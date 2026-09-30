@@ -1,0 +1,601 @@
+<title>תוכנית השקה Tizon</title>
+<meta name="description" content="תוכנית שיווק ל-Tizon Health, Tizon Store ו-Tizon Books, לבד ובחבילה">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700;800&family=Frank+Ruhl+Libre:wght@500;700;900&display=swap">
+<style>
+/* Layout: one reading column with a sticky chip nav; the Tizon Books ledger palette (forest green, bronze, cream paper). */
+:root {
+  --bg: #faf7f0;
+  --paper: #ffffff;
+  --soft: #f1ece2;
+  --ink: #2b2a26;
+  --muted: #6b6557;
+  --line: #e8dfcc;
+  --green: #2f5d27;
+  --green-soft: #e4ecdc;
+  --bronze: #a8783f;
+  --bronze-soft: #f3e8d6;
+  --warn: #a2680f;
+  --bad: #b3261e;
+  --on-accent: #ffffff;
+  --display: "Frank Ruhl Libre", "David", "Times New Roman", serif;
+  --body: "Assistant", "Segoe UI", "Arial", sans-serif;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161713; --paper: #1f201b; --soft: #26271f; --ink: #ede8dc; --muted: #aaa392;
+    --line: #37372d; --green: #8fc07a; --green-soft: #243322; --bronze: #d2a86c; --bronze-soft: #33291b;
+    --warn: #e0a54a; --bad: #f08a80; --on-accent: #10140e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161713; --paper: #1f201b; --soft: #26271f; --ink: #ede8dc; --muted: #aaa392;
+  --line: #37372d; --green: #8fc07a; --green-soft: #243322; --bronze: #d2a86c; --bronze-soft: #33291b;
+  --warn: #e0a54a; --bad: #f08a80; --on-accent: #10140e; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { direction: rtl; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--body); font-size: 17px; line-height: 1.65;
+  padding-inline: 16px; padding-block: 0 64px;
+}
+.wrap { max-width: 980px; margin-inline: auto; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.2; text-wrap: balance; margin: 0; }
+h2 { font-size: clamp(1.6rem, 3.4vw, 2.1rem); font-weight: 700; }
+h3 { font-size: 1.2rem; font-weight: 700; }
+p { margin: 0; }
+.num { font-variant-numeric: tabular-nums; }
+a { color: var(--green); }
+:focus-visible { outline: 3px solid var(--bronze); outline-offset: 2px; border-radius: 4px; }
+
+/* hero */
+header.hero { padding-block: 48px 28px; display: grid; gap: 18px; }
+.eyebrow { font-size: .85rem; font-weight: 700; letter-spacing: .06em; color: var(--bronze); }
+.hero h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 900; color: var(--green); }
+.hero .thesis { font-family: var(--display); font-size: clamp(1.2rem, 2.6vw, 1.55rem); max-width: 34ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag { font-size: .85rem; padding: 3px 12px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); color: var(--muted); }
+.tag.decide { background: var(--bronze-soft); color: var(--bronze); border-color: transparent; font-weight: 700; }
+.note { background: var(--bronze-soft); border-radius: var(--r); padding: 12px 16px; font-size: .95rem; max-width: 70ch; }
+
+/* chain */
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.chain .step { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px; display: grid; gap: 2px; min-width: 0; }
+.chain .step b { color: var(--green); font-size: .8rem; letter-spacing: .04em; }
+.chain .arrow { color: var(--bronze); font-size: 1.3rem; }
+
+/* nav */
+nav.toc {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+  margin-inline: -16px; padding: 10px 16px;
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+}
+nav.toc::-webkit-scrollbar { display: none; }
+nav.toc a { flex: none; text-decoration: none; color: var(--ink); font-size: .9rem; font-weight: 600; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); }
+nav.toc a:hover { border-color: var(--green); color: var(--green); }
+
+section { padding-block: 44px 8px; display: grid; gap: 18px; scroll-margin-top: 64px; }
+.lead { color: var(--muted); max-width: 65ch; }
+
+/* tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--paper); }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+th, td { text-align: right; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+thead th { background: var(--soft); font-size: .85rem; color: var(--muted); font-weight: 700; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+td.n, th.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .strong { font-weight: 700; color: var(--green); }
+
+/* product columns */
+.products { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.prod { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.prod .kind { font-size: .8rem; font-weight: 700; color: var(--bronze); letter-spacing: .05em; }
+.prod dl { margin: 0; display: grid; gap: 8px; font-size: .95rem; }
+.prod dt { font-weight: 700; font-size: .8rem; color: var(--muted); }
+.prod dd { margin: 0; }
+.status { justify-self: start; font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.status.live { background: var(--green-soft); color: var(--green); }
+.status.soon { background: var(--bronze-soft); color: var(--warn); }
+
+.gate { border: 2px solid var(--warn); border-radius: var(--r); padding: 16px 18px; display: grid; gap: 8px; background: var(--paper); }
+.gate h3 { color: var(--warn); }
+.gate ol { margin: 0; padding-inline-start: 1.3em; display: grid; gap: 4px; }
+
+/* bundles */
+.bundles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.bundle { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 20px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.bundle.hero-b { border: 2px solid var(--green); position: relative; }
+.bundle.hero-b::before { content: "הכי משתלם"; position: absolute; top: -12px; inset-inline-start: 16px; background: var(--green); color: var(--on-accent); font-size: .78rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.bundle .inc { color: var(--muted); font-size: .92rem; }
+.price { font-family: var(--display); font-size: 2.4rem; font-weight: 900; color: var(--green); line-height: 1; font-variant-numeric: tabular-nums; }
+.price small { font-family: var(--body); font-size: .9rem; font-weight: 600; color: var(--muted); }
+.was { font-size: .9rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.was s { color: var(--bad); }
+.save { justify-self: start; background: var(--green-soft); color: var(--green); font-weight: 700; font-size: .85rem; padding: 2px 10px; border-radius: 999px; }
+
+.founders { background: var(--green); color: var(--on-accent); border-radius: var(--r); padding: 20px 22px; display: grid; gap: 8px; }
+.founders h3 { color: var(--on-accent); }
+.founders ul { margin: 0; padding-inline-start: 1.2em; display: grid; gap: 4px; }
+
+/* messages */
+.msgs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.msg { border-inline-start: 3px solid var(--bronze); padding-inline-start: 14px; display: grid; gap: 4px; min-width: 0; }
+.msg .who { font-size: .8rem; font-weight: 700; color: var(--bronze); }
+.msg .h { font-family: var(--display); font-size: 1.25rem; font-weight: 700; }
+.msg p { color: var(--muted); font-size: .95rem; }
+.pillars { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.pillar { background: var(--soft); border-radius: var(--r); padding: 14px; display: grid; gap: 4px; min-width: 0; }
+.pillar b { color: var(--green); }
+.pillar span { font-size: .92rem; color: var(--muted); }
+
+/* timeline */
+.timeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--paper); overflow: hidden; }
+.phase { padding: 16px 14px; border-inline-start: 1px solid var(--line); display: grid; gap: 6px; align-content: start; min-width: 0; position: relative; }
+.phase:first-child { border-inline-start: 0; }
+.phase .when { font-size: .82rem; font-weight: 700; color: var(--bronze); font-variant-numeric: tabular-nums; }
+.phase .goal { font-weight: 700; color: var(--green); font-size: .95rem; }
+.phase p { font-size: .88rem; color: var(--muted); }
+.phase.key { background: var(--green-soft); }
+.phase.key::after { content: "ההשקה"; position: absolute; top: 10px; inset-inline-end: 10px; font-size: .72rem; font-weight: 700; color: var(--green); }
+
+/* channels */
+.channels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.ch { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.ch .pri { font-size: .78rem; font-weight: 700; color: var(--bronze); }
+.ch ul { margin: 0; padding-inline-start: 1.2em; display: grid; gap: 4px; font-size: .95rem; }
+
+/* funnel */
+.funnel { display: grid; gap: 8px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; }
+.frow { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 12px; align-items: center; }
+.frow .lbl { font-size: .92rem; font-weight: 600; }
+.bar { height: 30px; background: var(--green); border-radius: 4px; display: flex; align-items: center; padding-inline: 10px; color: var(--on-accent); font-weight: 700; font-size: .9rem; font-variant-numeric: tabular-nums; min-width: 4.5em; white-space: nowrap; }
+.bar.b2 { opacity: .85; } .bar.b3 { opacity: .72; } .bar.b4 { background: var(--bronze); }
+.frow .rate { font-size: .82rem; color: var(--muted); grid-column: 2; margin-top: -4px; }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.kpi { border-top: 3px solid var(--green); background: var(--paper); padding: 12px 14px; border-radius: 0 0 var(--r) var(--r); display: grid; gap: 2px; min-width: 0; }
+.kpi .v { font-family: var(--display); font-size: 1.7rem; font-weight: 900; color: var(--green); font-variant-numeric: tabular-nums; }
+.kpi .k { font-size: .85rem; color: var(--muted); }
+
+/* budget */
+.tiers { display: flex; gap: 6px; flex-wrap: wrap; }
+.tiers button { font: inherit; font-weight: 700; font-size: .95rem; padding: 6px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; }
+.tiers button[aria-pressed="true"] { background: var(--green); color: var(--on-accent); border-color: var(--green); }
+.budget-total { font-family: var(--display); font-size: 2rem; font-weight: 900; color: var(--green); font-variant-numeric: tabular-nums; }
+
+/* copy blocks */
+.copies { display: grid; gap: 14px; }
+.copy { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 18px; display: grid; gap: 10px; min-width: 0; }
+.copy header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.copy header b { font-size: .9rem; color: var(--bronze); }
+.copy .text { white-space: pre-line; font-size: .97rem; }
+.copybtn { font: inherit; font-size: .85rem; font-weight: 700; padding: 4px 14px; border-radius: 999px; border: 1px solid var(--green); background: transparent; color: var(--green); cursor: pointer; }
+.copybtn.done { background: var(--green); color: var(--on-accent); }
+
+/* checklist */
+.weeks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.week { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.week .when { font-size: .82rem; font-weight: 700; color: var(--bronze); }
+.week label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; font-size: .95rem; cursor: pointer; }
+.week input { width: 18px; height: 18px; margin-top: 4px; accent-color: var(--green); }
+.week input:checked + span { text-decoration: line-through; color: var(--muted); }
+.progress { font-size: .9rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+footer { padding-block: 48px 0; text-align: center; font-family: var(--display); font-size: 1.3rem; color: var(--green); }
+
+@media (max-width: 860px) {
+  .products, .bundles, .weeks { grid-template-columns: minmax(0, 1fr); }
+  .pillars, .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .timeline { grid-template-columns: minmax(0, 1fr); }
+  .phase { border-inline-start: 0; border-top: 1px solid var(--line); }
+  .phase:first-child { border-top: 0; }
+  .bundle.hero-b { order: -1; }
+}
+@media (max-width: 620px) {
+  .msgs, .channels { grid-template-columns: minmax(0, 1fr); }
+  .frow { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .frow .rate { grid-column: 1; }
+  body { font-size: 16px; }
+}
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">TIZON · תוכנית שיווק · טיוטה 30.9.2026</div>
+    <h1>כל הקליניקה במקום אחד</h1>
+    <p class="thesis">מטופלים, חנות וחשבוניות. בלי חמש מערכות ובלי להקליד פעמיים.</p>
+    <div class="chain" aria-label="השרשרת שהחבילה מוכרת">
+      <div class="step"><b>CRM</b>מטופל נרשם</div><span class="arrow">←</span>
+      <div class="step"><b>STORE</b>קונה בחנות</div><span class="arrow">←</span>
+      <div class="step"><b>BOOKS</b>חשבונית חתומה נשלחת לבד</div><span class="arrow">←</span>
+      <div class="step"><b>רו"ח</b>רואה הכול</div>
+    </div>
+    <div class="meta">
+      <span class="tag">3 מוצרים</span><span class="tag">לבד או בחבילה</span><span class="tag">השקת מייסדים 1.12.2026</span>
+      <span class="tag decide">[להחלטה] = מחכה לאישור שלך</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="ניווט בתוכנית">
+    <a href="#products">מוצרים</a><a href="#audience">קהלים</a><a href="#pricing">מחירון</a><a href="#messages">מסרים</a>
+    <a href="#timeline">לוח זמנים</a><a href="#channels">ערוצים</a><a href="#referrals">הפניות</a><a href="#funnel">יעדים</a>
+    <a href="#budget">תקציב</a><a href="#copy">טקסטים</a><a href="#risks">סיכונים</a><a href="#tomorrow">מחר בבוקר</a>
+  </nav>
+
+  <section id="products">
+    <h2>המוצרים</h2>
+    <p class="lead">שלושה מוצרים שכבר מדברים זה עם זה. אף מתחרה בישראל לא מוכר את השרשרת הזו כמוצר אחד למטפלים.</p>
+    <div class="products">
+      <article class="prod">
+        <span class="kind">CRM לקליניקה</span><h3>Tizon Health</h3><span class="status live">פעיל · יש מחירון</span>
+        <dl>
+          <div><dt>מה זה</dt><dd>תיק מטופל, יומן טיפולים, מפת דרכים, אבחון AI, תזכורות, דיוור, לידים, צ'אט צוות</dd></div>
+          <div><dt>הכאב</dt><dd>תיקים באקסל ובמחברת, מטופלים שנעלמים</dd></div>
+          <div><dt>הבידול</dt><dd>נבנה על ידי מטפל, למטפלים. AI קליני בעברית</dd></div>
+        </dl>
+      </article>
+      <article class="prod">
+        <span class="kind">חנות ממותגת</span><h3>Tizon Store</h3><span class="status live">פעיל</span>
+        <dl>
+          <div><dt>מה זה</dt><dd>מוצרים, קורסים, מנויים, תורים, דפי נחיתה, שותפים עם עמלות, משלוחי UPS, עברית, אנגלית ורוסית</dd></div>
+          <div><dt>הכאב</dt><dd>Wix ו-Shopify יקרים ולא מותאמים, אין מנגנון שותפים</dd></div>
+          <div><dt>הבידול</dt><dd>חנות, בית ספר ושותפים במוצר אחד</dd></div>
+        </dl>
+      </article>
+      <article class="prod">
+        <span class="kind">הנהלת חשבונות</span><h3>Tizon Books</h3><span class="status soon">לפני השקה</span>
+        <dl>
+          <div><dt>מה זה</dt><dd>חשבוניות וקבלות, PDF חתום, WhatsApp ומייל, דפי סליקה, מספרי הקצאה, מבנה אחיד, הוצאות מ-Gmail, גישה לרו"ח</dd></div>
+          <div><dt>הכאב</dt><dd>iCount נפרד מהקליניקה, הקלדה כפולה, בלבול סביב מספרי הקצאה</dd></div>
+          <div><dt>הבידול</dt><dd><strong>מעבר מ-iCount בלחיצה</strong>: מסמכים, לקוחות, פריטים וסנכרון יומי</dd></div>
+        </dl>
+      </article>
+    </div>
+    <div class="gate">
+      <h3>תנאי סף ל-Books לפני שמוכרים</h3>
+      <ol>
+        <li><strong>רישום התוכנה ברשות המסים.</strong> בלי מספר רישום לא מוכרים הפקת מסמכים אמיתיים. המבנה האחיד ופלט הסיכום לרישום כבר קיימים בתוכנה.</li>
+        <li>מספרי הקצאה מול ה-API של רשות המסים בסביבת production.</li>
+        <li>תנאי שימוש, מדיניות פרטיות והסכם עיבוד נתונים.</li>
+      </ol>
+      <p>עד שיש מספר רישום, Books משווק כרשימת המתנה למייסדים. גם זה עובד לטובתנו: מחסור אמיתי.</p>
+    </div>
+  </section>
+
+  <section id="audience">
+    <h2>קהלי יעד, לפי סדר עדיפות</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>קהל</th><th>למה עכשיו</th><th>מה מוכרים</th></tr></thead>
+      <tbody>
+        <tr><td><span class="strong">1 · לקוחות קיימים</span><br>CRM ובעלי חנויות</td><td>כבר סומכים עליך. עלות רכישה כמעט אפס</td><td>Books כתוספת, אחר כך החבילה</td></tr>
+        <tr><td><span class="strong">2 · שותפים ומפיצים</span></td><td>כבר מקבלים עמלה ויש להם רשת מטפלים</td><td>תוכנית הפניות לתוכנה</td></tr>
+        <tr><td><span class="strong">3 · מטפלים ברפואה משלימה</span></td><td>סוף שנת מס, כולם מחפשים סדר</td><td>החבילה המלאה, או CRM + Books</td></tr>
+        <tr><td><span class="strong">4 · רואי חשבון</span></td><td>כל רו"ח מביא 10–40 לקוחות</td><td>ערוץ הפצה: צפייה חינם + עמלה</td></tr>
+        <tr><td><span class="strong">5 · עסקים קטנים ב-iCount</span></td><td>מחפשים פשוט וזול יותר</td><td>Books לבד</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note"><strong>דנה, מטפלת בסינית, 42.</strong> 60–100 מטופלים פעילים, מוכרת צמחים ותוספים, עובדת עם iCount, אקסל ו-WhatsApp. שונאת את ה-15 בחודש. קונה ממי שהיא סומכת עליו, ובעיקר בהמלצה של קולגה.</p>
+  </section>
+
+  <section id="pricing">
+    <h2>מחירון וחבילות <span class="tag decide">[להחלטה]</span></h2>
+    <p class="lead">המחירים של ה-CRM לא משתנים. Books זול לבד כי הוא כלי הכניסה: כולם צריכים חשבוניות, ומי שנכנס דרכו משודרג לחבילה. המחירים לפני מע"מ.</p>
+    <div class="bundles">
+      <article class="bundle">
+        <h3>קליניקה מסודרת</h3><p class="inc">CRM Pro + Books מורשה</p>
+        <div class="price">₪299 <small>לחודש</small></div>
+        <p class="was">בנפרד <s>₪368</s> · בשנתי ₪239</p><span class="save">חוסכים ~19%</span>
+      </article>
+      <article class="bundle hero-b">
+        <h3>הכול במקום אחד</h3><p class="inc">CRM Pro + Books Pro + Store</p>
+        <div class="price">₪449 <small>לחודש</small></div>
+        <p class="was">בנפרד <s>₪627</s> · בשנתי ₪359</p><span class="save">חוסכים ~28%</span>
+      </article>
+      <article class="bundle">
+        <h3>קליניקה + צוות</h3><p class="inc">CRM Clinic + Books Pro + Store עם שותפים</p>
+        <div class="price">₪699 <small>לחודש</small></div>
+        <p class="was">בנפרד <s>₪947</s> · בשנתי ₪559</p><span class="save">חוסכים ~26%</span>
+      </article>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>מוצר לבד</th><th>תוכנית</th><th class="n">חודשי</th><th class="n">שנתי (לחודש)</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="3"><span class="strong">Books</span></td><td>פטור: מסמכים, לקוחות, PDF, WhatsApp</td><td class="n">₪49</td><td class="n">₪39</td></tr>
+        <tr><td>מורשה: + מע"מ, מספרי הקצאה, הוצאות, רו"ח</td><td class="n">₪89</td><td class="n">₪69</td></tr>
+        <tr><td>Pro: + דפי סליקה, חתימה דיגיטלית, כמה עסקים, צוות</td><td class="n">₪149</td><td class="n">₪119</td></tr>
+        <tr><td rowspan="2"><span class="strong">Store</span></td><td>חנות: מוצרים, תורים, דפי נחיתה, 3 שפות</td><td class="n">₪199</td><td class="n">₪159</td></tr>
+        <tr><td>חנות + בית ספר ושותפים</td><td class="n">₪299</td><td class="n">₪239</td></tr>
+        <tr><td><span class="strong">CRM</span></td><td>Pro / Clinic (קיים)</td><td class="n">₪279 / ₪499</td><td class="n">₪223 / ₪399</td></tr>
+      </tbody>
+    </table></div>
+    <div class="founders">
+      <h3>מבצע מייסדים · 100 מקומות</h3>
+      <ul>
+        <li>40% הנחה על החבילה ל-12 חודשים, ומחיר נעול לכל החיים</li>
+        <li>העברת הנתונים מ-iCount איתך, בזום של 20 דקות</li>
+        <li>תג "מייסד" בתוכנה וקבוצת WhatsApp סגורה עם גישה ישירה אליך</li>
+        <li>בכל חבילה: החודש הראשון ב-₪1, וייבוא מ-iCount בלי עלות</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="messages">
+    <h2>מסרים</h2>
+    <div class="msgs">
+      <div class="msg"><span class="who">CRM</span><span class="h">הקליניקה שלך, סוף סוף מסודרת</span><p>תיק מטופל, יומן, תזכורות ו-AI קליני. נבנה על ידי מטפל.</p></div>
+      <div class="msg"><span class="who">STORE</span><span class="h">החנות שלך, והמטופלים מוכרים בשבילך</span><p>מוצרים, קורסים ותורים, ותוכנית שותפים שמשלמת עמלה לבד.</p></div>
+      <div class="msg"><span class="who">BOOKS</span><span class="h">חשבונית בשתי לחיצות. ישר ל-WhatsApp.</span><p>מספר הקצאה אוטומטי, PDF חתום, ורואה החשבון רואה הכול. עוברים מ-iCount בדקה.</p></div>
+      <div class="msg"><span class="who">חבילה</span><span class="h">מטופל נרשם, קונה, מקבל חשבונית</span><p>שלוש מערכות שמדברות זו עם זו, במחיר של שתיים.</p></div>
+    </div>
+    <h3>ארבעה עמודי תווך, בכל פוסט ומודעה</h3>
+    <div class="pillars">
+      <div class="pillar"><b>זמן</b><span>3 שעות בשבוע שחוזרות אליך. חשבונית בטלפון ב-10 שניות.</span></div>
+      <div class="pillar"><b>שקט מול מס הכנסה</b><span>מספרי הקצאה, תקרת מזומן, מבנה אחיד, ארכיון חודשי.</span></div>
+      <div class="pillar"><b>מעבר בלי כאב</b><span>ייבוא מלא מ-iCount וסנכרון יומי עד שעוזבים.</span></div>
+      <div class="pillar"><b>נבנה על ידי מטפל</b><span>הסיפור שלך הוא הנכס השיווקי הכי חזק.</span></div>
+    </div>
+    <h3>התנגדויות ותשובות</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>הלקוח אומר</th><th>עונים</th></tr></thead>
+      <tbody>
+        <tr><td>"יש לי כבר iCount"</td><td>מייבאים הכול ב-ZIP אחד וממשיכים לסנכרן כל יום עד שתחליטי. אין מה להפסיד.</td></tr>
+        <tr><td>"זה רשום ברשות המסים?"</td><td>כן, מספר רישום [X]. <strong>רק אחרי שיש מספר.</strong></td></tr>
+        <tr><td>"מה אם תיסגרו?"</td><td>הנתונים שלך: ייצוא מבנה אחיד וגיבוי מלא בכל רגע, וארכיון חודשי אוטומטי למייל.</td></tr>
+        <tr><td>"יקר"</td><td>מול iCount, מערכת קליניקה ו-Wix בנפרד, החבילה חוסכת מאות שקלים בחודש, בלי לספור את השעות.</td></tr>
+        <tr><td>"אין לי זמן ללמוד"</td><td>יש סיור מודרך בכל מסך, ובמבצע המייסדים עושים את ההעברה איתך.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="timeline">
+    <h2>לוח זמנים <span class="tag decide">[להחלטה]</span></h2>
+    <p class="lead">החגים נגמרו. עסקים מחליפים תוכנת הנהלת חשבונות בתחילת שנת המס, ולכן ההשקה נבנית לקראת ינואר.</p>
+    <div class="timeline">
+      <div class="phase"><span class="when">1.10–18.10</span><h3>הכנה</h3><span class="goal">תשתית</span><p>דף נחיתה ורשימת המתנה, סרטוני הדגמה, הגשת רישום לרשות המסים</p></div>
+      <div class="phase"><span class="when">19.10–15.11</span><h3>חימום</h3><span class="goal">300 ברשימת המתנה</span><p>תוכן, מאחורי הקלעים, הודעה לבסיס הקיים, 3 וובינרים</p></div>
+      <div class="phase"><span class="when">16.11–30.11</span><h3>בטא סגורה</h3><span class="goal">20 פעילים, 10 המלצות</span><p>לקוחות CRM בלבד, העברה אישית מ-iCount</p></div>
+      <div class="phase key"><span class="when">1.12–31.12</span><h3>מייסדים</h3><span class="goal">100 מייסדים</span><p>"מתחילים את 2027 מסודר". קודם רשימת ההמתנה, אחר כך ממומן</p></div>
+      <div class="phase"><span class="when">ינואר–מרץ 2027</span><h3>השקה ציבורית</h3><span class="goal">300 משלמים</span><p>ממומן, רואי חשבון, שותפים, SEO</p></div>
+      <div class="phase"><span class="when">מאפריל 2027</span><h3>צמיחה</h3><span class="goal">10%+ בחודש</span><p>אופטימיזציה, מקרי בוחן, כנסים</p></div>
+    </div>
+    <p class="note">אם הרישום מתעכב: הכנה וחימום לא משתנים. הבטא רצה במצב "ניסיון" (מסמכים מסומנים כטיוטה), ומבצע המייסדים נדחה עד שיש מספר. בינתיים מוכרים CRM ו-Store, ו-Books נמכר מראש במחיר המייסדים.</p>
+  </section>
+
+  <section id="channels">
+    <h2>ערוצים</h2>
+    <div class="channels">
+      <div class="ch"><span class="pri">עדיפות ראשונה · כמעט בחינם</span><h3>הבסיס הקיים</h3><ul>
+        <li>הודעה אישית ב-WhatsApp לכל לקוח CRM ובעל חנות</li>
+        <li>באנר בתוך ה-CRM ובניהול החנות</li>
+        <li>מייל לרשימת הדיוור של החנות, רק למי שהסכים</li>
+        <li>וובינר סגור: "הקליניקה, החנות והחשבוניות ב-15 דקות ביום"</li></ul></div>
+      <div class="ch"><span class="pri">מהיום</span><h3>תוכן אורגני</h3><ul>
+        <li>פייסבוק, קבוצות מטפלים ועצמאים: 3 בשבוע, ערך ולא פרסום</li>
+        <li>אינסטגרם וטיקטוק: 4 Reels בשבוע, הדגמות של 15–30 שניות</li>
+        <li>יוטיוב: מדריך בשבוע (מעבר מ-iCount, מספרי הקצאה, חנות למטפל)</li>
+        <li>בלוג ו-SEO: 2 בחודש · לינקדאין אישי: 2 בשבוע</li></ul></div>
+      <div class="ch"><span class="pri">משלב המייסדים</span><h3>פרסום ממומן</h3><ul>
+        <li>מטא: רימרקטינג לרשימת ההמתנה, Lookalike ללקוחות, תחומי עניין (סינית, נטורופתיה, דיקור, עוסק פטור)</li>
+        <li>גוגל: "תוכנה לניהול קליניקה", "חלופה ל-iCount", "הנהלת חשבונות למטפלים"</li>
+        <li>70% מטא, 30% גוגל. מעבירים תקציב לפי עלות לנרשם כל שבועיים</li></ul></div>
+      <div class="ch"><span class="pri">לאורך כל הדרך</span><h3>שותפויות ואירועים</h3><ul>
+        <li>מכללות לרפואה משלימה: חודשיים חינם לבוגרים והרצאה בשיעור האחרון</li>
+        <li>איגודים מקצועיים: הנחה קבוצתית לחברים</li>
+        <li>כנסים: דוכן עם הדגמה חיה, "תני לי את הטלפון, ננפיק חשבונית"</li>
+        <li>וובינר חודשי פתוח: "הקליניקה הדיגיטלית"</li></ul></div>
+    </div>
+  </section>
+
+  <section id="referrals">
+    <h2>מנועי הפניה</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>מי מפנה</th><th>מה מקבל</th><th>על מה זה נשען</th></tr></thead>
+      <tbody>
+        <tr><td><span class="strong">לקוח</span></td><td>חודש חינם על כל לקוח שמצטרף, בלי תקרה</td><td>קישור אישי ו-QR מתוך ההגדרות</td></tr>
+        <tr><td><span class="strong">שותף או מפיץ</span></td><td class="n">20% מהתשלום החודשי, 12 חודשים</td><td>תוכנית השותפים שכבר קיימת בחנות</td></tr>
+        <tr><td><span class="strong">רואה חשבון</span></td><td class="n">15% לכל חיי הלקוח + צפייה חינם בכל הלקוחות שלו</td><td>הרשאת "צפייה בלבד", מבנה אחיד, כרטסת ומאזן בוחן</td></tr>
+      </tbody>
+    </table></div>
+    <p class="lead">יעד: 10 רואי חשבון פעילים עד מרץ 2027. כל אחד שווה 10 לקוחות ומעלה.</p>
+  </section>
+
+  <section id="funnel">
+    <h2>משפך ויעדים</h2>
+    <p class="lead">מצטבר עד מרץ 2027. אורך כל פס לפי המספר עצמו.</p>
+    <div class="funnel" id="funnelBox"></div>
+    <div class="kpis">
+      <div class="kpi"><span class="v">300</span><span class="k">לקוחות משלמים</span></div>
+      <div class="kpi"><span class="v">₪75K</span><span class="k">הכנסה חודשית חוזרת</span></div>
+      <div class="kpi"><span class="v">40%+</span><span class="k">מהלקוחות בחבילה</span></div>
+      <div class="kpi"><span class="v">&lt;3%</span><span class="k">נטישה חודשית</span></div>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>מדד</th><th>הגדרה</th><th class="n">יעד</th></tr></thead>
+      <tbody>
+        <tr><td>הפעלה</td><td>מסמך ראשון או מטופל ראשון תוך 7 ימים</td><td class="n">50%+</td></tr>
+        <tr><td>ARPU</td><td>הכנסה ממוצעת ללקוח לחודש</td><td class="n">₪250+</td></tr>
+        <tr><td>CAC</td><td>עלות רכישת לקוח בממומן</td><td class="n">עד ₪400</td></tr>
+        <tr><td>החזר CAC</td><td>CAC חלקי ARPU</td><td class="n">עד 3 חודשים</td></tr>
+        <tr><td>NPS</td><td>סקר רבעוני</td><td class="n">50+</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">גיליון שבועי אחד עם כל המדדים. ביום ראשון בבוקר, 15 דקות, מחליטים מה משנים.</p>
+  </section>
+
+  <section id="budget">
+    <h2>תקציב חודשי <span class="tag decide">[להחלטה]</span></h2>
+    <p class="lead">עד שלב המייסדים: רזה. הבסיס הקיים והתוכן האורגני עושים את העבודה. משלב המייסדים: בינוני.</p>
+    <div class="tiers" role="group" aria-label="רמת תקציב">
+      <button type="button" id="tier-lean" data-tier="0" aria-pressed="false">רזה</button>
+      <button type="button" id="tier-mid" data-tier="1" aria-pressed="true">בינוני · מומלץ</button>
+      <button type="button" id="tier-grow" data-tier="2" aria-pressed="false">צמיחה</button>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>סעיף</th><th class="n">לחודש</th></tr></thead>
+      <tbody id="budgetRows"></tbody>
+    </table></div>
+    <div>סה"כ קבוע לחודש: <span class="budget-total" id="budgetTotal"></span> <span class="progress">+ עמלות הפניה לפי ביצועים</span></div>
+  </section>
+
+  <section id="copy">
+    <h2>טקסטים מוכנים</h2>
+    <div class="copies">
+      <article class="copy"><header><b>WhatsApp ללקוח CRM קיים · שלב החימום</b><button class="copybtn" type="button">העתקה</button></header>
+<div class="text">היי [שם], כאן [השם שלך] מ-Tizon 👋
+בשנה האחרונה בניתי משהו שחסר לי בעצמי: תוכנת חשבוניות והנהלת חשבונות שמחוברת ל-CRM ולחנות.
+חשבונית בשתי לחיצות מהטלפון, ישר ל-WhatsApp של המטופל, מספר הקצאה אוטומטי, ורואה החשבון רואה הכול.
+ואם את ב-iCount, מעבירים הכול בדקה.
+פותח קודם ל-100 מייסדים, ב-40% הנחה לשנה. רוצה שאשמור לך מקום?</div></article>
+      <article class="copy"><header><b>מודעת מטא · Books</b><button class="copybtn" type="button">העתקה</button></header>
+<div class="text">חשבונית ב-10 שניות. מהטלפון.
+נמאס להקליד כל חשבונית פעמיים? Tizon Books מפיקה חשבונית חתומה, מוסיפה מספר הקצאה ושולחת ב-WhatsApp. עוברים מ-iCount בלחיצה, והחודש הראשון ב-₪1.
+[להתחיל ב-₪1]</div></article>
+      <article class="copy"><header><b>מודעת מטא · חבילה</b><button class="copybtn" type="button">העתקה</button></header>
+<div class="text">מטופל נרשם, קונה, מקבל חשבונית. את לא נוגעת בכלום.
+CRM לקליניקה + חנות + הנהלת חשבונות. שלוש מערכות שמדברות זו עם זו, במחיר של שתיים. נבנה על ידי מטפל, למטפלים.
+[לראות איך זה עובד]</div></article>
+    </div>
+    <h3>רצף מיילים לרשימת ההמתנה</h3>
+    <div class="tbl"><table>
+      <thead><tr><th class="n">מתי</th><th>נושא</th><th>תוכן</th></tr></thead>
+      <tbody>
+        <tr><td class="n">יום 0</td><td>את ברשימה ✔</td><td>תודה, מה יקרה עכשיו, סרטון של 60 שניות</td></tr>
+        <tr><td class="n">יום 3</td><td>הסיפור מאחורי Tizon</td><td>למה מטפל בנה תוכנה</td></tr>
+        <tr><td class="n">יום 7</td><td>3 שעות בשבוע</td><td>יום עבודה עם הכלים</td></tr>
+        <tr><td class="n">יום 10</td><td>מספרי הקצאה ב-2026: מה משתנה לך</td><td>ערך נטו, מבסס סמכות</td></tr>
+        <tr><td class="n">יום 14</td><td>מעבר מ-iCount בלי כאב</td><td>סרטון של הייבוא</td></tr>
+        <tr><td class="n">השקה</td><td>נפתח. 100 מקומות</td><td>קישור ודדליין</td></tr>
+        <tr><td class="n">השקה +3</td><td>נשארו [X] מקומות</td><td>המספר האמיתי</td></tr>
+        <tr><td class="n">השקה +7</td><td>נסגר מחר בחצות</td><td>אחרון</td></tr>
+      </tbody>
+    </table></div>
+    <h3>מבנה דף הנחיתה</h3>
+    <div class="tbl"><table><tbody>
+      <tr><td class="n">1</td><td>כותרת, תת־כותרת וכפתור "להצטרף למייסדים"</td></tr>
+      <tr><td class="n">2</td><td>סרטון של 60 שניות: מטופל נרשם, קונה, מקבל חשבונית</td></tr>
+      <tr><td class="n">3</td><td>שלושה כאבים מול שלושה פתרונות</td></tr>
+      <tr><td class="n">4</td><td>שלוש חבילות, האמצעית מודגשת</td></tr>
+      <tr><td class="n">5</td><td>"עוברים מ-iCount בדקה", עם צילום מסך של הייבוא</td></tr>
+      <tr><td class="n">6</td><td>המלצות מהבטא</td></tr>
+      <tr><td class="n">7</td><td>שאלות נפוצות (ההתנגדויות למעלה)</td></tr>
+      <tr><td class="n">8</td><td>כפתור שוב ו-WhatsApp</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section id="risks">
+    <h2>סיכונים</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>סיכון</th><th>השפעה</th><th>מה עושים</th></tr></thead>
+      <tbody>
+        <tr><td>רישום התוכנה מתעכב</td><td><span class="status soon">גבוהה</span></td><td>מגישים השבוע. בינתיים רשימת המתנה, ומוכרים קודם CRM ו-Store</td></tr>
+        <tr><td>באגים אצל לקוחות ראשונים ב-Books</td><td><span class="status soon">גבוהה</span></td><td>בטא סגורה קודם. תמיכה ב-WhatsApp עם מענה תוך שעתיים</td></tr>
+        <tr><td>פרטיות של נתונים רפואיים ופיננסיים</td><td><span class="status soon">גבוהה</span></td><td>מדיניות פרטיות, הסכם עיבוד נתונים, הדגשת הגיבוי והייצוא</td></tr>
+        <tr><td>עומס תמיכה על אדם אחד</td><td><span class="status live">בינונית</span></td><td>סיורים מודרכים (כבר במוצר), שאלות נפוצות, סרטונים, עוזר במשרה חלקית מינואר</td></tr>
+        <tr><td>מתחרה מוריד מחיר</td><td><span class="status live">נמוכה</span></td><td>הבידול הוא החיבור והנישה, לא המחיר</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="tomorrow">
+    <h2>מחר בבוקר</h2>
+    <p class="progress" id="progress"></p>
+    <div class="weeks">
+      <div class="week"><span class="when">שבוע 1 · 1.10–7.10</span>
+        <label><input type="checkbox" id="t1"><span>לאשר מחירון וחבילות</span></label>
+        <label><input type="checkbox" id="t2"><span>להגיש או לקדם רישום תוכנה ברשות המסים</span></label>
+        <label><input type="checkbox" id="t3"><span>לבנות דף נחיתה עם טופס רשימת המתנה</span></label>
+        <label><input type="checkbox" id="t4"><span>לצלם 3 סרטוני הדגמה: חשבונית ב-10 שניות, ייבוא מ-iCount, השרשרת המלאה</span></label>
+        <label><input type="checkbox" id="t5"><span>להוציא רשימה של כל לקוחות ה-CRM ובעלי החנויות</span></label>
+      </div>
+      <div class="week"><span class="when">שבוע 2 · 8.10–14.10</span>
+        <label><input type="checkbox" id="t6"><span>WhatsApp ל-20 הלקוחות הקרובים, ללמוד מהתגובות</span></label>
+        <label><input type="checkbox" id="t7"><span>באנר בתוך ה-CRM והחנות</span></label>
+        <label><input type="checkbox" id="t8"><span>לפנות ל-5 רואי חשבון ולקבוע פגישות</span></label>
+        <label><input type="checkbox" id="t9"><span>לפתוח קישור הפניה לשותפים</span></label>
+      </div>
+      <div class="week"><span class="when">שבועות 3–4 · 15.10–31.10</span>
+        <label><input type="checkbox" id="t10"><span>לשלוח לכל הבסיס</span></label>
+        <label><input type="checkbox" id="t11"><span>וובינר ראשון</span></label>
+        <label><input type="checkbox" id="t12"><span>לוח תוכן לחודש: 3 פוסטים ו-4 Reels בשבוע</span></label>
+        <label><input type="checkbox" id="t13"><span>לבחור 20 משתמשים לבטא</span></label>
+      </div>
+    </div>
+  </section>
+
+  <footer>בהצלחה לנו</footer>
+</div>
+
+<script>
+(function () {
+  // Funnel: widths to scale against the top row.
+  var steps = [
+    { l: 'מבקרים באתר', v: 20000, r: '' },
+    { l: 'רשימת המתנה / ניסיון', v: 1600, r: '8% מהמבקרים' },
+    { l: 'הפעלה', v: 800, r: '50% מהנרשמים' },
+    { l: 'משלמים', v: 320, r: '40% מהפעילים · 40% מהם בחבילה, 20% מביאים לקוח' }
+  ];
+  var box = document.getElementById('funnelBox');
+  var max = steps[0].v;
+  steps.forEach(function (s, i) {
+    var row = document.createElement('div');
+    row.className = 'frow';
+    var pct = Math.max(s.v / max * 100, 0);
+    row.innerHTML = '<span class="lbl">' + s.l + '</span><div><div class="bar b' + (i + 1) + '" style="width:' + pct + '%">' + s.v.toLocaleString('he-IL') + '</div></div>' + (s.r ? '<span class="rate">' + s.r + '</span>' : '');
+    box.appendChild(row);
+  });
+
+  // Budget tiers.
+  var items = [
+    ['ממומן (מטא + גוגל)', [2000, 5000, 10000]],
+    ['הפקת תוכן: עריכת וידאו ועיצוב', [1000, 2000, 3500]],
+    ['כלים: דיוור, אנליטיקס', [300, 500, 800]],
+    ['אירועים וכנסים', [0, 500, 1500]]
+  ];
+  var rows = document.getElementById('budgetRows');
+  var total = document.getElementById('budgetTotal');
+  var btns = document.querySelectorAll('.tiers button');
+  function fmt(n) { return n ? '₪' + n.toLocaleString('he-IL') : '–'; }
+  function show(t) {
+    rows.innerHTML = items.map(function (it) { return '<tr><td>' + it[0] + '</td><td class="n">' + fmt(it[1][t]) + '</td></tr>'; }).join('');
+    total.textContent = fmt(items.reduce(function (a, it) { return a + it[1][t]; }, 0));
+    btns.forEach(function (b) { b.setAttribute('aria-pressed', String(+b.dataset.tier === t)); });
+  }
+  btns.forEach(function (b) { b.addEventListener('click', function () { show(+b.dataset.tier); }); });
+  show(1);
+
+  // Copy buttons.
+  document.querySelectorAll('.copybtn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var el = b.closest('.copy').querySelector('.text');
+      var done = function () { b.textContent = 'הועתק'; b.classList.add('done'); setTimeout(function () { b.textContent = 'העתקה'; b.classList.remove('done'); }, 1800); };
+      var select = function () { var r = document.createRange(); r.selectNodeContents(el); var s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'מסומן, העתיקו'; };
+      try { navigator.clipboard.writeText(el.innerText.trim()).then(done, select); } catch (e) { select(); }
+    });
+  });
+
+  // Checklist, remembered in this browser only.
+  var KEY = 'tizon-plan-checks';
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+  var boxes = document.querySelectorAll('#tomorrow input[type=checkbox]');
+  var prog = document.getElementById('progress');
+  function count() {
+    var n = 0; boxes.forEach(function (c) { if (c.checked) n++; });
+    prog.textContent = n + ' מתוך ' + boxes.length + ' בוצעו · הסימונים נשמרים בדפדפן הזה';
+  }
+  boxes.forEach(function (c) {
+    c.checked = !!saved[c.id];
+    c.addEventListener('change', function () {
+      saved[c.id] = c.checked;
+      try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+      count();
+    });
+  });
+  count();
+})();
+</script>
