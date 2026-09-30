@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.18.0';
+const VERSION = '1.18.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -826,6 +826,33 @@ input:focus,select:focus{border-color:var(--gold)}
   .mg-tbl.has-labels td[data-select]::before{content:none}
 }
 
+
+/* Phones and tablets: sharper. Darker text and labels, clearer field
+   borders, heavier weights; outdoor light and small screens wash out the
+   soft tones that read well on a desktop monitor. */
+@media (max-width:1280px){
+  :root{--ink:#121110;--muted:#3a352c;--line:#d9cbad;--bg:#faf7f0}
+  body{font-weight:500;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+  input,select,textarea{border:1.6px solid #b9a782;color:#0d0c0a;font-weight:600;background:#fff}
+  input:focus,select:focus,textarea:focus{border-color:var(--green2);box-shadow:0 0 0 3px rgba(79,143,53,.18)}
+  input::placeholder,textarea::placeholder{color:#7d7361;font-weight:500;opacity:1}
+  input:disabled,select:disabled{color:#3a352c;background:#f3eee4}
+  .mg-fld label{color:#221f1a;font-weight:800}
+  .mg-tab{color:#3a352c;border-color:#d2c29f}
+  .mg-tab.on{color:#fff}
+  .mg-mod-h h3,.mg-card h3,.mg-card h4,h4{color:#0d0c0a;font-weight:800}
+  .mg-h h2,.tb-title{font-weight:700}
+  .mg-tbl td{color:#121110}
+  .mg-tbl th{color:#2c2821;font-weight:800}
+  .mg-tbl.has-labels td[data-label]::before{color:#2c2821;font-weight:800}
+  .mg-tbl.has-labels tr{border-color:#d6c6a3}
+  .mg-note{color:#16140f}
+  .mg-stat .lb{color:#2c2821}.mg-stat .dl{color:#3a352c}.mg-stat .vl{color:#0d0c0a}
+  .mg-btn.ghost{color:#23461d;border-color:#9fb58f;font-weight:700}
+  .side button{color:#1c1a16;font-weight:600}.side .sec{color:#3a352c;font-weight:700}
+  .tz-pick-row .t{color:#0d0c0a;font-weight:700}.tz-pick-row .s{color:#3a352c}
+  .mg-chip{color:#2c2821}
+}
 `;
 
 /* ===================================================================== ui */
@@ -953,6 +980,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.18.1', date: '30.09.26', items: ['נייד וטאבלט: תצוגה חדה וברורה יותר. טקסט וכותרות כהים יותר, מסגרות שדות בולטות וגופן עבה יותר.'] },
   { v: '1.18.0', date: '30.09.26', items: [
     'כפתור 🧾 בראש כל עסק: הפקת חשבונית מס קבלה בלחיצה אחת.',
     'בחירת לקוח בחיפוש: לפי שם, טלפון, אימייל או ח.פ. (גם שמות קודמים של לקוח ממוזג). הלקוחות האחרונים מופיעים ראשונים, והפרטים מתמלאים לבד.',
@@ -5798,6 +5826,6 @@ style.textContent = CSS;
 document.head.appendChild(style);
 const fonts = document.createElement('link');
 fonts.rel = 'stylesheet';
-fonts.href = 'https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&family=Frank+Ruhl+Libre:wght@500;700&display=swap';
+fonts.href = 'https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700;800&family=Frank+Ruhl+Libre:wght@500;700&display=swap';
 document.head.appendChild(fonts);
 createRoot(document.getElementById('root')).render(<App />);
