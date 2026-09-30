@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.21.0';
+const VERSION = '1.22.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -49,7 +49,7 @@ const lsSet = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED
    send them twice). They are also kept in this browser, so everything keeps
    working offline. The device lock (PIN) follows too, so every device asks
    for the same code. The store is linked for every device on the server. */
-const SYNCED = ['tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin'];
+const SYNCED = ['tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin', 'tzbooks_taxprofile'];
 /* Removed on one device, removed on all: kept in the cloud as false. */
 const lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } if (SYNCED.includes(k)) prefPush(k, false); };
 let prefUid = null, prefQueue = {}, prefTimer = null, prefErr = '';
@@ -1043,6 +1043,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.22.0', date: '01.10.26', items: [
+    'צפי מס הכנסה לפי ההכנסות וההוצאות: מס לפי מדרגות 2026 פחות נקודות זיכוי, ביטוח לאומי ומס בריאות לעצמאי, כמה להפריש כל חודש וכמה נותר לשלם אחרי מקדמות. כל העסקים באותו מספר עוסק מחושבים יחד. חברה מחושבת לפי מס חברות 23%.',
+    'בלשונית רווח והפסד: הפירוט המלא ("איך זה חושב?"), נקודות זיכוי, מקדמות וניכויי פנסיה. בסקירה: אריח עם הצפי לשנה.'] },
   { v: '1.21.0', date: '30.09.26', items: [
     '"＋ הכנסה" פותח את טופס המסמך המלא (חיפוש לקוח, פריטים, מחירים), כי הכנסה נרשמת בהפקת חשבונית. רישום ידני של הכנסה עם מסמך ממקום אחר נשאר כקישור בלשונית ההכנסות.',
     'כפתור עגול מהיר בפינה (כמו ב-iCount): חשבונית מס קבלה, שאר סוגי המסמכים, דף סליקה והוצאה, מכל לשונית.',
@@ -1229,6 +1232,7 @@ const TOURS = {
     { t: 'vat-stats', title: 'לדיווח', text: 'עסקאות, מע״מ עסקאות, תשומות ומע״מ לתשלום. אלה המספרים שממלאים בדיווח.', since: '1.0.0' },
   ],
   pnl: [
+    { t: 'tax-forecast', title: 'צפי מס הכנסה', text: 'כמה מס הכנסה, ביטוח לאומי ומס בריאות צפויים השנה לפי הרווח עד עכשיו, כמה להפריש כל חודש, וכמה נותר אחרי מקדמות. הערכה בלבד.', since: '1.22.0' },
     { t: 'pnl-range', title: 'טווח', text: 'בוחרים מחודש עד חודש, ומייצאים את הדוח ואת כל התנועות לרואה החשבון.', since: '1.0.0' },
     { t: 'pnl-cards', title: 'רווח והפסד', text: 'תמצית התקופה, הכנסות והוצאות לפי קטגוריה.', since: '1.0.0' },
   ],
@@ -1740,7 +1744,9 @@ function App() {
                       onReload={() => ensure(book, true)} onEditBook={() => setBookForm(book)}
                       onStoreLogin={() => setStoreLogin(true)}
                       onDeleteBook={() => deleteBook(book)}
-                      onTab={setBookTab} tabReq={tabReq?.book === book.id ? tabReq.k : null} onTabDone={() => setTabReq(null)} />
+                      onTab={setBookTab} tabReq={tabReq?.book === book.id ? tabReq.k : null} onTabDone={() => setTabReq(null)}
+                      siblings={(books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId) && roleOf(b, user.email) === 'owner').map(b => ({ book: b, data: datas[b.id] }))}
+                      onLoadSiblings={() => (books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId)).forEach(b => ensure(b))} />
           : <div className="mg-empty">טוען את {book.name}…</div>)}
       </main>
 
@@ -2424,11 +2430,18 @@ function QuickFab({ book, canPay, canExpense, onDoc, onPay, onExpense }) {
   );
 }
 
-function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone }) {
+function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings }) {
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
   const [quickDoc, setQuickDoc] = useState(null);
+  /* Income tax is per person: every business under the same tax id counts together. */
+  const taxRows = useMemo(() => {
+    const y = todayIso().slice(0, 4), to = thisMonth();
+    const one = (b, d) => { if (!d || d.histPending) return { name: b.name, ready: false, profit: 0 };
+      return { name: b.name, ready: true, profit: totals(buildLedger(b, d), `${y}-01`, to).profit }; };
+    return [one(book, data), ...siblings.map(x => one(x.book, x.data))];
+  }, [book, data, siblings]);
   /* Straight to a new document (or payment page) from anywhere in the business. */
   const openDoc = (type, pay) => { setSub('docs'); setQuickDoc({ at: Date.now(), type, pay }); };
   useEffect(() => { onTab?.(sub); }, [sub]);
@@ -2593,7 +2606,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         {SUBS.map(([k, l]) => <button key={k} className={'mg-tab' + (sub === k ? ' on' : '')} onClick={() => setSub(k)}>{l}</button>)}
       </div>
 
-      {sub === 'dash' && <Dash totals={tot} rate={rate} alerts={alerts} onSub={setSub} linked={!!book.tenant} />}
+      {sub === 'dash' && <Dash totals={tot} rate={rate} alerts={alerts} onSub={setSub} linked={!!book.tenant}
+                               taxTile={role === 'owner' ? <div role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => setSub('pnl')}><TaxForecast compact book={book} rows={taxRows} /></div> : null} />}
       {sub === 'income' && <IncomeList income={ledger.income} linked={!!book.tenant} onDoc={ro ? null : () => openDoc()} onManual={role === 'owner' ? () => setEdit({ kind: 'income', rec: null }) : null}
         onEdit={(r) => setEdit({ kind: 'income', rec: r })} onDel={(r) => remove('incomes', r.id, 'ההכנסה')} />}
       {sub === 'expenses' && !ro && <InboxCard book={book} server={server} role={role} flash={flash} refreshKey={inboxTick}
@@ -2613,7 +2627,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         onSave={(r) => save('banktx', r)} onDel={(r) => remove('banktx', r.id, 'השורה')}
         onBulk={async (recs) => { let ok = 0; for (const r of recs) if (await save('banktx', r)) ok++; return ok; }} />}
       {sub === 'vat' && <VatTab totals={tot} rate={rate} book={book} />}
-      {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} />}
+      {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} taxRows={role === 'owner' ? taxRows : null} onLoadSiblings={onLoadSiblings} />}
       {sub === 'docs' && <DocsTab quick={quickDoc} book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
                                   onLog={log} server={server} ro={ro} flash={flash}
@@ -2646,7 +2660,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
 }
 
 /* ------------------------------------------------------------------- סקירה */
-function Dash({ totals, rate, alerts, onSub, linked }) {
+function Dash({ totals, rate, alerts, onSub, linked, taxTile }) {
   const [month, setMonth] = useState(thisMonth());
   const t = totals(month, month);
   const year = month.slice(0, 4);
@@ -2673,6 +2687,7 @@ function Dash({ totals, rate, alerts, onSub, linked }) {
         <div className="mg-stat"><div className="lb">{rate > 0 ? `מע״מ ${monthName(pStart)}–${monthName(addMonths(pStart, 1))}` : 'מע״מ'}</div>
           <div className="vl">{rate > 0 ? fmt(vp.vatDue) : '—'}</div>
           <div className="dl">{rate > 0 ? (vp.vatDue >= 0 ? 'לתשלום' : 'להחזר') : 'עוסק פטור'}</div></div>
+        {taxTile}
       </div>
 
       {linked && alerts.unpaid.length > 0 && (
@@ -3349,7 +3364,134 @@ function VatTab({ totals, rate, book }) {
 }
 
 /* ------------------------------------------------------------ רווח והפסד */
-function PnlTab({ totals, supName, book }) {
+
+/* ============================================================ income tax */
+/* A forecast, not a return: 2026 figures for an individual (self-employed),
+   and the company rate for a company. They change every January and are
+   kept together here. Sources: kolzchut.org.il (brackets, credit point),
+   Bituach Leumi rates for the self-employed, 2026. */
+const TAX = {
+  year: 2026,
+  brackets: [[84120, 0.10], [120720, 0.14], [228000, 0.20], [301200, 0.31], [560280, 0.35], [721560, 0.47], [Infinity, 0.50]],
+  point: 2904,                 // one credit point, a year
+  ni: { low: 7703, max: 51910, niLow: 0.0287, niHigh: 0.1283, hLow: 0.0323, hHigh: 0.0517, deductible: 0.52 },
+  company: 0.23,
+};
+const TAX_PROFILE_KEY = 'tzbooks_taxprofile';
+const isCompanyId = (t) => /^5\d{8}$/.test(digitsOf(t));
+function bracketTax(income) {
+  let tax = 0, prev = 0; const steps = [];
+  for (const [top, rate] of TAX.brackets) {
+    if (income <= prev) break;
+    const part = Math.min(income, top) - prev;
+    if (part > 0) { tax += part * rate; steps.push({ from: prev, to: Math.min(income, top), rate, tax: part * rate }); }
+    prev = top;
+  }
+  return { tax, steps, marginal: steps.length ? steps[steps.length - 1].rate : TAX.brackets[0][1] };
+}
+/* National Insurance and health tax on a year's business profit, self-employed. */
+function niOf(annual) {
+  const m = Math.max(0, annual) / 12, n = TAX.ni;
+  const low = Math.min(m, n.low), high = Math.max(0, Math.min(m, n.max) - n.low);
+  const ni = 12 * (low * n.niLow + high * n.niHigh), health = 12 * (low * n.hLow + high * n.hHigh);
+  return { ni, health, total: ni + health, deduct: ni * n.deductible };
+}
+function taxForecast(profit, { points = 2.25, other = 0, company = false } = {}) {
+  const p = Math.max(0, profit);
+  if (company) { const tax = p * TAX.company; return { company: true, profit: p, tax, ni: 0, health: 0, total: tax, rate: p ? tax / p : 0 }; }
+  const n = niOf(p);
+  const taxable = Math.max(0, p - n.deduct - Math.max(0, other));
+  const b = bracketTax(taxable);
+  const credit = Math.max(0, points) * TAX.point;
+  const tax = Math.max(0, b.tax - credit);
+  return { profit: p, taxable, deductNi: n.deduct, other, gross: b.tax, credit, tax, ni: n.ni, health: n.health,
+           total: tax + n.total, rate: p ? (tax + n.total) / p : 0, marginal: b.marginal, steps: b.steps };
+}
+/* How far into the year: whole months plus today's share of this one. */
+function yearShare(now = todayIso()) {
+  const [y, m, d] = now.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  return ((m - 1) + d / days) / 12;
+}
+
+const fmtRound = (n) => fmt(Math.round(Number(n) || 0));
+function TaxForecast({ book, rows, onLoad, compact }) {
+  const y = todayIso().slice(0, 4);
+  const [prof, setProf] = useState(() => lsGet(TAX_PROFILE_KEY, {}) || {});
+  const save = (patchObj) => { const n = { ...prof, ...patchObj }; setProf(n); try { lsSet(TAX_PROFILE_KEY, n); } catch {} };
+  const [mode, setMode] = useState('year');
+  const [open, setOpen] = useState(false);
+  useEffect(() => { onLoad?.(); }, []);
+  const company = isCompanyId(book.taxId);
+  const share = yearShare();
+  const ytd = rows.filter(r => r.ready).reduce((a, r) => a + r.profit, 0);
+  const waiting = rows.filter(r => !r.ready);
+  const base = mode === 'year' && share > 0.04 ? ytd / share : ytd;
+  /* Advances are per taxpayer: each tax id (a person, or a company) keeps its own. */
+  const tid = digitsOf(book.taxId) || book.id, advKey = `${tid}:${y}`;
+  const points = prof.points ?? 2.25, adv = Number(prof.adv?.[advKey]) || 0, other = Number(prof.deduct) || 0;
+  const f = taxForecast(base, { points, other, company });
+  const dueNow = mode === 'year' ? f.total : f.total;
+  const left = Math.max(0, dueNow - (company ? adv : adv));
+  const monthsLeft = Math.max(1, 12 - Number(todayIso().slice(5, 7)) + 1);
+  const fmt = (n) => fmtRound(n);
+  const L = ({ l, v, b, c, sub }) => <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 0', borderBottom: '1px solid #f0ebe0', fontWeight: b ? 800 : 400, color: c }}>
+    <span style={{ flex: 1, minWidth: 0 }}>{l}{sub && <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 13 }}> · {sub}</span>}</span><span dir="ltr" style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{fmt(v)}</span></div>;
+  if (compact) return (
+    <div className="mg-stat" data-tour="tax-tile"><div className="lb">{company ? 'מס חברות צפוי' : 'מס הכנסה + ביט״ל צפוי'} {y}</div>
+      <div className="vl">{fmt(f.total)}</div>
+      <div className="dl">{fmt(f.total / 12)} לחודש · {Math.round(f.rate * 100)}% מהרווח{waiting.length ? ' · חלקי' : ''}</div></div>
+  );
+  return (
+    <div data-tour="tax-forecast" className="mg-card" style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0 }}>צפי {company ? 'מס חברות' : 'מס הכנסה וביטוח לאומי'} · {y}</h3>
+        <div className="seg" style={{ maxWidth: 320 }}>
+          <button className={mode === 'year' ? 'on' : ''} onClick={() => setMode('year')}>צפי לשנה מלאה</button>
+          <button className={mode === 'ytd' ? 'on' : ''} onClick={() => setMode('ytd')}>על מה שהיה עד היום</button>
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 10px' }}>
+        {rows.length > 1 ? `כולל את כל העסקים שלך באותו מספר עוסק: ${rows.map(r => r.name).join(', ')}. ` : ''}
+        רווח מתחילת השנה {fmt(ytd)}{mode === 'year' && share > 0.04 ? ` (${Math.round(share * 100)}% מהשנה), ולכן לשנה מלאה בערך ${fmt(base)}` : ''}.
+        {waiting.length > 0 && <> <b style={{ color: 'var(--warn)' }}>עוד לא נטען: {waiting.map(r => r.name).join(', ')}.</b></>}</div>
+      <div className="mg-stats" style={{ marginBottom: 12 }}>
+        <div className="mg-stat"><div className="lb">סה״כ צפוי {mode === 'year' ? 'לשנה' : 'עד היום'}</div><div className="vl">{fmt(f.total)}</div>
+          <div className="dl">{Math.round(f.rate * 100)}% מהרווח</div></div>
+        <div className="mg-stat"><div className="lb">להפריש כל חודש</div><div className="vl">{fmt(mode === 'year' ? f.total / 12 : f.total / Math.max(1, share * 12))}</div>
+          <div className="dl">{company ? 'מס חברות' : 'מס + ביטוח לאומי + בריאות'}</div></div>
+        <div className="mg-stat"><div className="lb">נותר לשלם</div><div className="vl" style={left > 0 ? undefined : { color: 'var(--green)' }}>{fmt(left)}</div>
+          <div className="dl">אחרי מקדמות {fmt(adv)}{mode === 'year' ? ` · ${fmt(left / monthsLeft)} לחודש עד סוף השנה` : ''}</div></div>
+        {!company && <div className="mg-stat"><div className="lb">מדרגת מס שולית</div><div className="vl">{Math.round((f.marginal || 0) * 100)}%</div>
+          <div className="dl">כל ₪1,000 רווח נוסף ≈ {fmt(1000 * ((f.marginal || 0) + (base / 12 > TAX.ni.low ? TAX.ni.niHigh + TAX.ni.hHigh : TAX.ni.niLow + TAX.ni.hLow)))} מס</div></div>}
+      </div>
+      <button className="mg-linkish" onClick={() => setOpen(o => !o)}>{open ? 'הסתר פירוט' : 'איך זה חושב?'}</button>
+      {open && <div style={{ marginTop: 8 }}>
+        <L l="רווח (הכנסות פחות הוצאות, לפני מע״מ)" v={f.profit} />
+        {company ? <L l={`מס חברות ${Math.round(TAX.company * 100)}%`} v={f.tax} b /> : <>
+          <L l="ניכוי 52% מדמי הביטוח הלאומי" v={-f.deductNi} />
+          {f.other > 0 && <L l="ניכויים נוספים (פנסיה, קרן השתלמות)" v={-f.other} />}
+          <L l="הכנסה חייבת" v={f.taxable} b />
+          {f.steps.map((st, i) => <L key={i} l={`מדרגה ${Math.round(st.rate * 100)}%`} sub={`${fmt(st.from)}–${fmt(st.to)}`} v={st.tax} />)}
+          <L l={`נקודות זיכוי (${points} × ${fmt(TAX.point)})`} v={-Math.min(f.credit, f.gross)} />
+          <L l="מס הכנסה" v={f.tax} b />
+          <L l="ביטוח לאומי" v={f.ni} /><L l="מס בריאות" v={f.health} />
+        </>}
+        <L l="סה״כ" v={f.total} b c="var(--green)" />
+      </div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10, marginTop: 12 }}>
+        {!company && <Field label="נקודות זיכוי"><input inputMode="decimal" value={prof.points ?? 2.25} onChange={e => save({ points: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>}
+        <Field label={`מקדמות ששולמו ב-${y}`}><input inputMode="decimal" value={prof.adv?.[advKey] ?? ''} placeholder="0" onChange={e => save({ adv: { ...(prof.adv || {}), [advKey]: e.target.value } })} /></Field>
+        {!company && <Field label="ניכויים בשנה (פנסיה, השתלמות)"><input inputMode="decimal" value={prof.deduct ?? ''} placeholder="0" onChange={e => save({ deduct: e.target.value })} /></Field>}
+      </div>
+      <div className="mg-note" style={{ marginTop: 10, fontSize: 13 }}>
+        הערכה בלבד, לפי מדרגות {TAX.year} ליחיד {company ? '' : 'ושיעורי ביטוח לאומי לעצמאי'}. לא כולל הכנסות אחרות (משכורת, שכר דירה), זיכויים מיוחדים או הוצאות שלא נרשמו כאן. המספר הסופי נקבע בדוח השנתי מול רואה החשבון.
+      </div>
+    </div>
+  );
+}
+
+function PnlTab({ totals, supName, book, taxRows, onLoadSiblings }) {
   const y = new Date().getFullYear();
   const [from, setFrom] = useState(`${y}-01`);
   const [to, setTo] = useState(thisMonth());
@@ -3369,6 +3511,7 @@ function PnlTab({ totals, supName, book }) {
   );
   return (
     <>
+      {taxRows && <TaxForecast book={book} rows={taxRows} onLoad={onLoadSiblings} />}
       <div data-tour="pnl-range" style={{ ...row, marginBottom: 14 }}>
         <Field label="מחודש"><input type="month" value={from} onChange={e => e.target.value && setFrom(e.target.value)} /></Field>
         <Field label="עד חודש"><input type="month" value={to} onChange={e => e.target.value && setTo(e.target.value)} /></Field>
