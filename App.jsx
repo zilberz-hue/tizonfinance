@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.15.4';
+const VERSION = '1.15.5';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.15.5', date: '30.09.26', items: ['חיבור ל-iCount: תיקון עומס בבדיקת ההרשאות מול Google (429).'] },
   { v: '1.15.4', date: '30.09.26', items: ['חיבור ל-iCount: בדיקת הבעלות משלבת את מפתח השירות ואת הכניסה שלך.'] },
   { v: '1.15.3', date: '30.09.26', items: ['מסמכים ממוינים מהחדש לישן לפי תאריך המסמך.', 'חיבור ל-iCount: זיהוי בעלות גם כשמפתח השירות שהועלה שייך לפרויקט אחר.'] },
   { v: '1.15.2', date: '30.09.26', items: ['השרת עובד בלי הגדרות נוספות ב-Netlify: מזהה הפרויקט מובנה, והרשאות נבדקות לפי הכניסה שלך.', 'עסק כפול ריק נמחק בלחיצה אחת ממסך כל העסקים.'] },

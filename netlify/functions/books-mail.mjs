@@ -1,4 +1,4 @@
-/* Tizon Books 1.15.4 · server function, in one file. Built from
+/* Tizon Books 1.15.5 · server function, in one file. Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -972,10 +972,21 @@ async function storeId() {
   storeCache = t;
   return t.idToken;
 }
-var FSB = (p) => `https://firestore.googleapis.com/v1/projects/${projectId()}/databases/(default)/documents${p}`;
+var BOOKS_WEB_KEY = env("BOOKS_WEB_KEY") || "AIzaSyAOph6_Dr2ChyEi2iFF4yDT-p9jk3uDd3k";
+var FSB = (p) => `https://firestore.googleapis.com/v1/projects/${projectId()}/databases/(default)/documents${p}?key=${BOOKS_WEB_KEY}`;
+async function fsFetch(url, opts) {
+  const f = fetchOverride || fetch;
+  let r = await f(url, opts);
+  if (r.status === 429 || r.status === 503) {
+    await new Promise((res) => setTimeout(res, 700));
+    r = await f(url, opts);
+  }
+  return r;
+}
+var roleCache = /* @__PURE__ */ new Map();
 async function bookAs(idToken, bookId) {
   if (!/^[\w-]{1,80}$/.test(bookId)) return null;
-  const r = await (fetchOverride || fetch)(FSB("/books/" + bookId), { headers: { authorization: "Bearer " + idToken } });
+  const r = await fsFetch(FSB("/books/" + bookId), { headers: { authorization: "Bearer " + idToken } });
   if (!r.ok) {
     if (lastRole) lastRole.http = r.status;
     return null;
@@ -986,7 +997,7 @@ async function bookAs(idToken, bookId) {
 async function booksAs(idToken, email) {
   const out = {};
   for (const f of ["owners", "clerks", "viewers"]) {
-    const r = await (fetchOverride || fetch)(FSB(":runQuery"), {
+    const r = await fsFetch(FSB(":runQuery"), {
       method: "POST",
       headers: { authorization: "Bearer " + idToken, "content-type": "application/json" },
       body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "books" }], where: { fieldFilter: { field: { fieldPath: f }, op: "ARRAY_CONTAINS", value: { stringValue: email } } } } })
@@ -1001,6 +1012,13 @@ async function booksAs(idToken, email) {
 }
 var lastRole = null;
 async function roleOfBook(email, bookId, idToken) {
+  const ck = email + "|" + bookId, hit = roleCache.get(ck);
+  if (hit && Date.now() - hit.at < 5 * 6e4) return hit.role;
+  const role = await roleOfBookNow(email, bookId, idToken);
+  if (role) roleCache.set(ck, { role, at: Date.now() });
+  return role;
+}
+async function roleOfBookNow(email, bookId, idToken) {
   lastRole = { email, book: bookId };
   const rank = { owner: 3, clerk: 2, viewer: 1, "": 0 };
   let best = "";
