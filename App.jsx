@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -731,6 +731,8 @@ input:focus,select:focus{border-color:var(--gold)}
   .mg-tbl.has-labels td > input,.mg-tbl.has-labels td > select{flex:1;min-width:0;max-width:62%}
   .mg-tbl.has-labels tr:hover td{background:transparent}
   .mg-tbl.has-labels td:first-child{font-size:17.5px}
+  .mg-tbl.has-labels td[data-select]{justify-content:flex-start;border-bottom:0;padding-bottom:0;min-height:0}
+  .mg-tbl.has-labels td[data-select]::before{content:none}
 }
 
 `;
@@ -860,6 +862,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.13.0', date: '30.09.26', items: [
+    'פריטים: ייבוא מוצרים ישירות מהחנות, עם בחירה אילו לייבא.',
+    'פריטים: תיבות סימון למחיקה של פריט אחד, כמה, או כל הרשימה.'] },
   { v: '1.12.0', date: '30.09.26', items: [
     'מראה אחיד ומותאם לכל מכשיר: בטלפון תפריט נפתח מהצד, טבלאות מוצגות ככרטיסים וחלונות נפתחים מלמטה; בטאבלט טקסט וכפתורים גדולים יותר ולשוניות בשורה אחת.'] },
   { v: '1.11.0', date: '30.09.26', items: [
@@ -954,7 +959,8 @@ const TOURS = {
     { t: 'cust-table', title: 'כרטיס לקוח', text: 'מחזור ופעילות אחרונה לכל לקוח. בכרטיס יש גם כפתור לכרטסת. כפילויות מתאחדות לפי ח.פ., ורק כשהשם תואם גם לפי אימייל או טלפון.', since: '1.5.0' },
   ],
   items: [
-    { t: 'items-tools', title: 'פריטים', text: 'המוצרים והשירותים של העסק, עם מחיר. מוסיפים כאן או מייבאים את רשימת הפריטים מ-iCount (אקסל או CSV).', since: '1.9.0' },
+    { t: 'items-tools', title: 'פריטים', text: 'המוצרים והשירותים של העסק, עם מחיר. מוסיפים כאן, מייבאים מהחנות, או מ-iCount (אקסל או CSV).', since: '1.9.0' },
+    { t: 'items-table', title: 'מחיקה של כמה יחד', text: 'מסמנים פריטים בתיבות, או את כולם בתיבה שבכותרת, ומוחקים בלחיצה אחת.', since: '1.13.0', roles: ['owner'] },
     { t: 'items-table', title: 'הקטלוג', text: 'בחשבונית ובדף סליקה בוחרים פריט, והמחיר נכנס לבד, גם כשהמסמך לפני מע״מ והמחיר כולל אותו. כאן רואים גם כמה נמכר מכל פריט.', since: '1.9.0' },
   ],
   ledger: [
@@ -4859,12 +4865,75 @@ function ItemForm({ rec, rate, onSave, onClose }) {
   );
 }
 
+/* The store's catalogue into the items: public in the store (a shop's
+   products are its advertising), so it is read without any login. Prices in
+   the store include VAT. The ones to bring are picked from a list. */
+async function storeProducts(tenant) {
+  const s = await getDoc(doc(store().db, 'tenants', tenantId(tenant), 'store', 'ms:products'));
+  const raw = s.exists() ? s.data().value : null;
+  const list = typeof raw === 'string' ? JSON.parse(raw) : Array.isArray(raw) ? raw : [];
+  return list.filter(p => p && String(p.name || '').trim()).map(p => ({
+    name: String(p.name).trim(), sku: String(p.sku || p.id || '').trim(), price: r2(Number(p.salePrice || p.price) || 0), incl: true,
+    category: String(p.category || '').trim(), desc: '', unit: '', hidden: p.visible === false || p.active === false }));
+}
+function StoreItemsImport({ book, list, col, flash, onDone, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState('');
+  const [pick, setPick] = useState(() => new Set());
+  const [upd, setUpd] = useState(true);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    storeProducts(book.tenant).then(r => { setRows(r); setPick(new Set(r.filter(x => !x.hidden).map(x => x.sku || x.name))); })
+      .catch(e => setErr(String(e?.code || e?.message || e)));
+  }, []);
+  const keyOf = (x) => x.sku || x.name;
+  const chosen = (rows || []).filter(x => pick.has(keyOf(x)));
+  const plan = useMemo(() => planItems(list, chosen.map(x => ({ ...x })), upd), [list, rows, pick, upd]);
+  const run = async () => {
+    setBusy(true);
+    const recs = [...plan.add.map(x => ({ ...x, sources: ['store'] })), ...plan.upd];
+    const n = await saveCustomers(col, recs);
+    setBusy(false); flash(`נשמרו ${n} פריטים מהחנות`); onDone(); onClose();
+  };
+  return (
+    <Box title="ייבוא מוצרים מהחנות" onClose={onClose} wide
+         footer={<>{rows && <button className="mg-btn" disabled={busy || !(plan.add.length + plan.upd.length)} onClick={run}>
+                   {busy ? 'שומר…' : `ייבא ${plan.add.length} חדשים${plan.upd.length ? ` ועדכן ${plan.upd.length}` : ''}`}</button>}
+                   <button className="mg-btn ghost" onClick={onClose}>סגור</button></>}>
+      {err ? <div className="mg-note bad">לא הצלחתי לקרוא את המוצרים של החנות ({err}).</div>
+      : !rows ? <div className="mg-empty">קורא את המוצרים מהחנות…</div>
+      : <>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+          <b>{rows.length} מוצרים בחנות</b>
+          <button className="mg-btn ghost sm" onClick={() => setPick(new Set(rows.map(keyOf)))}>בחר הכול</button>
+          <button className="mg-btn ghost sm" onClick={() => setPick(new Set())}>נקה</button>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={upd} onChange={e => setUpd(e.target.checked)} />לעדכן מחיר של פריטים שכבר קיימים</label>
+        </div>
+        <div className="mg-tblwrap" style={{ maxHeight: '52vh', overflow: 'auto' }}><table className="mg-tbl">
+          <thead><tr><th style={{ width: 36 }}></th><th>מוצר</th><th>מק״ט</th><th>מחיר (כולל מע״מ)</th><th>קטגוריה</th></tr></thead>
+          <tbody>{rows.map(x => (
+            <tr key={keyOf(x)} style={{ cursor: 'pointer', opacity: x.hidden ? .6 : 1 }} onClick={() => setPick(s0 => { const n = new Set(s0); n.has(keyOf(x)) ? n.delete(keyOf(x)) : n.add(keyOf(x)); return n; })}>
+              <td data-select="1"><input type="checkbox" readOnly checked={pick.has(keyOf(x))} style={{ width: 20, height: 20 }} /></td>
+              <td><b>{x.name}</b>{x.hidden ? <span className="mg-chip" style={{ marginInlineStart: 6 }}>מוסתר בחנות</span> : ''}</td>
+              <td dir="ltr" style={{ textAlign: 'right' }}>{x.sku}</td><td>{fmt(x.price)}</td><td>{x.category}</td>
+            </tr>))}</tbody></table></div>
+        <div className="mg-note" style={{ marginTop: 10 }}>נבחרו {chosen.length} · <b>{plan.add.length}</b> חדשים · <b>{plan.upd.length}</b> קיימים שיתעדכנו · {plan.same.length} בלי שינוי. פריט מזוהה לפי מק״ט. בחנות לא משתנה דבר.</div>
+      </>}
+    </Box>
+  );
+}
+
 function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
   const list = data.items || [];
   const rate = rateOf(book);
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState(null);
   const [imp, setImp] = useState(false);
+  const [fromStore, setFromStore] = useState(false);
+  const [sel, setSel] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const toggle = (id) => setSel(s0 => { const n = new Set(s0); n.has(id) ? n.delete(id) : n.add(id); return n; });
   /* How often each item was sold, by its name on documents. */
   const used = useMemo(() => {
     const m = {};
@@ -4884,22 +4953,44 @@ function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
     if (!window.confirm(`למחוק את "${x.name}"? מסמכים שכבר הופקו לא משתנים.`)) return;
     try { await cols.items.del(x.id); patch('items', l => l.filter(y => y.id !== x.id)); flash('נמחק'); } catch { flash('המחיקה נכשלה'); }
   };
+  /* Several at once: the ticked ones, or everything shown. */
+  const delMany = async () => {
+    const ids = [...sel].filter(id => list.some(x => x.id === id));
+    if (!ids.length || !window.confirm(`למחוק ${ids.length} פריטים? מסמכים שכבר הופקו לא משתנים.`)) return;
+    setBusy(true); let ok = 0;
+    for (let k = 0; k < ids.length; k += 20) await Promise.all(ids.slice(k, k + 20).map(id => cols.items.del(id).then(() => ok++).catch(() => {})));
+    setSel(new Set()); setBusy(false);
+    const left = await cols.items.list().catch(() => null); if (left) patch('items', () => left);
+    flash(`נמחקו ${ok} פריטים`);
+  };
   const reload = async () => { const l = await cols.items.list().catch(() => null); if (l) patch('items', () => l); };
   return (
     <>
       <div data-tour="items-tools" style={{ ...row, marginBottom: 12 }}>
         <Field label="חיפוש"><input value={q} onChange={e => setQ(e.target.value)} placeholder="שם, מק״ט, קטגוריה" /></Field>
         <button className="mg-btn" onClick={() => setEdit({})}>＋ פריט</button>
+        {role === 'owner' && shown.length > 0 && <button className="mg-btn ghost sm" onClick={() => setSel(shown.every(x => sel.has(x.id)) ? new Set() : new Set(shown.map(x => x.id)))}>
+          {shown.every(x => sel.has(x.id)) ? '☐ בטל בחירה' : `☑ בחר הכול (${shown.length})`}</button>}
+        {book.tenant && <button className="mg-btn ghost" onClick={() => setFromStore(true)}>🛒 ייבוא מהחנות</button>}
         <button className="mg-btn ghost" onClick={() => setImp(true)}>⬆ ייבוא מ-iCount (אקסל / CSV)</button>
         <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`items-${book.name}.csv`, [
           ['שם הפריט', 'מק״ט', 'מחיר', 'כולל מע״מ', 'יחידה', 'קטגוריה', 'תיאור נוסף', 'פעיל'],
           ...shown.map(x => [x.name, x.sku || '', x.price, x.incl ? 'כן' : 'לא', x.unit || '', x.category || '', x.desc || '', x.active === false ? 'לא' : 'כן'])])}>⬇ ייצוא</button>
       </div>
+      {role === 'owner' && sel.size > 0 && (
+        <div className="mg-note warn" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+          <b>נבחרו {sel.size} פריטים</b>
+          <button className="mg-btn danger sm" disabled={busy} onClick={delMany}>{busy ? 'מוחק…' : '🗑 מחק נבחרים'}</button>
+          <button className="mg-btn ghost sm" onClick={() => setSel(new Set())}>נקה בחירה</button>
+        </div>)}
       <div data-tour="items-table" className="mg-tblwrap"><table className="mg-tbl">
-        <thead><tr><th>פריט</th><th>מק״ט</th><th>מחיר</th><th>קטגוריה</th><th>נמכר</th><th></th></tr></thead>
+        <thead><tr>{role === 'owner' && <th style={{ width: 36 }}><input type="checkbox" aria-label="בחר הכול" style={{ width: 20, height: 20 }}
+              checked={shown.length > 0 && shown.every(x => sel.has(x.id))}
+              onChange={e => setSel(e.target.checked ? new Set([...sel, ...shown.map(x => x.id)]) : new Set([...sel].filter(id => !shown.some(x => x.id === id))))} /></th>}<th>פריט</th><th>מק״ט</th><th>מחיר</th><th>קטגוריה</th><th>נמכר</th><th></th></tr></thead>
         <tbody>
           {shown.map(x => { const u = used[normItem(x.name)]; return (
             <tr key={x.id} style={x.active === false ? { opacity: .5 } : null}>
+              {role === 'owner' && <td data-select="1"><input type="checkbox" aria-label={'בחר ' + x.name} style={{ width: 20, height: 20 }} checked={sel.has(x.id)} onChange={() => toggle(x.id)} /></td>}
               <td><b>{x.name}</b>{x.unit ? <span style={{ color: 'var(--muted)', fontSize: 13 }}> · {x.unit}</span> : ''}{x.desc ? <div style={{ color: 'var(--muted)', fontSize: 13 }}>{x.desc}</div> : ''}</td>
               <td dir="ltr" style={{ textAlign: 'right' }}>{x.sku}</td>
               <td>{fmt(x.price)}{rate > 0 && <span style={{ color: 'var(--muted)', fontSize: 12 }}> {x.incl ? 'כולל מע״מ' : '+ מע״מ'}</span>}</td>
@@ -4909,9 +5000,10 @@ function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
                 <button className="mg-btn ghost sm" onClick={() => setEdit(x)}>עריכה</button>{' '}
                 {role === 'owner' && <button className="mg-btn ghost sm" onClick={() => del(x)}>מחק</button>}</td>
             </tr>); })}
-          {!shown.length && <tr><td colSpan={6}><div className="mg-empty">{list.length ? 'אין פריטים שמתאימים לחיפוש.' : 'עוד אין פריטים. מוסיפים כאן, או מייבאים את רשימת הפריטים מ-iCount.'}</div></td></tr>}
+          {!shown.length && <tr><td colSpan={7}><div className="mg-empty">{list.length ? 'אין פריטים שמתאימים לחיפוש.' : `עוד אין פריטים. מוסיפים כאן, או מייבאים${book.tenant ? ' מהחנות או' : ''} מ-iCount.`}</div></td></tr>}
         </tbody></table></div>
       {edit && <ItemForm rec={edit} rate={rate} onSave={save} onClose={() => setEdit(null)} />}
+      {fromStore && <StoreItemsImport book={book} list={list} col={cols.items} flash={flash} onDone={reload} onClose={() => setFromStore(false)} />}
       {imp && <ItemImport list={list} col={cols.items} rate={rate} flash={flash} onDone={reload} onClose={() => setImp(false)} />}
     </>
   );
