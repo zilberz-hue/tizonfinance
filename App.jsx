@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.9.2';
+const VERSION = '1.10.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -594,6 +594,9 @@ input:focus,select:focus{border-color:var(--gold)}
 .help-btn .nd{position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:50%;background:var(--bad);border:2px solid #fff}
 .tour-news{max-width:520px;width:100%;max-height:85vh;overflow:auto}
 @media print{.help-btn,.tour{display:none}}
+.ledger-item{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:right;background:none;border:0;border-radius:9px;padding:8px 10px;cursor:pointer;font-size:14px;color:var(--ink)}
+.ledger-item:hover{background:#f6efe1}.ledger-item.on{background:#f3e6cc;font-weight:700}.ledger-item b{font-size:13px;color:var(--green)}.ledger-item b.owe{color:var(--bad)}
+@media (max-width:820px){.ledger-grid{grid-template-columns:1fr !important}.ledger-item{font-size:16px}}
 @media (max-width:820px){
   .shell{flex-direction:column}
   .side{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px}
@@ -763,6 +766,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.10.0', date: '30.09.26', items: [
+    'כרטסת: לקוח, ספק וכל חשבון בהנהלת החשבונות, עם יתרת פתיחה ויתרה מצטברת. הדפסה, אקסל ושליחה ללקוח.',
+    'מאזן בוחן לכל תקופה.'] },
   { v: '1.9.2', date: '30.09.26', items: ['חיבור לחנות: כתובת אתר שהוזנה במקום מזהה החנות מתוקנת לבד ל-main.', 'ההודעה על סנכרון ההגדרות מפנה לחוקים העדכניים.'] },
   { v: '1.9.1', date: '30.09.26', items: ['תיקון בנייה ב-Netlify (תיקיית public).'] },
   { v: '1.9.0', date: '30.09.26', items: [
@@ -795,9 +801,9 @@ const CHANGES = [
 const TOUR_CTX = {
   welcome: 'התחלה', all: 'כל העסקים', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
   expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pnl: 'רווח והפסד', tax: 'רשות המסים',
-  items: 'פריטים', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
+  items: 'פריטים', ledger: 'כרטסת', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
-const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'import'];
+const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'import'];
 const WRITERS = ['owner', 'clerk'];
 
 const TOURS = {
@@ -846,11 +852,18 @@ const TOURS = {
     { t: 'cust-stats', title: 'הלקוחות', text: 'כמה לקוחות, כמה עם אימייל וטלפון, וכמה פעילים השנה.', since: '1.5.0' },
     { t: 'cust-store', title: 'סנכרון עם החנות', text: 'לקוחות החנות נקראים לכאן. לחנות נוספים רק לקוחות חדשים, בלחיצה, ואף פרט קיים שם לא משתנה.', since: '1.6.0' },
     { t: 'cust-tools', title: 'חיפוש, הוספה וייבוא', text: 'מחפשים לפי שם, טלפון, אימייל או ח.פ. אפשר להוסיף לקוח, לייבא מ-iCount ולייצא לאקסל.', since: '1.5.0', roles: WRITERS },
-    { t: 'cust-table', title: 'כרטיס לקוח', text: 'מחזור ופעילות אחרונה לכל לקוח. כפילויות מתאחדות לפי ח.פ., ורק כשהשם תואם גם לפי אימייל או טלפון.', since: '1.5.0' },
+    { t: 'cust-table', title: 'כרטיס לקוח', text: 'מחזור ופעילות אחרונה לכל לקוח. בכרטיס יש גם כפתור לכרטסת. כפילויות מתאחדות לפי ח.פ., ורק כשהשם תואם גם לפי אימייל או טלפון.', since: '1.5.0' },
   ],
   items: [
     { t: 'items-tools', title: 'פריטים', text: 'המוצרים והשירותים של העסק, עם מחיר. מוסיפים כאן או מייבאים את רשימת הפריטים מ-iCount (אקסל או CSV).', since: '1.9.0' },
     { t: 'items-table', title: 'הקטלוג', text: 'בחשבונית ובדף סליקה בוחרים פריט, והמחיר נכנס לבד, גם כשהמסמך לפני מע״מ והמחיר כולל אותו. כאן רואים גם כמה נמכר מכל פריט.', since: '1.9.0' },
+  ],
+  ledger: [
+    { t: 'ledger-kind', title: 'כרטסות', text: 'כרטסת לקוח, כרטסת ספק, כרטסת של כל חשבון בהנהלת החשבונות, ומאזן בוחן.', since: '1.10.0' },
+    { t: 'ledger-range', title: 'תקופה', text: 'בוחרים תאריכים. יתרת הפתיחה מחושבת מכל מה שלפני התקופה. מכאן גם מדפיסים, מייצאים לאקסל ושולחים ללקוח.', since: '1.10.0' },
+    { t: 'ledger-list', title: 'בחירה', text: 'הרשימה ממוינת לפי גובה היתרה. באדום: מי שחייב לך.', since: '1.10.0' },
+    { t: 'ledger-tb', title: 'מאזן בוחן', text: 'כל החשבונות, חובה וזכות בתקופה, ובדיקה שהכול מאוזן. לחיצה על חשבון פותחת את הכרטסת שלו.', since: '1.10.0' },
+    { t: 'ledger-table', title: 'התנועות', text: 'חשבוניות בחובה, קבלות וזיכויים בזכות, ויתרה מצטברת בכל שורה. כולל מסמכים שיובאו מ-iCount.', since: '1.10.0' },
   ],
   income: [
     { t: 'inc-filters', title: 'הכנסות', text: 'סינון לפי חודש, חיפוש וייצוא לאקסל. בעסק שמחובר לחנות, הזמנות ששולמו נכנסות לכאן לבד.', since: '1.0.0' },
@@ -1961,6 +1974,7 @@ function AllView({ books, datas, loading, onOpen, onStoreLogin }) {
 function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone }) {
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
+  const [ledgerPick, setLedgerPick] = useState(null);
   useEffect(() => { onTab?.(sub); }, [sub]);
   useEffect(() => { if (tabReq) { if (SUBS.some(([k]) => k === tabReq)) setSub(tabReq); onTabDone?.(); } }, [tabReq]);
   const [edit, setEdit] = useState(null);
@@ -2064,7 +2078,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     patch('documents', list => list.map(x => x.id === d.id ? { ...x, printCount: n } : x));
   };
 
-  const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'],
+  const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
     ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ...(ro ? [] : [['import', 'ייבוא']])]
     .filter(([k]) => !clerk || ['docs', 'customers', 'items'].includes(k));
 
@@ -2116,8 +2130,10 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
                                   onLog={log} server={server} ro={ro} flash={flash}
                                   payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh} />}
+      {sub === 'ledger' && <LedgerTab book={book} data={data} ledger={ledger} pick={ledgerPick} />}
       {sub === 'items' && <ItemsTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role} />}
       {sub === 'customers' && <CustomersTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role}
+                                            onLedger={clerk ? null : (c) => { setLedgerPick({ kind: 'cust', id: c.id, n: Date.now() }); setSub('ledger'); }}
                                             onReload={onReload} onStoreLogin={onStoreLogin} />}
       {sub === 'tax' && <TaxTab book={book} docs={data.documents || []} log={data.log || []} ro={ro} onLog={log} flash={flash} ledger={ledger} />}
       {sub === 'import' && <ImportTab book={book} data={data} cols={cols} flash={flash} onDone={onReload} onDeleteBook={onDeleteBook} onLog={log} />}
@@ -3945,7 +3961,7 @@ function CustomerImport({ list, col, flash, onDone, onClose }) {
 }
 
 /* ---------------------------------------------------------- the list */
-function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onReload, onStoreLogin }) {
+function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onReload, onStoreLogin, onLedger }) {
   const list = data.customers || [];
   const [q, setQ] = useState('');
   const [src, setSrc] = useState('');
@@ -4080,6 +4096,7 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
       {card && (
         <Box title={card.name} onClose={() => setCard(null)} wide
              footer={<><button className="mg-btn" onClick={() => { setEdit(card); setCard(null); }}>✎ עריכה</button>
+                       {onLedger && <button className="mg-btn ghost keep" onClick={() => { onLedger(card); setCard(null); }}>📒 כרטסת</button>}
                        {role === 'owner' && <button className="mg-btn ghost" onClick={() => del(card)}>🗑 מחיקה</button>}
                        <button className="mg-btn ghost keep" onClick={() => setCard(null)}>סגור</button></>}>
           <div style={{ ...grid, fontSize: 14 }}>
@@ -4166,6 +4183,202 @@ function CustomerForm({ rec, onSave, onClose }) {
         ))}
       </div>
     </Box>
+  );
+}
+
+/* =================================================================== ledgers */
+/* כרטסת: every movement of one customer, supplier or bookkeeping account,
+   with a running balance and an opening balance for the period; and the
+   trial balance of all accounts. Customers are read from the documents
+   themselves (issued here and imported from iCount), accounts from the same
+   double-entry journal that goes into the unified file. */
+const LEDGER_KINDS = [['cust', 'כרטסת לקוח'], ['supp', 'כרטסת ספק'], ['acc', 'כרטסת חשבון'], ['tb', 'מאזן בוחן']];
+
+/* One customer's movements: debit what was invoiced, credit what was paid or credited. */
+function customerMoves(book, docs, who, withTest) {
+  const out = [];
+  docs.filter(d => (withTest || d.series !== 'test') && !d.cancelled && sameCustomer(who, d.customer || {})).forEach(d => {
+    const t = docTitle(d), wh = Number(d.withholding) || 0;
+    const paid = r2((d.payments || []).reduce((a, p) => a + (Number(p.amount) || 0), 0) + wh);
+    if (d.type === '305') out.push({ date: d.date, ref: t, desc: 'חשבונית', dr: r2(d.total), cr: 0, docId: d.id });
+    if (d.type === '320') { out.push({ date: d.date, ref: t, desc: 'חשבונית', dr: r2(d.total), cr: 0, docId: d.id });
+                            if (paid) out.push({ date: d.date, ref: t, desc: 'תקבול' + (wh ? ` (כולל ניכוי במקור ${fmt(wh)})` : ''), dr: 0, cr: paid, docId: d.id }); }
+    if (d.type === '400') {
+      if (book.dealerType === 'exempt' && !d.refId) out.push({ date: d.date, ref: t, desc: 'מכירה', dr: r2(d.total), cr: 0, docId: d.id });
+      out.push({ date: d.date, ref: t, desc: 'תקבול' + (d.refTitle ? ` · ${d.refTitle}` : '') + (wh ? ` (כולל ניכוי במקור ${fmt(wh)})` : ''), dr: 0, cr: r2((Number(d.total) || 0) + wh), docId: d.id });
+    }
+    if (d.type === '330') out.push({ date: d.date, ref: t, desc: 'זיכוי' + (d.refTitle ? ` · ${d.refTitle}` : ''), dr: 0, cr: r2(d.total), docId: d.id });
+  });
+  return out.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (b.dr - a.dr));
+}
+/* Expenses are recorded when paid: each one is a bill and its payment. */
+function supplierMoves(ledger, s) {
+  const out = [];
+  ledger.outgo.filter(e => (s.id && e.supplierId === s.id) || (!e.supplierId && s.name && normName(e.supplierName) === normName(s.name))).forEach(e => {
+    out.push({ date: e.date, ref: e.docNo || '', desc: e.desc || e.cat || 'הוצאה', dr: 0, cr: r2(e.gross) });
+    out.push({ date: e.date, ref: e.docNo || '', desc: 'תשלום' + (e.pay ? ` · ${e.pay}` : ''), dr: r2(e.gross), cr: 0 });
+  });
+  return out.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.dr - b.dr));
+}
+/* Opening balance before the period, and the period's lines with a running balance. */
+function withBalance(moves, from, to) {
+  const before = moves.filter(m => m.date < from);
+  let bal = r2(before.reduce((a, m) => a + m.dr - m.cr, 0));
+  const open = bal;
+  const rows = moves.filter(m => m.date >= from && m.date <= to).map(m => { bal = r2(bal + m.dr - m.cr); return { ...m, bal }; });
+  return { open, rows, dr: r2(rows.reduce((a, m) => a + m.dr, 0)), cr: r2(rows.reduce((a, m) => a + m.cr, 0)), close: bal };
+}
+const balText = (n) => Math.abs(n) < 0.005 ? '0' : `${fmt(Math.abs(n))} ${n > 0 ? 'חובה' : 'זכות'}`;
+
+function ledgerHTML(book, title, sub, head, rows, foot) {
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title>
+<style>@page{size:A4;margin:14mm}body{font-family:Arial,sans-serif;font-size:12px;color:#222;margin:0}
+h1{font-size:20px;margin:0 0 2px;color:#6e4d22}.s{color:#666;margin-bottom:12px}table{width:100%;border-collapse:collapse}
+th{background:#f1e8d6;text-align:right;padding:6px;font-size:11px}td{padding:6px;border-bottom:1px solid #eee}.n{text-align:left;white-space:nowrap}
+tfoot td{font-weight:800;background:#faf6ee}.top{display:flex;justify-content:space-between;border-bottom:3px solid #a8783f;padding-bottom:8px;margin-bottom:12px}</style></head><body>
+<div class="top"><div><b style="font-size:16px">${esc(book.legalName || book.name)}</b><div>${esc(DEALERS[book.dealerType] || '')} ${esc(book.taxId || '')}</div></div><div>${esc(new Date().toLocaleDateString('he-IL'))}</div></div>
+<h1>${esc(title)}</h1><div class="s">${esc(sub)}</div>
+<table><thead><tr>${head.map(h => `<th${h.n ? ' class="n"' : ''}>${esc(h.t)}</th>`).join('')}</tr></thead>
+<tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td${head[i].n ? ' class="n"' : ''}>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+${foot ? `<tfoot><tr>${foot.map((c, i) => `<td${head[i].n ? ' class="n"' : ''}>${esc(c)}</td>`).join('')}</tr></tfoot>` : ''}</table>
+<div class="s" style="margin-top:14px">הופק ב-Tizon Books ${VERSION}</div></body></html>`;
+}
+
+function LedgerTab({ book, data, ledger, pick }) {
+  const y = new Date().getFullYear();
+  const [kind, setKind] = useState(pick?.kind || 'cust');
+  const [from, setFrom] = useState(`${y}-01-01`);
+  const [to, setTo] = useState(todayIso());
+  const [sel, setSel] = useState(pick?.id || '');
+  const [q, setQ] = useState('');
+  /* While the business issues test documents, they can be looked at here too. */
+  const [withTest, setWithTest] = useState(() => docSeries(book) === 'test');
+  useEffect(() => { if (pick) { setKind(pick.kind); setSel(pick.id); } }, [pick]);
+  const docs = data.documents || [];
+
+  /* Customers: the list, and anyone on a document who is not on it. */
+  const custs = useMemo(() => {
+    const list = (data.customers || []).map(c => ({ ...c, key: c.id }));
+    docs.filter(d => (withTest || d.series !== 'test') && d.customer?.name).forEach(d => {
+      if (!list.some(c => sameCustomer(c, d.customer))) list.push({ ...d.customer, key: 'doc:' + normName(d.customer.name) });
+    });
+    return list.map(c => { const m = withBalance(customerMoves(book, docs, c, withTest), '0000-00-00', '9999-12-31'); return { ...c, bal: m.close, n: m.rows.length }; })
+      .filter(c => c.n).sort((a, b) => Math.abs(b.bal) - Math.abs(a.bal) || String(a.name).localeCompare(String(b.name), 'he'));
+  }, [data.customers, docs, book, withTest]);
+  const supps = useMemo(() => (data.suppliers || []).map(s => ({ ...s, key: s.id, n: supplierMoves(ledger, s).length })).filter(s => s.n)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'he')), [data.suppliers, ledger]);
+  /* The journal from the beginning, for opening balances; accounts as in the unified file. */
+  const journal = useMemo(() => kind === 'acc' || kind === 'tb' ? buildJournal(book, docs, ledger, '0000-00-00', to) : null, [kind, book, docs, ledger, to]);
+
+  let view = null;
+  if (kind === 'cust' || kind === 'supp') {
+    const list = kind === 'cust' ? custs : supps;
+    const who = list.find(x => x.key === sel);
+    if (who) {
+      const m = withBalance(kind === 'cust' ? customerMoves(book, docs, who, withTest) : supplierMoves(ledger, who), from, to);
+      view = { title: `${kind === 'cust' ? 'כרטסת לקוח' : 'כרטסת ספק'} · ${who.name}`, who, ...m };
+    }
+  } else if (kind === 'acc' && journal) {
+    const a = journal.accounts.find(x => x.key === sel);
+    if (a) {
+      const moves = journal.tx.filter(t => t.acc === a.key).map(t => ({ date: t.date, ref: t.ref, desc: t.desc, dr: t.side === 1 ? t.amt : 0, cr: t.side === 2 ? t.amt : 0 }))
+        .sort((x, z) => (x.date || '').localeCompare(z.date || ''));
+      view = { title: `כרטסת חשבון · ${a.key} ${a.name}`, ...withBalance(moves, from, to) };
+    }
+  }
+  const tb = kind === 'tb' && journal ? (() => {
+    const rows = journal.accounts.map(a => {
+      const t = journal.tx.filter(x => x.acc === a.key && x.date >= from && x.date <= to);
+      const dr = r2(t.filter(x => x.side === 1).reduce((s, x) => s + x.amt, 0)), cr = r2(t.filter(x => x.side === 2).reduce((s, x) => s + x.amt, 0));
+      return { key: a.key, name: a.name, group: a.tbName, dr, cr, bal: r2(dr - cr) };
+    }).filter(r => r.dr || r.cr).sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    return { rows, dr: r2(rows.reduce((s, r) => s + r.dr, 0)), cr: r2(rows.reduce((s, r) => s + r.cr, 0)) };
+  })() : null;
+
+  const sub = `${heDate(from)} עד ${heDate(to)}`;
+  const HEAD = [{ t: 'תאריך' }, { t: 'אסמכתא' }, { t: 'פרטים' }, { t: 'חובה', n: 1 }, { t: 'זכות', n: 1 }, { t: 'יתרה', n: 1 }];
+  const lines = view ? [['', '', 'יתרת פתיחה', '', '', balText(view.open)], ...view.rows.map(r => [heDate(r.date), r.ref, r.desc, r.dr ? fmt(r.dr) : '', r.cr ? fmt(r.cr) : '', balText(r.bal)])] : [];
+  const foot = view ? ['', '', 'סה״כ לתקופה', fmt(view.dr), fmt(view.cr), balText(view.close)] : null;
+  const print = () => {
+    if (view) printHTML(ledgerHTML(book, view.title, sub, HEAD, lines, foot));
+    else if (tb) printHTML(ledgerHTML(book, 'מאזן בוחן', sub, [{ t: 'חשבון' }, { t: 'שם' }, { t: 'קבוצה' }, { t: 'חובה', n: 1 }, { t: 'זכות', n: 1 }, { t: 'יתרה', n: 1 }],
+      tb.rows.map(r => [r.key, r.name, r.group, fmt(r.dr), fmt(r.cr), balText(r.bal)]), ['', 'סה״כ', '', fmt(tb.dr), fmt(tb.cr), balText(r2(tb.dr - tb.cr))]));
+  };
+  const csv = () => {
+    if (view) downloadCSV(`ledger-${book.name}-${from}_${to}.csv`, [[view.title], [sub], [], HEAD.map(h => h.t),
+      ['', '', 'יתרת פתיחה', '', '', view.open], ...view.rows.map(r => [r.date, r.ref, r.desc, r.dr || '', r.cr || '', r.bal]), ['', '', 'סה״כ', view.dr, view.cr, view.close]]);
+    else if (tb) downloadCSV(`trial-balance-${book.name}-${from}_${to}.csv`, [['מאזן בוחן', sub], [], ['חשבון', 'שם', 'קבוצה', 'חובה', 'זכות', 'יתרה'],
+      ...tb.rows.map(r => [r.key, r.name, r.group, r.dr, r.cr, r.bal]), ['', 'סה״כ', '', tb.dr, tb.cr, r2(tb.dr - tb.cr)]]);
+  };
+  const mail = () => {
+    const c = view?.who; if (!c) return;
+    const body = `שלום ${c.name},\n\nמצב החשבון שלך אצלנו ל-${heDate(to)}: ${Math.abs(view.close) < 0.005 ? 'אין יתרה פתוחה' : view.close > 0 ? `יתרה לתשלום ${fmt(view.close)}` : `יתרת זכות ${fmt(-view.close)}`}.\n\n`
+      + view.rows.map(r => `${heDate(r.date)} · ${r.ref} · ${r.desc} · ${r.dr ? fmt(r.dr) : '-' + fmt(r.cr)}`).join('\n') + `\n\nתודה,\n${book.legalName || book.name}`;
+    window.location.href = `mailto:${c.email || ''}?subject=${encodeURIComponent('כרטסת · ' + (book.legalName || book.name))}&body=${encodeURIComponent(body)}`;
+  };
+
+  const list = kind === 'cust' ? custs : kind === 'supp' ? supps : kind === 'acc' && journal ? journal.accounts.map(a => ({ key: a.key, name: `${a.key} · ${a.name}` })) : [];
+  const shown = list.filter(x => !q || String(x.name || '').toLowerCase().includes(q.toLowerCase()) || String(x.taxId || '').includes(q));
+  return (
+    <>
+      <div data-tour="ledger-kind" className="mg-tabs" style={{ marginBottom: 12 }}>
+        {LEDGER_KINDS.map(([k, l]) => <button key={k} className={'mg-tab' + (kind === k ? ' on' : '')} onClick={() => { setKind(k); setSel(''); setQ(''); }}>{l}</button>)}
+      </div>
+      <div data-tour="ledger-range" style={{ ...row, marginBottom: 12 }}>
+        <Field label="מתאריך"><input type="date" value={from} onChange={e => e.target.value && setFrom(e.target.value)} /></Field>
+        <Field label="עד תאריך"><input type="date" value={to} onChange={e => e.target.value && setTo(e.target.value)} /></Field>
+        {kind === 'cust' && docs.some(d => d.series === 'test') && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14, alignSelf: 'center' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={withTest} onChange={e => setWithTest(e.target.checked)} />כולל מסמכי ניסיון</label>}
+        {(view || tb) && <>
+          <button className="mg-btn ghost sm keep" onClick={print}>🖨 הדפסה / PDF</button>
+          <button className="mg-btn ghost sm keep" onClick={csv}>⬇ אקסל</button>
+          {kind === 'cust' && view && <button className="mg-btn ghost sm keep" onClick={mail}>✉ שלח ללקוח</button>}
+        </>}
+      </div>
+      {kind !== 'tb' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px,300px) 1fr', gap: 14, alignItems: 'start' }} className="ledger-grid">
+          <div data-tour="ledger-list" className="mg-card" style={{ padding: 10, maxHeight: 560, overflow: 'auto' }}>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder={kind === 'acc' ? 'חיפוש חשבון' : 'חיפוש שם או ח.פ.'} style={{ marginBottom: 8 }} />
+            {shown.map(x => (
+              <button key={x.key} className={'ledger-item' + (sel === x.key ? ' on' : '')} onClick={() => setSel(x.key)}>
+                <span>{x.name}</span>{x.bal != null && Math.abs(x.bal) >= 0.005 && <b className={x.bal > 0 ? 'owe' : ''}>{fmt(x.bal)}</b>}
+              </button>))}
+            {!shown.length && <div className="mg-empty" style={{ fontSize: 14 }}>{kind === 'cust' ? 'אין עדיין מסמכים ללקוחות.' : kind === 'supp' ? 'אין הוצאות משויכות לספקים.' : 'אין תנועות.'}</div>}
+          </div>
+          <div data-tour="ledger-table">
+            {!view ? <div className="mg-empty">בחר {kind === 'cust' ? 'לקוח' : kind === 'supp' ? 'ספק' : 'חשבון'} מהרשימה.</div> : <>
+              <div className="mg-stats" style={{ marginBottom: 12 }}>
+                <div className="mg-stat"><div className="lb">יתרת פתיחה</div><div className="vl" style={{ fontSize: 20 }}>{balText(view.open)}</div></div>
+                <div className="mg-stat"><div className="lb">חובה בתקופה</div><div className="vl" style={{ fontSize: 20 }}>{fmt(view.dr)}</div></div>
+                <div className="mg-stat"><div className="lb">זכות בתקופה</div><div className="vl" style={{ fontSize: 20 }}>{fmt(view.cr)}</div></div>
+                <div className="mg-stat"><div className="lb">{kind === 'cust' ? (view.close > 0.005 ? 'הלקוח חייב' : 'יתרת סגירה') : 'יתרת סגירה'}</div><div className="vl" style={{ fontSize: 20 }}>{balText(view.close)}</div></div>
+              </div>
+              <div className="mg-tblwrap"><table className="mg-tbl">
+                <thead><tr>{HEAD.map(h => <th key={h.t}>{h.t}</th>)}</tr></thead>
+                <tbody>{lines.map((r, i) => <tr key={i} style={i === 0 ? { background: '#faf6ee' } : null}>{r.map((c, j) => <td key={j} style={j >= 3 ? { whiteSpace: 'nowrap' } : null}>{c}</td>)}</tr>)}</tbody>
+                <tfoot><tr>{foot.map((c, j) => <td key={j}>{c}</td>)}</tr></tfoot>
+              </table></div>
+              {kind === 'supp' && <div className="mg-note" style={{ marginTop: 10 }}>הוצאות נרשמות כשהן משולמות, ולכן כל הוצאה מופיעה גם כחשבון וגם כתשלום.</div>}
+              {kind === 'acc' && <div className="mg-note" style={{ marginTop: 10 }}>מתוך פקודות היומן של המסמכים האמיתיים, ההכנסות וההוצאות: אותן פקודות שנכנסות לקובץ המבנה האחיד.</div>}
+            </>}
+          </div>
+        </div>
+      )}
+      {tb && (
+        <div data-tour="ledger-tb">
+          <div className="mg-tblwrap"><table className="mg-tbl">
+            <thead><tr><th>חשבון</th><th>שם</th><th>קבוצה</th><th>חובה</th><th>זכות</th><th>יתרה</th></tr></thead>
+            <tbody>{tb.rows.map(r => (
+              <tr key={r.key} style={{ cursor: 'pointer' }} onClick={() => { setKind('acc'); setSel(r.key); }}>
+                <td dir="ltr" style={{ textAlign: 'right' }}>{r.key}</td><td>{r.name}</td><td>{r.group}</td><td>{fmt(r.dr)}</td><td>{fmt(r.cr)}</td><td>{balText(r.bal)}</td></tr>))}
+              {!tb.rows.length && <tr><td colSpan={6}><div className="mg-empty">אין תנועות בתקופה.</div></td></tr>}</tbody>
+            <tfoot><tr><td></td><td>סה״כ</td><td></td><td>{fmt(tb.dr)}</td><td>{fmt(tb.cr)}</td><td>{Math.abs(tb.dr - tb.cr) < 0.02 ? '✓ מאוזן' : balText(r2(tb.dr - tb.cr))}</td></tr></tfoot>
+          </table></div>
+          <div className="mg-note" style={{ marginTop: 10 }}>תנועות התקופה בכל חשבון. לחיצה על שורה פותחת את הכרטסת שלו.</div>
+        </div>
+      )}
+    </>
   );
 }
 
