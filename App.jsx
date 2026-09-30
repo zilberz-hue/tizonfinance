@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.15.0';
+const VERSION = '1.15.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.15.1', date: '30.09.26', items: ['חיבור ל-iCount: הודעת שגיאה מפורטת, כדי לדעת בדיוק מה חסר.'] },
   { v: '1.15.0', date: '30.09.26', items: [
     'חיבור ישיר ל-iCount: המסמכים נמשכים מ-iCount בלי לייצא קבצים, ואפשר שמסמכים חדשים ייכנסו לבד פעם ביום.'] },
   { v: '1.14.0', date: '30.09.26', items: [
@@ -4424,14 +4425,23 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
   const [busy, setBusy] = useState('');
   const [res, setRes] = useState(null);
   const [auto, setAuto] = useState(!!book.icountAuto);
+  const [err, setErr] = useState('');
   const load = () => fnCall({ action: 'icount-status', book: book.id }).then(setSt).catch(() => setSt({ linked: false }));
   useEffect(() => { if (cloud && server) load(); }, [book.id, !!server]);
   if (!cloud || !server) return null;
   const link = async (unlink) => {
     setBusy('link');
-    try { const r = await fnCall({ action: 'icount-link', book: book.id, token, unlink }); setToken(''); load();
-          flash(unlink ? 'החיבור ל-iCount נותק' : `מחובר ל-iCount · ${r.recent} מסמכים בחודש האחרון`); }
-    catch (e) { flash(/token|401|auth/i.test(e.message) ? 'iCount לא קיבל את המפתח. בדוק שהעתקת את כל ה-API Token.' : 'החיבור נכשל · ' + e.message); }
+    try { const r = await fnCall({ action: 'icount-link', book: book.id, token, unlink }); setToken(''); load(); setErr('');
+          flash(unlink ? 'החיבור ל-iCount נותק' : r.warning ? 'המפתח נשמר, אבל iCount החזיר הודעה: ' + r.warning : `מחובר ל-iCount · ${r.recent} מסמכים בחודש האחרון`);
+          if (r.warning) setErr('iCount: ' + r.warning); }
+    catch (e) {
+      const m = e.message || '';
+      setErr(m === 'setup-role' ? 'השרת עוד לא יודע מי בעלי העסק: צריך להגדיר ב-Netlify את ALLOWED_EMAILS עם האימייל שלך, או להעלות מפתח שירות (גיבוי וענן ← דפי סליקה).'
+        : m === 'owners only' ? 'רק בעלי העסק יכולים לחבר את iCount.'
+        : /^HTTP 404/.test(m) ? 'השרת עדיין לא עודכן לגרסה הזו. חכה לסיום הבנייה ב-Netlify ונסה שוב.'
+        : /auth|token|401|403|login|unauthori|invalid/i.test(m) ? 'iCount לא קיבל את המפתח (' + m + '). בדוק שהעתקת את כל ה-API Token, ושהוא פעיל ב-iCount.'
+        : 'החיבור נכשל: ' + m);
+    }
     setBusy('');
   };
   const pull = async () => {
@@ -4441,7 +4451,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
       const have = new Set((data.documents || []).map(d => d.id));
       const byType = {}; r.docs.forEach(d => { const t = byType[d.type] = byType[d.type] || { n: 0, total: 0 }; t.n++; t.total += d.total; });
       setRes({ ...r, byType, fresh: r.docs.filter(d => !have.has(d.id)) });
-    } catch (e) { flash('המשיכה מ-iCount נכשלה · ' + e.message); }
+    } catch (e) { setErr('המשיכה מ-iCount נכשלה: ' + e.message); }
     setBusy('');
   };
   const save = async () => {
@@ -4467,6 +4477,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
           <Field label="API Token של iCount"><input dir="ltr" type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="API3E8-…" /></Field>
           <button className="mg-btn" disabled={busy === 'link' || token.trim().length < 10} onClick={() => link(false)}>{busy === 'link' ? 'בודק…' : 'חבר'}</button>
         </div>
+        {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
       </> : <>
         <div style={row}>
           <Field label="מתאריך"><input type="date" value={from} onChange={e => e.target.value && setFrom(e.target.value)} /></Field>
@@ -4475,6 +4486,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
         </div>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14, marginTop: 10 }}>
           <input type="checkbox" style={{ width: 'auto' }} checked={auto} onChange={e => setAutoSync(e.target.checked)} />מסמכים חדשים נכנסים לבד, פעם ביום (כשפותחים את העסק)</label>
+        {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
         {res && <div style={{ marginTop: 12 }}>
           <div className="mg-note">
             נמצאו <b>{res.docs.length}</b> מסמכים · <b>{res.fresh.length}</b> חדשים (השאר כבר כאן){res.skipped ? ` · ${res.skipped} שאינם מסמכי מס (הצעות, הזמנות) דולגו` : ''}.

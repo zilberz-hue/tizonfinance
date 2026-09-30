@@ -1,5 +1,4 @@
-/* Tizon Books 1.15.0 · server function, in one file (signing, mail, Tax Authority,
-   payment pages, the receipt PDF, the store link and iCount). Built from
+/* Tizon Books 1.15.1 · server function, in one file. Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -681,7 +680,7 @@ async function icountCall(token2, path, body, fetchImpl = fetch) {
     throw Object.assign(new Error("icount: not json (" + r.status + ")"), { status: 502 });
   }
   if (j?.status === false && j?.reason === "no_results_found") return { ...j, empty: true };
-  if (!r.ok || j?.status === false) throw Object.assign(new Error("icount: " + (j?.reason || j?.error_description || j?.message || r.status)), { status: r.status === 401 ? 401 : 400 });
+  if (!r.ok || j?.status === false) throw Object.assign(new Error("icount: " + [j?.reason, j?.error_description || j?.message, !j?.reason ? "HTTP " + r.status : ""].filter(Boolean).join(" \xB7 ")), { status: r.status === 401 ? 401 : 400 });
   return j;
 }
 var num = (v) => {
@@ -1228,7 +1227,7 @@ var books_mail_default = async (req) => {
     if (["icount-link", "icount-docs", "icount-status"].includes(body.action)) {
       const bookId = String(body.book || "");
       const role = await roleOfBook(email, bookId);
-      if (role !== "owner") return json(403, { error: "owners only" });
+      if (role !== "owner") return json(403, { error: dbOverride || await saJson() || env("ALLOWED_EMAILS") ? "owners only" : "setup-role" });
       const key = "icount:" + bookId;
       if (body.action === "icount-status") {
         const t2 = await secrets().get(key, { type: "json" }).catch(() => null);
@@ -1242,9 +1241,16 @@ var books_mail_default = async (req) => {
         const token2 = String(body.token || "").trim();
         if (token2.length < 10) return json(400, { error: "token" });
         const to2 = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), from2 = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-        const t2 = await icountDocs(token2, from2, to2, fetchOverride || fetch);
+        let recent = null, warning = "";
+        try {
+          recent = (await icountDocs(token2, from2, to2, fetchOverride || fetch)).count;
+        } catch (e) {
+          const m = String(e.message || e);
+          if (/auth|token|login|401|403|permission|denied|unauthori|invalid_(api|key|user)/i.test(m)) return json(400, { error: m });
+          warning = m;
+        }
         await secrets().setJSON(key, { token: token2, by: email, at: (/* @__PURE__ */ new Date()).toISOString() });
-        return json(200, { ok: true, linked: true, recent: t2.count });
+        return json(200, { ok: true, linked: true, recent, warning });
       }
       const t = await secrets().get(key, { type: "json" }).catch(() => null);
       if (!t?.token) return json(400, { error: "icount-not-linked" });
