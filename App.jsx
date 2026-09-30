@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.9.0';
+const VERSION = '1.9.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -758,6 +758,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.9.1', date: '30.09.26', items: ['תיקון בנייה ב-Netlify (תיקיית public).'] },
   { v: '1.9.0', date: '30.09.26', items: [
     'פריטים: קטלוג מוצרים ושירותים לכל עסק, עם ייבוא מ-iCount. בחשבונית בוחרים פריט והמחיר נכנס לבד.',
     'דפי סליקה של זד קרדיט: שולחים ללקוח קישור, הוא משלם בכרטיס (גם בתשלומים), ומיד מופקת חשבונית מס קבלה חתומה ונשלחת אליו במייל.',
