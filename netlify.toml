@@ -3,6 +3,12 @@
   command = "npm run build"
   publish = "dist"
 
+# The Firebase web config in App.jsx is public by design (it identifies the
+# project; the login and firestore.rules protect the data), so Netlify's
+# secret scan is told this one value is expected.
+[build.environment]
+  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "AIzaSyAOph6_Dr2ChyEi2iFF4yDT-p9jk3uDd3k"
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
