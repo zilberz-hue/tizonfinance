@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.20.0';
+const VERSION = '1.21.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -892,6 +892,30 @@ input:focus,select:focus{border-color:var(--gold)}
   main img,main table,main pre,main textarea{max-width:100%}
   .mg-note,.mg-card{overflow-wrap:anywhere}
 }
+
+/* The quick button: bottom-left, above everything but dialogs. */
+.fab{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+/* The help button moves to the other corner, so the two never cover each other. */
+.help-btn{left:auto !important;right:20px}
+@media (max-width:820px){.help-btn{right:14px}}
+.fab-btn{width:60px;height:60px;border-radius:50%;border:0;background:var(--green);color:#fff;font-size:32px;line-height:1;cursor:pointer;
+  box-shadow:0 8px 24px rgba(30,60,25,.35);display:flex;align-items:center;justify-content:center;touch-action:manipulation;transition:transform .15s}
+.fab.open .fab-btn{background:#3a352c;transform:rotate(90deg)}
+.fab-menu{display:flex;flex-direction:column;gap:8px;align-items:flex-end;animation:fabIn .14s ease-out}
+.fab-item{border:0;background:#fff;color:#121110;font-weight:700;font-size:16px;padding:12px 18px;border-radius:999px;cursor:pointer;white-space:nowrap;
+  box-shadow:0 4px 16px rgba(0,0,0,.18);font-family:inherit}
+.fab-item.main{background:var(--green);color:#fff}
+.fab-back{position:fixed;inset:0;background:rgba(20,20,15,.25);z-index:44}
+@keyframes fabIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (max-width:820px){
+  .hdr-act{display:none !important}
+  .hdr-set{padding:8px 12px !important;min-width:0 !important;width:auto !important;flex:0 0 auto !important}
+  .hdr-set-t{display:none}
+  main{padding-bottom:96px}
+  .mg-h{flex-direction:row !important;align-items:center !important;flex-wrap:nowrap !important}
+  .mg-h > div:first-child{flex:1;min-width:0}
+}
+@media print{.fab,.fab-back{display:none}}
 `;
 
 /* ===================================================================== ui */
@@ -1019,6 +1043,10 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.21.0', date: '30.09.26', items: [
+    '"＋ הכנסה" פותח את טופס המסמך המלא (חיפוש לקוח, פריטים, מחירים), כי הכנסה נרשמת בהפקת חשבונית. רישום ידני של הכנסה עם מסמך ממקום אחר נשאר כקישור בלשונית ההכנסות.',
+    'כפתור עגול מהיר בפינה (כמו ב-iCount): חשבונית מס קבלה, שאר סוגי המסמכים, דף סליקה והוצאה, מכל לשונית.',
+    'בנייד ראש העסק קומפקטי: הכפתורים הגדולים עברו לכפתור המהיר.'] },
   { v: '1.20.0', date: '30.09.26', items: [
     'אחרי הפקת מסמך: מסך "הופק" עם שליחה ללקוח בלחיצה אחת. בנייד ה-PDF עצמו נשלח בוואטסאפ (או בכל אפליקציה). במייל נשלח עותק חתום, והכתובת כבר ממולאת. הדפסה, PDF ו"מסמך נוסף" באותו מקום.',
     'ברשימת המסמכים בנייד: כפתור 📲 שתף ששולח את ה-PDF עצמו.'] },
@@ -1148,6 +1176,7 @@ const TOURS = {
     { t: 'dash-chart', title: 'שנה אחורה', text: 'הכנסות מול הוצאות ב-12 החודשים האחרונים.', since: '1.0.0' },
   ],
   docs: [
+    { t: 'fab', title: 'הכפתור המהיר', text: 'מכל לשונית: לחיצה על + בפינה פותחת חשבונית מס קבלה, שאר סוגי המסמכים, דף סליקה או הוצאה.', since: '1.21.0' },
     { t: 'quick-doc', title: 'הפקה מהירה', text: 'מכל מקום בעסק: לחיצה כאן פותחת מסמך חדש (חשבונית מס קבלה, או קבלה לעוסק פטור).', since: '1.18.0' },
     { t: 'book-tabs', title: 'העסקים שלך', text: 'יש לך הרשאה להפיק מסמכים ולנהל לקוחות. שתי הלשוניות כאן.', since: '1.7.0', roles: ['clerk'] },
     { t: 'docs-mode', title: 'ניסיון או אמיתי', text: 'במצב ניסיון המסמכים מסומנים T- ולא נספרים. במצב אמיתי הם מסמכי מס: מספור רציף, בלי מחיקה ובלי עריכה.', since: '1.2.0' },
@@ -2370,11 +2399,37 @@ function AllView({ books, datas, loading, onOpen, onStoreLogin }) {
 }
 
 /* ================================================================ one book */
+/* The round button in the corner, as in iCount: a new document, a payment
+   page or an expense, from any tab, in one or two taps. */
+function QuickFab({ book, canPay, canExpense, onDoc, onPay, onExpense }) {
+  const [open, setOpen] = useState(false);
+  /* A credit note is issued from the invoice it credits, not from here. */
+  const types = allowedTypes(book).filter(t => t !== '330');
+  if (!types.length) return null;
+  const go = (f) => { setOpen(false); f(); };
+  return (
+    <>
+      {open && <div className="fab-back" onClick={() => setOpen(false)} />}
+      <div className={'fab' + (open ? ' open' : '')} data-tour="fab">
+        {open && <div className="fab-menu" role="menu">
+          {types.map(t => <button key={t} role="menuitem" className={'fab-item' + (t === types[0] ? ' main' : '')} onClick={() => go(() => onDoc(t))}>🧾 {DOC_TYPES[t].label}</button>)}
+          {canPay && <button role="menuitem" className="fab-item" onClick={() => go(onPay)}>💳 דף סליקה</button>}
+          {canExpense && <button role="menuitem" className="fab-item" onClick={() => go(onExpense)}>＋ הוצאה</button>}
+        </div>}
+        <button className="fab-btn" aria-label={open ? 'סגור' : 'מסמך חדש'} aria-expanded={open}
+                onClick={() => open ? setOpen(false) : setOpen(true)}>{open ? '×' : '＋'}</button>
+      </div>
+    </>
+  );
+}
+
 function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone }) {
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
-  const [quickDoc, setQuickDoc] = useState(0);
+  const [quickDoc, setQuickDoc] = useState(null);
+  /* Straight to a new document (or payment page) from anywhere in the business. */
+  const openDoc = (type, pay) => { setSub('docs'); setQuickDoc({ at: Date.now(), type, pay }); };
   useEffect(() => { onTab?.(sub); }, [sub]);
   /* On a narrow screen the tabs scroll sideways: keep the chosen one in view. */
   useEffect(() => { document.querySelector('.book-tabs .mg-tab.on')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }, [sub]);
@@ -2507,12 +2562,13 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         <div><h2>{book.name}</h2>
           <div className="sub">{DEALERS[book.dealerType]}{book.taxId ? ' · ' + book.taxId : ''}{rate > 0 ? ` · מע״מ ${rate}%` : ''}
             {book.tenant ? ` · מקושר לחנות ${book.tenant}` : ''}</div></div>
-        {!ro && allowedTypes(book).length > 0 && <button data-tour="quick-doc" className="mg-btn" style={{ background: '#fff', color: 'var(--green)', fontWeight: 700 }}
-          onClick={() => { setSub('docs'); setQuickDoc(Date.now()); }}>🧾 {DOC_TYPES[allowedTypes(book)[0]].label}</button>}
+        {!ro && allowedTypes(book).length > 0 && <button data-tour="quick-doc" className="mg-btn hdr-act" style={{ background: '#fff', color: 'var(--green)', fontWeight: 700 }}
+          onClick={() => openDoc()}>🧾 {DOC_TYPES[allowedTypes(book)[0]].label}</button>}
         {role === 'owner' && <>
-          <button className="mg-btn ghost" onClick={() => setEdit({ kind: 'expense', rec: null })}>＋ הוצאה</button>
-          <button className="mg-btn ghost" onClick={() => setEdit({ kind: 'income', rec: null })}>＋ הכנסה</button>
-          <button className="mg-btn ghost" onClick={onEditBook}>הגדרות</button></>}
+          <button className="mg-btn ghost hdr-act" onClick={() => setEdit({ kind: 'expense', rec: null })}>＋ הוצאה</button>
+          {/* Income is recorded by issuing its document: the same form, with customers and items. */}
+          <button className="mg-btn ghost hdr-act" onClick={() => openDoc()}>＋ הכנסה</button>
+          <button className="mg-btn ghost hdr-set" onClick={onEditBook} aria-label="הגדרות העסק">⚙ <span className="hdr-set-t">הגדרות</span></button></>}
         {role !== 'owner' && <span className="mg-chip" style={{ background: 'rgba(255,255,255,.2)', color: '#fff' }}>{ROLES[role]}</span>}
       </div>
 
@@ -2537,7 +2593,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       </div>
 
       {sub === 'dash' && <Dash totals={tot} rate={rate} alerts={alerts} onSub={setSub} linked={!!book.tenant} />}
-      {sub === 'income' && <IncomeList income={ledger.income} linked={!!book.tenant}
+      {sub === 'income' && <IncomeList income={ledger.income} linked={!!book.tenant} onDoc={ro ? null : () => openDoc()} onManual={role === 'owner' ? () => setEdit({ kind: 'income', rec: null }) : null}
         onEdit={(r) => setEdit({ kind: 'income', rec: r })} onDel={(r) => remove('incomes', r.id, 'ההכנסה')} />}
       {sub === 'expenses' && !ro && <InboxCard book={book} server={server} role={role} flash={flash} refreshKey={inboxTick}
         onRecord={(it, g, reload) => {
@@ -2571,7 +2627,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
 
       {edit?.kind === 'income' && <IncomeForm rec={edit.rec} rate={rate} onClose={() => setEdit(null)}
         docLabel={!ro && allowedTypes(book).length ? DOC_TYPES[allowedTypes(book)[0]].label : ''}
-        onDoc={() => { setEdit(null); setSub('docs'); setQuickDoc(Date.now()); }}
+        onDoc={() => { setEdit(null); openDoc(); }}
         onSave={async (r) => { if (await save('incomes', r)) { flash('ההכנסה נשמרה'); setEdit(null); } }} />}
       {edit?.kind === 'expense' && <ExpenseForm rec={edit.rec} init={edit.init} rate={rate} suppliers={suppliers} onClose={() => setEdit(null)}
         onNewSupplier={(s) => save('suppliers', s)} onFile={cloud ? openExpFile : null}
@@ -2580,6 +2636,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
           if (edit.inboxId) { await inboxCall('inbox-mark', book.id, { id: edit.inboxId, status: 'done', expenseId: r.id }).catch(() => {}); setInboxTick(t => t + 1); }
           flash('ההוצאה נשמרה'); setEdit(null);
         }} />}
+      {!ro && <QuickFab book={book} canPay={!!payOk?.zcredit} canExpense={role === 'owner'} onDoc={(t) => openDoc(t)} onPay={() => openDoc(null, true)}
+                        onExpense={() => setEdit({ kind: 'expense', rec: null })} />}
       {edit?.kind === 'supplier' && <SupplierForm rec={edit.rec} onClose={() => setEdit(null)}
         onSave={async (r) => { if (await save('suppliers', r)) { flash('הספק נשמר'); setEdit(null); } }} />}
     </div>
@@ -2674,7 +2732,7 @@ function ShowMore({ n, total, onMore, cols = 9 }) {
     <button className="mg-btn ghost sm" onClick={onMore}>הצג עוד · מוצגות {n} מתוך {total}</button></td></tr>;
 }
 
-function IncomeList({ income, linked, onEdit, onDel }) {
+function IncomeList({ income, linked, onEdit, onDel, onDoc, onManual }) {
   const [month, setMonth] = useState('');
   const [src, setSrc] = useState('all');
   const [q, setQ] = useState('');
@@ -2685,6 +2743,10 @@ function IncomeList({ income, linked, onEdit, onDel }) {
   const [lim, more] = useLimit([month, src, q]);
   return (
     <>
+      {(onDoc || onManual) && <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        {onDoc && <button className="mg-btn" onClick={onDoc}>＋ הכנסה (הפקת חשבונית)</button>}
+        {onManual && <button className="mg-linkish" style={{ fontSize: 14 }} onClick={onManual}>רישום ידני של הכנסה שכבר יש לה מסמך ממקום אחר</button>}
+      </div>}
       <div data-tour="inc-filters" style={{ ...row, marginBottom: 12 }}>
         <Field label="חודש"><input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
         {linked && <Field label="מקור"><select value={src} onChange={e => setSrc(e.target.value)}>
@@ -3619,7 +3681,7 @@ function IssuedPanel({ d, book, busy, canShareFiles, canMail, onShare, onMail, o
   );
 }
 
-function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
+function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
                   payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh }) {
   const [busyId, setBusyId] = useState('');
   const [payForm, setPayForm] = useState(false);
@@ -3630,7 +3692,11 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
   const [src, setSrc] = useState('');
   const series = docSeries(book);
   /* The quick button at the top of the business opens a new document here at once. */
-  useEffect(() => { if (quick && !ro && allowedTypes(book).length) setForm({ type: allowedTypes(book)[0] }); }, [quick]);
+  useEffect(() => {
+    if (!quick || ro) return;
+    if (quick.pay) { setPayForm(true); return; }
+    if (allowedTypes(book).length) setForm({ type: quick.type && allowedTypes(book).includes(quick.type) ? quick.type : allowedTypes(book)[0] });
+  }, [quick]);
   const hasImp = docs.some(isImported);
   const list = docs.filter(d => (!month || d.date.startsWith(month)) && (!type || d.type === type)
                               && (!src || (src === 'import' ? isImported(d) : !isImported(d))))
