@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,8 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.15.0', date: '30.09.26', items: [
+    'חיבור ישיר ל-iCount: המסמכים נמשכים מ-iCount בלי לייצא קבצים, ואפשר שמסמכים חדשים ייכנסו לבד פעם ביום.'] },
   { v: '1.14.0', date: '30.09.26', items: [
     'עסקים כפולים: זיהוי ומיזוג לעסק אחד, בלי לאבד נתונים. העברה מהמכשיר לענן כבר לא יוצרת כפילויות.',
     'מסמכים שיובאו מ-iCount: הדפסת העתק נאמן למקור.'] },
@@ -1005,6 +1007,7 @@ const TOURS = {
     { t: 'tax-log', title: 'יומן פעולות', text: 'כל הפקה, הדפסה, שליחה וייצוא נרשמים כאן, ואי אפשר למחוק.', since: '1.3.0' },
   ],
   import: [
+    { t: 'imp-icount-live', title: 'חיבור ישיר ל-iCount', text: 'מפתח API מ-iCount, והמסמכים נמשכים לכאן בלי קבצים. אפשר גם שמסמכים חדשים ייכנסו לבד כל יום.', since: '1.15.0' },
     { t: 'imp-icount', title: 'ייבוא מ-iCount', text: 'מעלים את קובצי המבנה האחיד מ-iCount. המסמכים נשמרים כמו שהם, והזמנות שכבר בחנות לא נספרות פעמיים.', since: '1.4.0' },
     { t: 'imp-erp', title: 'המערכת הישנה', text: 'העתקת הכנסות, הוצאות וספקים מה-ERP הקודם.', since: '1.0.0' },
     { t: 'imp-danger', title: 'מחיקת העסק', text: 'מוחקת את הספר ואת כל הרשומות שלו. אי אפשר למחוק עסק שהופקו בו מסמכים אמיתיים.', since: '1.0.0' },
@@ -2226,6 +2229,20 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     try { await DB.patch(`books/${book.id}/payreqs`, p.id, f); patch('payreqs', l => l.map(x => x.id === p.id ? { ...x, ...f } : x)); flash('הקישור בוטל'); }
     catch { flash('הביטול נכשל (אולי כבר שולם). רענן ונסה שוב.'); }
   };
+  /* iCount, once a day: the last weeks' new documents come in by themselves. */
+  useEffect(() => {
+    if (!cloud || !server || role !== 'owner' || !book.icountAuto) return;
+    if (Date.now() - Date.parse(book.icountSyncAt || 0) < 12 * 3600e3) return;
+    (async () => {
+      try {
+        const to = todayIso(), from = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
+        const r = await icountPull(book, from, to);
+        const s0 = await icountSave(cols, data, r.docs);
+        await DB.patch('books', book.id, { icountSyncAt: new Date().toISOString() }).catch(() => {});
+        if (s0.n) { flash(`נכנסו ${s0.n} מסמכים חדשים מ-iCount`); onReload(); }
+      } catch (e) { console.warn('icount sync', e); }
+    })();
+  }, [book.id, !!server]);
   const payRefresh = async () => {
     const [p, d] = await Promise.all([cols.payreqs.list().catch(() => null), cols.documents.list().catch(() => null)]);
     if (p) patch('payreqs', () => p); if (d) patch('documents', () => d);
@@ -2301,7 +2318,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
                                             onLedger={clerk ? null : (c) => { setLedgerPick({ kind: 'cust', id: c.id, n: Date.now() }); setSub('ledger'); }}
                                             onReload={onReload} onStoreLogin={onStoreLogin} />}
       {sub === 'tax' && <TaxTab book={book} docs={data.documents || []} log={data.log || []} ro={ro} onLog={log} flash={flash} ledger={ledger} />}
-      {sub === 'import' && <ImportTab book={book} data={data} cols={cols} flash={flash} onDone={onReload} onDeleteBook={onDeleteBook} onLog={log} />}
+      {sub === 'import' && <ImportTab book={book} data={data} cols={cols} flash={flash} onDone={onReload} onDeleteBook={onDeleteBook} onLog={log} server={server} />}
 
       {edit?.kind === 'income' && <IncomeForm rec={edit.rec} rate={rate} onClose={() => setEdit(null)}
         onSave={async (r) => { if (await save('incomes', r)) { flash('ההכנסה נשמרה'); setEdit(null); } }} />}
@@ -2853,7 +2870,7 @@ function PnlTab({ totals, supName, book }) {
 /* The old ERP (tizon-event) kept everything in one Realtime Database node.
    Copied into this book under ids built from the old ones, so a second run
    skips what is already here. Its amounts never separated VAT. */
-function ImportTab({ book, data, cols, flash, onDone, onDeleteBook, onLog }) {
+function ImportTab({ book, data, cols, flash, onDone, onDeleteBook, onLog, server }) {
   const [old, setOld] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -2904,6 +2921,7 @@ function ImportTab({ book, data, cols, flash, onDone, onDeleteBook, onLog }) {
 
   return (
     <>
+      <ICountLive book={book} data={data} cols={cols} flash={flash} onDone={onDone} onLog={onLog} server={server} />
       <ICountImport book={book} data={data} cols={cols} flash={flash} onDone={onDone} onLog={onLog} />
       <div data-tour="imp-erp" className="mg-card" style={{ marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>ייבוא מה-ERP הישן</h3>
@@ -4362,6 +4380,120 @@ function CustomerForm({ rec, onSave, onClose }) {
   );
 }
 
+
+
+/* ============================================================ iCount, live */
+/* iCount's documents read directly (API v3, through the server, which keeps
+   the token). They are stored exactly like the unified-format import — the
+   same ids — so the two never double each other. Month by month, so a busy
+   year stays within what one request may return. */
+function monthsBetween(from, to) {
+  const out = []; let d = new Date(from.slice(0, 7) + '-01T00:00:00Z');
+  const end = new Date(to + 'T00:00:00Z');
+  while (d <= end) {
+    const a = d.toISOString().slice(0, 10); const n = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+    const b = new Date(n - 864e5).toISOString().slice(0, 10);
+    out.push([a < from ? from : a, b > to ? to : b]); d = n;
+  }
+  return out;
+}
+async function icountPull(book, from, to, onStep) {
+  const all = []; let raw = null, skipped = 0;
+  for (const [a, b] of monthsBetween(from, to)) {
+    const r = await fnCall({ action: 'icount-docs', book: book.id, from: a, to: b });
+    (r.docs || []).forEach(h => all.push(clean({ ...importedDoc(h, 'icount-api'), icountPdf: h.pdf || '' })));
+    raw = raw || r.raw; skipped += r.skipped || 0; onStep?.(a.slice(0, 7));
+  }
+  return { docs: all, raw, skipped };
+}
+async function icountSave(cols, data, docs) {
+  const have = new Set((data.documents || []).map(d => d.id));
+  const fresh = docs.filter(d => !have.has(d.id));
+  let n = 0;
+  for (let i = 0; i < fresh.length; i += 20) await Promise.all(fresh.slice(i, i + 20).map(d => withTimeout(cols.documents.put(d.id, d), 15000).then(() => n++).catch(() => {})));
+  const cp = planCustomers(data.customers || [], fresh.map(d => d.customer || {}), 'icount');
+  if (cp.add.length + cp.upd.length) await saveCustomers(cols.customers, [...cp.add, ...cp.upd]);
+  return { n, customers: cp.add.length };
+}
+function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
+  const [st, setSt] = useState(null);
+  const [token, setToken] = useState('');
+  const y = new Date().getFullYear();
+  const [from, setFrom] = useState(`${y}-01-01`);
+  const [to, setTo] = useState(todayIso());
+  const [busy, setBusy] = useState('');
+  const [res, setRes] = useState(null);
+  const [auto, setAuto] = useState(!!book.icountAuto);
+  const load = () => fnCall({ action: 'icount-status', book: book.id }).then(setSt).catch(() => setSt({ linked: false }));
+  useEffect(() => { if (cloud && server) load(); }, [book.id, !!server]);
+  if (!cloud || !server) return null;
+  const link = async (unlink) => {
+    setBusy('link');
+    try { const r = await fnCall({ action: 'icount-link', book: book.id, token, unlink }); setToken(''); load();
+          flash(unlink ? 'החיבור ל-iCount נותק' : `מחובר ל-iCount · ${r.recent} מסמכים בחודש האחרון`); }
+    catch (e) { flash(/token|401|auth/i.test(e.message) ? 'iCount לא קיבל את המפתח. בדוק שהעתקת את כל ה-API Token.' : 'החיבור נכשל · ' + e.message); }
+    setBusy('');
+  };
+  const pull = async () => {
+    setBusy('pull'); setRes(null);
+    try {
+      const r = await icountPull(book, from, to, (m) => setBusy('pull:' + m));
+      const have = new Set((data.documents || []).map(d => d.id));
+      const byType = {}; r.docs.forEach(d => { const t = byType[d.type] = byType[d.type] || { n: 0, total: 0 }; t.n++; t.total += d.total; });
+      setRes({ ...r, byType, fresh: r.docs.filter(d => !have.has(d.id)) });
+    } catch (e) { flash('המשיכה מ-iCount נכשלה · ' + e.message); }
+    setBusy('');
+  };
+  const save = async () => {
+    setBusy('save');
+    const r = await icountSave(cols, data, res.fresh);
+    await onLog({ action: 'import-icount', title: `iCount (חיבור ישיר): ${r.n} מסמכים, ${r.customers} לקוחות חדשים`, series: 'test' });
+    setBusy(''); setRes(null); flash(`נשמרו ${r.n} מסמכים מ-iCount`); onDone();
+  };
+  const setAutoSync = async (v) => {
+    setAuto(v);
+    try { await DB.patch('books', book.id, { icountAuto: v }); flash(v ? 'מסמכים חדשים מ-iCount ייכנסו לבד, פעם ביום' : 'הסנכרון האוטומטי כובה'); } catch { flash('השמירה נכשלה'); }
+  };
+  return (
+    <div data-tour="imp-icount-live" className="mg-card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginTop: 0 }}>חיבור ישיר ל-iCount {st?.linked && <span className="mg-chip ok">מחובר</span>}</h3>
+      {!st ? <div className="mg-empty">בודק…</div> : !st.linked ? <>
+        <p style={{ marginTop: 0, fontSize: 14 }}>המסמכים של iCount נכנסים לכאן בלי לייצא קבצים: מה שכבר הופק, ומעכשיו גם כל מסמך חדש. קריאה בלבד; ב-iCount לא משתנה דבר.</p>
+        <ol style={{ fontSize: 14, lineHeight: 1.8, paddingInlineStart: 18, marginTop: 0 }}>
+          <li>ב-iCount: אזור אישי ← הגדרות ← <b>API</b> ← יצירת API Token חדש.</li>
+          <li>מעתיקים את המפתח (מתחיל ב-<span dir="ltr">API3</span>) ומדביקים כאן. הוא נשמר רק בשרת.</li>
+        </ol>
+        <div style={row}>
+          <Field label="API Token של iCount"><input dir="ltr" type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="API3E8-…" /></Field>
+          <button className="mg-btn" disabled={busy === 'link' || token.trim().length < 10} onClick={() => link(false)}>{busy === 'link' ? 'בודק…' : 'חבר'}</button>
+        </div>
+      </> : <>
+        <div style={row}>
+          <Field label="מתאריך"><input type="date" value={from} onChange={e => e.target.value && setFrom(e.target.value)} /></Field>
+          <Field label="עד תאריך"><input type="date" value={to} onChange={e => e.target.value && setTo(e.target.value)} /></Field>
+          <button className="mg-btn" disabled={!!busy} onClick={pull}>{busy.startsWith('pull') ? `מושך… ${busy.slice(5)}` : '⬇ משוך מסמכים'}</button>
+        </div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14, marginTop: 10 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={auto} onChange={e => setAutoSync(e.target.checked)} />מסמכים חדשים נכנסים לבד, פעם ביום (כשפותחים את העסק)</label>
+        {res && <div style={{ marginTop: 12 }}>
+          <div className="mg-note">
+            נמצאו <b>{res.docs.length}</b> מסמכים · <b>{res.fresh.length}</b> חדשים (השאר כבר כאן){res.skipped ? ` · ${res.skipped} שאינם מסמכי מס (הצעות, הזמנות) דולגו` : ''}.
+            <div style={{ marginTop: 4 }}>{Object.entries(res.byType).map(([t, v]) => <span key={t} className="mg-chip" style={{ marginInlineEnd: 6 }}>{DOC_TYPES[t]?.label}: {v.n} · {fmt(v.total)}</span>)}</div>
+          </div>
+          {res.docs[0] && <details style={{ marginTop: 8, fontSize: 13 }}><summary>בדיקה: המסמך הראשון כפי שנקלט, מול מה ש-iCount שלח</summary>
+            <div style={{ ...grid, marginTop: 8 }}>
+              <pre dir="ltr" style={{ whiteSpace: 'pre-wrap', background: 'var(--soft)', padding: 8, borderRadius: 8, maxHeight: 240, overflow: 'auto' }}>{JSON.stringify({ type: res.docs[0].type, number: res.docs[0].number, date: res.docs[0].date, customer: res.docs[0].customer?.name, net: res.docs[0].net, vat: res.docs[0].vat, total: res.docs[0].total, lines: res.docs[0].lines, payments: res.docs[0].payments }, null, 1)}</pre>
+              <pre dir="ltr" style={{ whiteSpace: 'pre-wrap', background: '#f6f6f6', padding: 8, borderRadius: 8, maxHeight: 240, overflow: 'auto' }}>{JSON.stringify(res.raw, null, 1)}</pre>
+            </div></details>}
+          <div style={{ ...row, marginTop: 10 }}>
+            <button className="mg-btn" disabled={busy === 'save' || !res.fresh.length} onClick={save}>{busy === 'save' ? 'שומר…' : `שמור ${res.fresh.length} מסמכים חדשים`}</button>
+          </div>
+        </div>}
+        <div style={{ marginTop: 12 }}><button className="mg-btn ghost sm" onClick={() => { if (window.confirm('לנתק את החיבור ל-iCount? המסמכים שכבר נקלטו נשארים.')) link(true); }}>נתק</button></div>
+      </>}
+    </div>
+  );
+}
 
 /* ============================================================ duplicates */
 /* The same business twice (typically: made on a device before the cloud, and

@@ -1,5 +1,5 @@
-/* Tizon Books 1.11.0 · server function, in one file (signing, mail, Tax Authority,
-   payment pages, the receipt PDF and the store link). Built from
+/* Tizon Books 1.15.0 · server function, in one file (signing, mail, Tax Authority,
+   payment pages, the receipt PDF, the store link and iCount). Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -112,27 +112,27 @@ async function zcSession({ key, pay, base, secret, fetchImpl = fetch, url = ZC_U
   return { sessionId: data.SessionId || "", url: data.SessionUrl };
 }
 function readCallback(b) {
-  const pick = (...ks) => {
+  const pick2 = (...ks) => {
     for (const k of ks) if (b?.[k] != null && b[k] !== "") return b[k];
     return "";
   };
-  const last4 = String(pick("CardNum", "CardNumber", "Last4Digits", "CardSuffix")).replace(/\D/g, "").slice(-4);
-  const total = pick("Total", "TransactionSum", "Amount", "Sum");
+  const last4 = String(pick2("CardNum", "CardNumber", "Last4Digits", "CardSuffix")).replace(/\D/g, "").slice(-4);
+  const total = pick2("Total", "TransactionSum", "Amount", "Sum");
   return {
     error: !!(b?.HasError === true || b?.HasError === "true"),
-    sessionId: String(pick("SessionId", "SessionID", "Guid")),
-    uniqueId: String(pick("UniqueID", "UniqueId")),
-    reference: String(pick("ReferenceNumber", "ReferenceID", "TransactionID")),
-    approval: String(pick("ApprovalNumber", "AuthNum", "ApprovalNum")),
+    sessionId: String(pick2("SessionId", "SessionID", "Guid")),
+    uniqueId: String(pick2("UniqueID", "UniqueId")),
+    reference: String(pick2("ReferenceNumber", "ReferenceID", "TransactionID")),
+    approval: String(pick2("ApprovalNumber", "AuthNum", "ApprovalNum")),
     last4,
-    installments: Number(pick("Installments", "NumOfPayments", "PaymentsNumber")) || 1,
-    j: String(pick("J")),
+    installments: Number(pick2("Installments", "NumOfPayments", "PaymentsNumber")) || 1,
+    j: String(pick2("J")),
     total: total === "" ? null : r2(total),
-    card: String(pick("CardName", "CardBrand", "Brand")),
-    name: String(pick("CustomerName", "HolderName")),
-    email: String(pick("CustomerEmail", "Email")),
-    phone: String(pick("CustomerPhone", "PhoneNumber")),
-    holderId: String(pick("HolderId", "HolderID"))
+    card: String(pick2("CardName", "CardBrand", "Brand")),
+    name: String(pick2("CustomerName", "HolderName")),
+    email: String(pick2("CustomerEmail", "Email")),
+    phone: String(pick2("CustomerPhone", "PhoneNumber")),
+    holderId: String(pick2("HolderId", "HolderID"))
   };
 }
 async function issueForPayment(db, bookId, payId, cb, { now = /* @__PURE__ */ new Date(), version = "" } = {}) {
@@ -523,7 +523,7 @@ async function docPdf(book, d, opts = {}) {
   };
   const money2 = (n) => "\u20AA" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const heDate2 = (s) => s ? String(s).slice(0, 10).split("-").reverse().join("/") : "";
-  const num = (d.series === "test" ? "T-" : "") + d.number;
+  const num2 = (d.series === "test" ? "T-" : "") + d.number;
   const label = DOC_LABELS[d.type] || "\u05DE\u05E1\u05DE\u05DA";
   const lined = ["320", "305", "330", "300"].includes(String(d.type));
   const paid = ["320", "400"].includes(String(d.type));
@@ -567,7 +567,7 @@ async function docPdf(book, d, opts = {}) {
   y = Math.min(y, H - 48 - 62);
   page.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 2.5, color: gold });
   y -= 30;
-  const tw = text(`${label} \u05DE\u05E1\u05F3 ${num}`, R, y, { size: 20, bold: true });
+  const tw = text(`${label} \u05DE\u05E1\u05F3 ${num2}`, R, y, { size: 20, bold: true });
   const badge = opts.copy ? "\u05D4\u05E2\u05EA\u05E7 \u05E0\u05D0\u05DE\u05DF \u05DC\u05DE\u05E7\u05D5\u05E8" : "\u05DE\u05E7\u05D5\u05E8";
   const bw = width(badge, 11, true) + 16, bx = R - tw - 12 - bw;
   page.drawRectangle({ x: bx, y: y - 5, width: bw, height: 20, borderColor: gold, borderWidth: 1.5 });
@@ -658,10 +658,117 @@ async function docPdf(book, d, opts = {}) {
     y -= 14 * ls.length + 16;
   }
   footer();
-  pdf.setTitle(`${label} ${num}`);
+  pdf.setTitle(`${label} ${num2}`);
   pdf.setCreator("Tizon Books" + (opts.version ? " " + opts.version : ""));
   pdf.setAuthor(bizName);
   return Buffer.from(await pdf.save({ useObjectStreams: false }));
+}
+
+// netlify/lib/icount.mjs
+var BASE = "https://api.icount.co.il/api/v3.php";
+var IC_TYPES = { invoice: "305", invrec: "320", receipt: "400", refund: "330", deal: "300" };
+async function icountCall(token2, path, body, fetchImpl = fetch) {
+  const r = await fetchImpl(BASE + path, {
+    method: "POST",
+    headers: { authorization: "Bearer " + token2, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body || {})
+  });
+  const text = await r.text();
+  let j;
+  try {
+    j = text ? JSON.parse(text) : {};
+  } catch {
+    throw Object.assign(new Error("icount: not json (" + r.status + ")"), { status: 502 });
+  }
+  if (j?.status === false && j?.reason === "no_results_found") return { ...j, empty: true };
+  if (!r.ok || j?.status === false) throw Object.assign(new Error("icount: " + (j?.reason || j?.error_description || j?.message || r.status)), { status: r.status === 401 ? 401 : 400 });
+  return j;
+}
+var num = (v) => {
+  const n = Number(String(v ?? "").replace(/[,₪\s]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+};
+var has = (v) => v !== void 0 && v !== null && v !== "";
+var pick = (o, ...ks) => {
+  for (const k of ks) if (o && has(o[k])) return o[k];
+  return void 0;
+};
+function isoDate(v) {
+  const s = String(v || "").trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  if (/^\d{9,}$/.test(s)) {
+    const d = new Date(Number(s) * (s.length > 11 ? 1 : 1e3));
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  }
+  return "";
+}
+var listOf = (x) => Array.isArray(x) ? x : x && typeof x === "object" ? Object.values(x) : [];
+function mapDoc(d) {
+  const kind = String(pick(d, "doctype", "doc_type", "type") || "").toLowerCase();
+  const type = IC_TYPES[kind];
+  if (!type) return null;
+  const c = d.client && typeof d.client === "object" ? d.client : {};
+  const vat = num(pick(d, "totalvat", "total_vat", "vat", "vat_sum", "vat_amount"));
+  const withVat = pick(d, "totalwithvat", "total_with_vat", "sum_with_vat");
+  let total, net;
+  if (has(withVat)) {
+    total = num(withVat);
+    net = has(pick(d, "totalsum", "total_without_vat", "sum_without_vat")) ? num(pick(d, "totalsum", "total_without_vat", "sum_without_vat")) : total - vat;
+  } else {
+    total = num(pick(d, "total", "totalsum", "sum", "amount", "totalpaid"));
+    net = total - vat;
+  }
+  const lines = listOf(pick(d, "items", "doc_items")).map((it) => ({
+    desc: String(pick(it, "description", "name", "item_name", "details") || "\u05E9\u05D5\u05E8\u05D4"),
+    qty: num(pick(it, "quantity", "qty")) || 1,
+    price: num(pick(it, "unitprice", "unit_price", "price", "unitprice_novat"))
+  }));
+  const sum = lines.reduce((a, l) => a + l.qty * l.price, 0);
+  if (vat && lines.length && Math.abs(sum - total) < 0.05 && Math.abs(sum - net) > 0.05) lines.forEach((l) => {
+    l.price = Math.round(l.price / (total / net) * 100) / 100;
+  });
+  const payments = [];
+  const pay = (kind2, arr, f = (p) => p) => listOf(arr).forEach((p) => {
+    const a = num(pick(f(p), "sum", "amount", "total"));
+    if (a) payments.push({ kind: kind2, amount: a, date: isoDate(pick(f(p), "date", "paydate", "payment_date")) || isoDate(pick(d, "dateissued", "doc_date", "date")), details: String(pick(f(p), "card_number", "cc_last4", "cheque_num", "num", "reference") || "") });
+  });
+  if (d.cash && has(pick(d.cash, "sum"))) payments.push({ kind: "\u05DE\u05D6\u05D5\u05DE\u05DF", amount: num(d.cash.sum), date: isoDate(pick(d, "dateissued", "doc_date", "date")), details: "" });
+  pay("\u05DB\u05E8\u05D8\u05D9\u05E1 \u05D0\u05E9\u05E8\u05D0\u05D9", d.cc && !Array.isArray(d.cc) && has(d.cc.sum) ? [d.cc] : d.cc);
+  pay("\u05E6\u05F3\u05E7", d.cheques || d.checks);
+  pay("\u05D4\u05E2\u05D1\u05E8\u05D4 \u05D1\u05E0\u05E7\u05D0\u05D9\u05EA", d.banktransfer && !Array.isArray(d.banktransfer) && has(d.banktransfer.sum) ? [d.banktransfer] : d.banktransfer || d.bank_transfers);
+  pay("\u05D0\u05D7\u05E8", d.other || d.paypal);
+  if (!payments.length && ["320", "400"].includes(type)) payments.push({ kind: "\u05DC\u05E4\u05D9 iCount", amount: total, date: isoDate(pick(d, "dateissued", "doc_date", "date")), details: "" });
+  return {
+    type,
+    num: String(pick(d, "docnum", "doc_number", "number") ?? ""),
+    date: isoDate(pick(d, "dateissued", "doc_date", "date", "issue_date", "created")),
+    customer: {
+      name: String(pick(d, "client_name", "clientname", "name") ?? pick(c, "client_name", "name") ?? ""),
+      taxId: String(pick(d, "vat_id", "client_vat_id", "client_vatid") ?? pick(c, "vat_id") ?? ""),
+      email: String(pick(d, "email", "client_email") ?? pick(c, "email") ?? ""),
+      phone: String(pick(d, "phone", "client_phone", "mobile") ?? pick(c, "phone") ?? ""),
+      address: String(pick(d, "client_address", "address") ?? "")
+    },
+    lines,
+    payments,
+    total,
+    vat,
+    net,
+    withholding: num(pick(d, "tax_deduction", "withholding", "deduction")),
+    cancelled: [1, "1", true, "true"].includes(pick(d, "is_cancelled", "cancelled", "canceled")),
+    base: null,
+    pdf: String(pick(d, "pdf_link", "doc_url", "url") || "")
+  };
+}
+async function icountDocs(token2, from, to, fetchImpl = fetch) {
+  const r = await icountCall(token2, "/doc/search", { start_date: from, end_date: to, max_results: 1e3, detail_level: 10 }, fetchImpl);
+  if (r.empty) return { docs: [], raw: null, count: 0 };
+  const list = listOf(pick(r, "results_list", "docs", "data", "results") || []);
+  const docs = list.map(mapDoc).filter((x) => x && x.num);
+  return { docs, raw: list[0] || null, count: list.length, skipped: list.length - docs.length };
 }
 
 // netlify/lib/store.mjs
@@ -769,7 +876,7 @@ async function storeCreateCustomer(idToken, tenant, c, fetchImpl = fetch) {
 }
 
 // netlify/functions/books-mail.mjs
-var VERSION = "1.11.0";
+var VERSION = "1.15.0";
 var JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
 var env = (k) => (process.env[k] || "").trim();
 var json = (status, body) => new Response(JSON.stringify(body), {
@@ -864,6 +971,13 @@ async function storeId() {
   if (t.refreshToken !== link.refreshToken) await secrets().setJSON("store-link", { ...link, refreshToken: t.refreshToken });
   storeCache = t;
   return t.idToken;
+}
+async function roleOfBook(email, bookId) {
+  if (dbOverride || await saJson()) {
+    const b = /^[\w-]{1,80}$/.test(bookId) ? await (await adminDb()).get(`books/${bookId}`) : null;
+    return b ? roleIn(b, email) : "";
+  }
+  return env("ALLOWED_EMAILS") ? "owner" : "";
 }
 async function mayUseStore(email, tenant) {
   if (dbOverride || await saJson()) {
@@ -1110,6 +1224,33 @@ var books_mail_default = async (req) => {
       });
       const j = await r.json().catch(() => ({}));
       return json(200, { approved: !!j.approved, confirmation_number: j.confirmation_number || "0", message: j.message, status: j.status || r.status });
+    }
+    if (["icount-link", "icount-docs", "icount-status"].includes(body.action)) {
+      const bookId = String(body.book || "");
+      const role = await roleOfBook(email, bookId);
+      if (role !== "owner") return json(403, { error: "owners only" });
+      const key = "icount:" + bookId;
+      if (body.action === "icount-status") {
+        const t2 = await secrets().get(key, { type: "json" }).catch(() => null);
+        return json(200, { linked: !!t2?.token, at: t2?.at || null });
+      }
+      if (body.action === "icount-link") {
+        if (body.unlink) {
+          await secrets().delete(key);
+          return json(200, { ok: true, linked: false });
+        }
+        const token2 = String(body.token || "").trim();
+        if (token2.length < 10) return json(400, { error: "token" });
+        const to2 = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), from2 = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+        const t2 = await icountDocs(token2, from2, to2, fetchOverride || fetch);
+        await secrets().setJSON(key, { token: token2, by: email, at: (/* @__PURE__ */ new Date()).toISOString() });
+        return json(200, { ok: true, linked: true, recent: t2.count });
+      }
+      const t = await secrets().get(key, { type: "json" }).catch(() => null);
+      if (!t?.token) return json(400, { error: "icount-not-linked" });
+      const from = String(body.from || ""), to = String(body.to || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return json(400, { error: "dates" });
+      return json(200, { ok: true, ...await icountDocs(t.token, from, to, fetchOverride || fetch) });
     }
     if (body.action === "store-link") {
       if (!env("ALLOWED_EMAILS")) return json(403, { error: "set ALLOWED_EMAILS first" });
