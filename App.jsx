@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.15.2';
+const VERSION = '1.15.3';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.15.3', date: '30.09.26', items: ['מסמכים ממוינים מהחדש לישן לפי תאריך המסמך.', 'חיבור ל-iCount: זיהוי בעלות גם כשמפתח השירות שהועלה שייך לפרויקט אחר.'] },
   { v: '1.15.2', date: '30.09.26', items: ['השרת עובד בלי הגדרות נוספות ב-Netlify: מזהה הפרויקט מובנה, והרשאות נבדקות לפי הכניסה שלך.', 'עסק כפול ריק נמחק בלחיצה אחת ממסך כל העסקים.'] },
   { v: '1.15.1', date: '30.09.26', items: ['חיבור ל-iCount: הודעת שגיאה מפורטת, כדי לדעת בדיוק מה חסר.'] },
   { v: '1.15.0', date: '30.09.26', items: [
@@ -3114,7 +3115,8 @@ function DocsTab({ book, docs, customers = [], items = [], onIssue, onPrinted, o
   const hasImp = docs.some(isImported);
   const list = docs.filter(d => (!month || d.date.startsWith(month)) && (!type || d.type === type)
                               && (!src || (src === 'import' ? isImported(d) : !isImported(d))))
-    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    /* Newest first: by the document's date, then by its number. */
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || ((Number(b.number) || 0) - (Number(a.number) || 0)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
   const openInv = docs.filter(d => d.type === '305' && d.series === series && openOf(d, docs) > 0.009);
 
   const print = async (d) => { printHTML(docHTML(book, d, (d.printCount || 0) > 0)); onPrinted(d); };
@@ -3413,7 +3415,7 @@ async function fnCall(body) {
   const idToken = await cloud.auth.currentUser.getIdToken();
   const r = await fetch(FN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, idToken }) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+  if (!r.ok) throw Object.assign(new Error(j.error || 'HTTP ' + r.status), { body: j });
   return j;
 }
 const b64 = (buf) => { let s = ''; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
@@ -4438,7 +4440,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
     catch (e) {
       const m = e.message || '';
       setErr(m === 'setup-role' ? 'השרת עוד לא יודע מי בעלי העסק: צריך להגדיר ב-Netlify את ALLOWED_EMAILS עם האימייל שלך, או להעלות מפתח שירות (גיבוי וענן ← דפי סליקה).'
-        : m === 'owners only' ? 'רק בעלי העסק יכולים לחבר את iCount.'
+        : m === 'owners only' ? 'השרת לא זיהה אותך כבעל העסק הזה. פרטים לבדיקה: ' + JSON.stringify(e.body?.detail || {})
         : /BOOKS_PROJECT_ID/.test(m) ? 'השרת עדיין בגרסה ישנה. חכה לסיום הבנייה ב-Netlify ונסה שוב.'
         : /^HTTP 404/.test(m) ? 'השרת עדיין לא עודכן לגרסה הזו. חכה לסיום הבנייה ב-Netlify ונסה שוב.'
         : /auth|token|401|403|login|unauthori|invalid/i.test(m) ? 'iCount לא קיבל את המפתח (' + m + '). בדוק שהעתקת את כל ה-API Token, ושהוא פעיל ב-iCount.'

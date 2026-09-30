@@ -1,4 +1,4 @@
-/* Tizon Books 1.15.2 · server function, in one file. Built from
+/* Tizon Books 1.15.3 · server function, in one file. Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -976,7 +976,10 @@ var FSB = (p) => `https://firestore.googleapis.com/v1/projects/${projectId()}/da
 async function bookAs(idToken, bookId) {
   if (!/^[\w-]{1,80}$/.test(bookId)) return null;
   const r = await (fetchOverride || fetch)(FSB("/books/" + bookId), { headers: { authorization: "Bearer " + idToken } });
-  if (!r.ok) return null;
+  if (!r.ok) {
+    if (lastRole) lastRole.http = r.status;
+    return null;
+  }
   const j = await r.json().catch(() => null);
   return j?.fields ? { ...fromFields(j.fields), id: bookId } : null;
 }
@@ -996,12 +999,25 @@ async function booksAs(idToken, email) {
   }
   return Object.values(out);
 }
+var lastRole = null;
 async function roleOfBook(email, bookId, idToken) {
+  lastRole = { email, book: bookId };
   if (dbOverride || await saJson()) {
-    const b2 = /^[\w-]{1,80}$/.test(bookId) ? await (await adminDb()).get(`books/${bookId}`) : null;
-    return b2 ? roleIn(b2, email) : "";
+    try {
+      const b2 = /^[\w-]{1,80}$/.test(bookId) ? await (await adminDb()).get(`books/${bookId}`) : null;
+      if (b2) {
+        lastRole.via = "key";
+        return roleIn(b2, email);
+      }
+      lastRole.key = "no-book";
+    } catch (e) {
+      lastRole.key = String(e.message || e).slice(0, 80);
+    }
   }
   const b = await bookAs(idToken, bookId);
+  lastRole.via = "login";
+  lastRole.found = !!b;
+  if (b) lastRole.owners = b.owners;
   return b ? roleIn(b, email) : "";
 }
 async function ownsAny(email, idToken) {
@@ -1253,7 +1269,7 @@ var books_mail_default = async (req) => {
     if (["icount-link", "icount-docs", "icount-status"].includes(body.action)) {
       const bookId = String(body.book || "");
       const role = await roleOfBook(email, bookId, String(body.idToken || ""));
-      if (role !== "owner") return json(403, { error: "owners only" });
+      if (role !== "owner") return json(403, { error: "owners only", detail: lastRole });
       const key = "icount:" + bookId;
       if (body.action === "icount-status") {
         const t2 = await secrets().get(key, { type: "json" }).catch(() => null);
@@ -1313,7 +1329,7 @@ var books_mail_default = async (req) => {
         return json(400, { error: "not json" });
       }
       if (j.type !== "service_account" || !j.private_key || !j.client_email) return json(400, { error: "not a service account file" });
-      if (env("BOOKS_PROJECT_ID") && j.project_id !== env("BOOKS_PROJECT_ID")) return json(400, { error: `project ${j.project_id}, expected ${env("BOOKS_PROJECT_ID")}` });
+      if (j.project_id !== projectId()) return json(400, { error: `project ${j.project_id}, expected ${projectId()}` });
       await secrets().set("sa.json", JSON.stringify(j));
       adminCache = null;
       return json(200, { ok: true, project: j.project_id, account: j.client_email });
