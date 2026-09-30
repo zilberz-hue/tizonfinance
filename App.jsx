@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.15.5';
+const VERSION = '1.16.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -222,7 +222,61 @@ async function storeRead(tenant, name) {
   return s.docs.map(d => ({ ...d.data(), id: d.id }));
 }
 
-const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs'];
+const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive'];
+
+/* History imported from iCount is kept packed: a few hundred documents to a
+   record in books/{book}/archive, instead of one record each. Thousands of
+   old documents then cost a handful of reads each time a business opens,
+   not thousands (the free plan allows 50,000 reads a day). They are read
+   only, so nothing is lost by packing them; in memory they are ordinary
+   documents. */
+const ARCH_BYTES = 600 * 1024;
+const utf8Len = (s) => new TextEncoder().encode(s).length;
+function archiveDocs(chunks) {
+  const out = [];
+  (chunks || []).filter(c => c.kind === 'documents').sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    .forEach(c => { try { JSON.parse(c.data || '[]').forEach(d => out.push({ ...d, _arch: true })); } catch { /* a damaged chunk is skipped */ } });
+  return out;
+}
+async function archiveWrite(bookId, docs, oldChunks = []) {
+  const col = bookCol(bookId, 'archive');
+  const list = [...docs].map(({ _arch, ...d }) => d).sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id)));
+  const chunks = []; let cur = [], size = 2;
+  for (const d of list) {
+    const j = JSON.stringify(d), n = utf8Len(j) + 1;
+    if (cur.length && size + n > ARCH_BYTES) { chunks.push(cur); cur = []; size = 2; }
+    cur.push(j); size += n;
+  }
+  if (cur.length) chunks.push(cur);
+  const ids = chunks.map((_, i) => 'docs_' + String(i).padStart(3, '0'));
+  for (let i = 0; i < chunks.length; i++) {
+    const data = '[' + chunks[i].join(',') + ']';
+    const was = oldChunks.find(c => c.id === ids[i]);
+    if (!was || was.data !== data) await withTimeout(col.put(ids[i], { kind: 'documents', n: chunks[i].length, data, updatedAt: new Date().toISOString() }), 30000);
+  }
+  for (const c of oldChunks.filter(c => c.kind === 'documents' && !ids.includes(c.id))) await col.del(c.id).catch(() => {});
+  return list.length;
+}
+/* Adds imported documents to the packed history, without doubling. */
+async function archiveAdd(bookId, data, docs) {
+  const have = archiveDocs(data.archive);
+  const ids = new Set(have.map(d => d.id));
+  const all = [...have, ...docs.filter(d => !ids.has(d.id))];
+  await archiveWrite(bookId, all, data.archive || []);
+  return all.length - have.length;
+}
+/* Imported documents still kept one per record (before this version) move into the pack, once. */
+async function archiveMigrate(book, data, onStep) {
+  const loose = (data.documents || []).filter(d => d.series === 'import' && !d._arch);
+  if (!loose.length) return 0;
+  await archiveAdd(book.id, data, loose);
+  let n = 0;
+  for (let i = 0; i < loose.length; i += 25) {
+    await Promise.all(loose.slice(i, i + 25).map(d => bookCol(book.id, 'documents').del(d.id).then(() => n++).catch(() => {})));
+    onStep?.(Math.min(i + 25, loose.length), loose.length);
+  }
+  return n;
+}
 const bookCol = (bookId, name) => ({
   list: () => DB.list(`books/${bookId}/${name}`),
   put: (id, data) => DB.put(`books/${bookId}/${name}`, id, data),
@@ -477,6 +531,8 @@ async function loadBook(book) {
   const res = await Promise.all(COLS.map(c => withTimeout(bookCol(book.id, c).list()).catch(() => null)));
   const out = { errors: [], orders: [], docs: [], storeErr: '', storeLogin: false };
   COLS.forEach((c, i) => { out[c] = res[i] || []; if (!res[i]) out.errors.push(c); });
+  const packed = archiveDocs(out.archive);
+  if (packed.length) { const ids = new Set(out.documents.map(d => d.id)); out.documents = [...out.documents, ...packed.filter(d => !ids.has(d.id))]; }
   const t = tenantId(book.tenant);
   if (t) {
     try {
@@ -862,6 +918,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.16.0', date: '30.09.26', items: [
+    'היסטוריה מ-iCount נשמרת ארוזה: אלפי מסמכים ישנים נקראים בכמה קריאות בלבד, כך שהמכסה החינמית היומית של Firebase לא נגמרת.',
+    'שדות המפתח (iCount, זד קרדיט) לא מתמלאים יותר אוטומטית מסיסמאות שמורות בדפדפן.'] },
   { v: '1.15.5', date: '30.09.26', items: ['חיבור ל-iCount: תיקון עומס בבדיקת ההרשאות מול Google (429).'] },
   { v: '1.15.4', date: '30.09.26', items: ['חיבור ל-iCount: בדיקת הבעלות משלבת את מפתח השירות ואת הכניסה שלך.'] },
   { v: '1.15.3', date: '30.09.26', items: ['מסמכים ממוינים מהחדש לישן לפי תאריך המסמך.', 'חיבור ל-iCount: זיהוי בעלות גם כשמפתח השירות שהועלה שייך לפרויקט אחר.'] },
@@ -1249,6 +1308,7 @@ function App() {
   });
   const closeNews = () => { try { lsSet(SEEN_KEY, VERSION); } catch { /* ignore */ } setNews(null); };
   const flashT = useRef(null);
+  const migrating = useRef(new Set());
   const flash = (m) => { setMsg(m); clearTimeout(flashT.current); flashT.current = setTimeout(() => setMsg(''), 4200); };
 
   useEffect(() => {
@@ -1325,6 +1385,14 @@ function App() {
     const d = await loadBook(book);
     setDatas(x => ({ ...x, [book.id]: d }));
     setLoading(l => ({ ...l, [book.id]: false }));
+    /* Once: imported history kept one record per document moves into the pack. */
+    const loose = (d.documents || []).filter(z => z.series === 'import' && !z._arch).length;
+    if (loose >= 20 && !migrating.current.has(book.id) && (!cloud || roleOf(book, user?.email || '') === 'owner')) {
+      migrating.current.add(book.id);
+      flash(`מארגן ${loose} מסמכים היסטוריים של "${book.name}" כדי שהמערכת תטען מהר יותר…`);
+      try { const n = await archiveMigrate(book, d); if (n) { flash(`הסתיים: ${n} מסמכים היסטוריים נארזו. מעכשיו העסק נטען מהר ובזול.`); ensure(book, true); } }
+      catch (e) { console.warn('archive', e); migrating.current.delete(book.id); }
+    }
   };
   useEffect(() => {
     if (!books) return;
@@ -2242,7 +2310,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       try {
         const to = todayIso(), from = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
         const r = await icountPull(book, from, to);
-        const s0 = await icountSave(cols, data, r.docs);
+        const s0 = await icountSave(cols, data, r.docs, book.id);
         await DB.patch('books', book.id, { icountSyncAt: new Date().toISOString() }).catch(() => {});
         if (s0.n) { flash(`נכנסו ${s0.n} מסמכים חדשים מ-iCount`); onReload(); }
       } catch (e) { console.warn('icount sync', e); }
@@ -3902,7 +3970,8 @@ function ICountImport({ book, data, cols, flash, onDone, onLog }) {
     setBusy(true);
     let n = 0;
     const put = (col, r) => withTimeout(col.put(r.id, r), 15000).then(() => { n++; }).catch(() => {});
-    const all = [...plan.fresh.map(d => [cols.documents, d]), ...plan.freshBuys.map(e => [cols.expenses, e])];
+    if (plan.fresh.length) { setProg('שומר מסמכים…'); n += await archiveAdd(book.id, data, plan.fresh).catch(() => 0); }
+    const all = plan.freshBuys.map(e => [cols.expenses, e]);
     for (let i = 0; i < all.length; i += 20) {
       await Promise.all(all.slice(i, i + 20).map(([c, r]) => put(c, r)));
       setProg(`${Math.min(i + 20, all.length)} / ${all.length}`);
@@ -3964,7 +4033,8 @@ function ICountImport({ book, data, cols, flash, onDone, onLog }) {
           <button className="mg-linkish" disabled={busy} onClick={async () => {
             if (!window.confirm('למחוק את כל מה שיובא מ-iCount (מסמכים והוצאות)? אפשר לייבא שוב אחר כך.')) return;
             setBusy(true);
-            const docs = (data.documents || []).filter(isImported), exps = (data.expenses || []).filter(e => e.src === 'icount');
+            const docs = (data.documents || []).filter(d => isImported(d) && !d._arch), exps = (data.expenses || []).filter(e => e.src === 'icount');
+            for (const c of (data.archive || []).filter(c => c.kind === 'documents')) await cols.archive.del(c.id).catch(() => {});
             for (const d of docs) await cols.documents.del(d.id).catch(() => {});
             for (const e of exps) await cols.expenses.del(e.id).catch(() => {});
             setBusy(false); flash('ההיסטוריה המיובאת נמחקה'); onDone();
@@ -4412,11 +4482,10 @@ async function icountPull(book, from, to, onStep) {
   }
   return { docs: all, raw, skipped };
 }
-async function icountSave(cols, data, docs) {
+async function icountSave(cols, data, docs, bookId) {
   const have = new Set((data.documents || []).map(d => d.id));
   const fresh = docs.filter(d => !have.has(d.id));
-  let n = 0;
-  for (let i = 0; i < fresh.length; i += 20) await Promise.all(fresh.slice(i, i + 20).map(d => withTimeout(cols.documents.put(d.id, d), 15000).then(() => n++).catch(() => {})));
+  const n = fresh.length ? await archiveAdd(bookId, data, fresh) : 0;
   const cp = planCustomers(data.customers || [], fresh.map(d => d.customer || {}), 'icount');
   if (cp.add.length + cp.upd.length) await saveCustomers(cols.customers, [...cp.add, ...cp.upd]);
   return { n, customers: cp.add.length };
@@ -4462,7 +4531,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
   };
   const save = async () => {
     setBusy('save');
-    const r = await icountSave(cols, data, res.fresh);
+    const r = await icountSave(cols, data, res.fresh, book.id);
     await onLog({ action: 'import-icount', title: `iCount (חיבור ישיר): ${r.n} מסמכים, ${r.customers} לקוחות חדשים`, series: 'test' });
     setBusy(''); setRes(null); flash(`נשמרו ${r.n} מסמכים מ-iCount`); onDone();
   };
@@ -4480,7 +4549,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
           <li>מעתיקים את המפתח (מתחיל ב-<span dir="ltr">API3</span>) ומדביקים כאן. הוא נשמר רק בשרת.</li>
         </ol>
         <div style={row}>
-          <Field label="API Token של iCount"><input dir="ltr" type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="API3E8-…" /></Field>
+          <Field label="API Token של iCount"><input dir="ltr" type="text" name="icount-api-token" autoComplete="off" spellCheck={false} style={{ WebkitTextSecurity: 'disc' }} value={token} onChange={e => setToken(e.target.value)} placeholder="API3E8-…" /></Field>
           <button className="mg-btn" disabled={busy === 'link' || token.trim().length < 10} onClick={() => link(false)}>{busy === 'link' ? 'בודק…' : 'חבר'}</button>
         </div>
         {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
@@ -4542,7 +4611,8 @@ async function mergeBooks(keep, drop, onStep) {
   const ip = planItems(dataK.items || [], dataD.items || [], false);
   for (const r of [...ip.add, ...ip.upd]) await put('items', r);
   const haveImp = new Set((dataK.documents || []).filter(d => d.series === 'import').map(d => d.type + ':' + d.number));
-  for (const d of (dataD.documents || []).filter(d => d.series === 'import' && !haveImp.has(d.type + ':' + d.number))) await put('documents', d);
+  const moreImp = (dataD.documents || []).filter(d => d.series === 'import' && !haveImp.has(d.type + ':' + d.number));
+  if (moreImp.length) n += await archiveAdd(keep.id, dataK, moreImp);
   /* The duplicate goes: whatever the rules let go (test and imported documents, test counters and log), then the business itself. */
   for (const c of COLS) for (const r of dataD[c] || []) await bookCol(drop.id, c).del(r.id).catch(() => {});
   await delBook(drop.id);
@@ -4964,7 +5034,7 @@ function PayCard({ server, books, user, flash, onServer }) {
             <div key={b.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', flexWrap: 'wrap' }}>
               <b style={{ minWidth: 110 }}>{b.name}</b>
               {st[b.id]?.zcredit ? <span className="mg-chip ok">מוגדר</span> : <span className="mg-chip">לא מוגדר</span>}
-              <input dir="ltr" type="password" style={{ flex: 1, minWidth: 160 }} placeholder={st[b.id]?.zcredit ? 'מפתח חדש להחלפה' : 'מפתח WebCheckout'} value={keys[b.id] || ''} onChange={e => setKeys(k => ({ ...k, [b.id]: e.target.value }))} />
+              <input dir="ltr" type="text" autoComplete="off" spellCheck={false} style={{ flex: 1, minWidth: 160, WebkitTextSecurity: 'disc' }} placeholder={st[b.id]?.zcredit ? 'מפתח חדש להחלפה' : 'מפתח WebCheckout'} value={keys[b.id] || ''} onChange={e => setKeys(k => ({ ...k, [b.id]: e.target.value }))} />
               <button className="mg-btn sm" disabled={busy === b.id || (keys[b.id] || '').trim().length < 8} onClick={() => saveKey(b)}>שמור</button>
               {st[b.id]?.zcredit && <button className="mg-btn ghost sm" disabled={busy === b.id} onClick={() => saveKey(b, true)}>הסר</button>}
             </div>))}
