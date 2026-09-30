@@ -1,0 +1,4555 @@
+/* ============================================================================
+   Tizon Books · הנהלת חשבונות לכל העסקים
+   A standalone app. It touches nothing of the store: not its code, not its
+   Firebase, not its rules.
+
+   Two ways to keep the data:
+     · on this computer (the default) — works the moment it is opened, with
+       a backup file that can be downloaded and restored at any time;
+     · in its own Firebase project — pasted in under "גיבוי וענן", and from
+       then on the data is in the cloud, behind a login, on every device.
+
+   Every business is a "book":
+     books/{book}                   name, dealer type, VAT, tax id, owners
+     books/{book}/incomes/{id}      income
+     books/{book}/expenses/{id}     expenses and their deductible VAT
+     books/{book}/suppliers/{id}    who is paid
+     books/{book}/banktx/{id}       bank statement lines and their matches
+
+   A book can be linked to the store (tenants/{t} in the store's Firebase):
+   its paid orders are then read as income. Read-only — see store() below.
+   ==========================================================================*/
+
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
+import LOGO from './logo.png';
+import MARK from './mark.png';
+import { initializeApp } from 'firebase/app';
+import {
+  initializeFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, query, where, runTransaction
+} from 'firebase/firestore';
+import {
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
+} from 'firebase/auth';
+
+const VERSION = '1.9.0';
+const BUILD_DATE = '30.09.26';
+const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
+const CLOUD_KEY = 'tzbooks_cloud';
+const LOCAL_KEY = 'tzbooks_data';
+const BACKUP_KEY = 'tzbooks_lastbackup';
+
+/* ------------------------------------------------------------- storage */
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+const lsSet = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED.includes(k)) prefPush(k, v); };
+
+/* Settings that follow the user to every device, kept in prefs/{uid} in the
+   cloud: the software registration, the tours and what's new, and when the
+   weekly backup and monthly archive were last sent (so two devices do not
+   send them twice). They are also kept in this browser, so everything keeps
+   working offline. Not synced on purpose: the device lock (it locks one
+   device) and the store login (a password is never stored). */
+const SYNCED = ['tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version'];
+let prefUid = null, prefQueue = {}, prefTimer = null, prefErr = '';
+function prefPush(k, v) {
+  if (!prefUid || !cloud) return;
+  prefQueue[k] = v === undefined ? null : v;
+  clearTimeout(prefTimer);
+  prefTimer = setTimeout(async () => {
+    const out = { ...prefQueue, updatedAt: new Date().toISOString() }; prefQueue = {};
+    try { await setDoc(doc(cloud.db, 'prefs', prefUid), clean(out), { merge: true }); prefErr = ''; }
+    catch (e) { prefErr = e?.code || 'error'; console.warn('prefs sync', e); }
+  }, 600);
+}
+/* After login: what is in the cloud wins; a first device uploads what it has. */
+async function prefPull(user) {
+  if (!cloud || !user?.uid) return;
+  prefUid = user.uid;
+  try {
+    const snap = await withTimeout(getDoc(doc(cloud.db, 'prefs', prefUid)), 8000);
+    const remote = snap.exists() ? snap.data() : {};
+    const up = {};
+    for (const k of SYNCED) {
+      if (remote[k] !== undefined && remote[k] !== null) localStorage.setItem(k, JSON.stringify(remote[k]));
+      else { const v = lsGet(k, undefined); if (v !== undefined) up[k] = v; }
+    }
+    if (Object.keys(up).length) { await setDoc(doc(cloud.db, 'prefs', prefUid), clean({ ...up, updatedAt: new Date().toISOString() }), { merge: true }); }
+    prefErr = '';
+  } catch (e) { prefErr = e?.code || 'error'; console.warn('prefs pull', e); }
+}
+
+/* The cloud. BUILT_IN_CLOUD is the books' own Firebase project (tizonfinance),
+   so every device connects by itself and only asks for a login. These values
+   are public by design: what protects the data is the login and
+   firestore.rules. A device can still choose to work locally ("נתק"), and a
+   project pasted in the settings takes precedence. */
+const BUILT_IN_CLOUD = {
+  apiKey: 'AIzaSyAOph6_Dr2ChyEi2iFF4yDT-p9jk3uDd3k',
+  authDomain: 'tizonfinance.firebaseapp.com',
+  projectId: 'tizonfinance',
+  storageBucket: 'tizonfinance.firebasestorage.app',
+  messagingSenderId: '438117852802',
+  appId: '1:438117852802:web:9ef80f02c71901c16b769b',
+};
+const LOCAL_ONLY_KEY = 'tzbooks_local_only';
+let cloud = null;
+const cloudCfg = lsGet(CLOUD_KEY, null) || (lsGet(LOCAL_ONLY_KEY, false) ? null : BUILT_IN_CLOUD);
+if (cloudCfg?.apiKey && cloudCfg?.projectId) {
+  try {
+    const app = initializeApp(cloudCfg);
+    cloud = { db: initializeFirestore(app, { experimentalAutoDetectLongPolling: true }), auth: getAuth(app), cfg: cloudCfg };
+  } catch (e) { console.warn('cloud config', e); }
+}
+const MODE = cloud ? 'cloud' : 'local';
+const hasLocalData = () => Object.keys(lsGet(LOCAL_KEY, {})).length > 0;
+
+/* One small interface over both, addressed by path ("books", "books/x/expenses"). */
+const kidsOf = (o, path) => Object.keys(o).filter(k => k.startsWith(path + '/') && !k.slice(path.length + 1).includes('/'));
+const local = {
+  async list(path) { const o = lsGet(LOCAL_KEY, {}); return kidsOf(o, path).map(k => ({ ...o[k], id: k.split('/').pop() })); },
+  async put(path, id, data) {
+    const o = lsGet(LOCAL_KEY, {}); o[path + '/' + id] = data;
+    try { lsSet(LOCAL_KEY, o); } catch { throw new Error('האחסון בדפדפן מלא. עבור לענן או מחק נתונים ישנים.'); }
+  },
+  async del(path, id) { const o = lsGet(LOCAL_KEY, {}); delete o[path + '/' + id]; lsSet(LOCAL_KEY, o); },
+  async books() { return this.list('books'); },
+  async patch(path, id, fields) { const o = lsGet(LOCAL_KEY, {}); o[path + '/' + id] = { ...(o[path + '/' + id] || {}), ...fields }; lsSet(LOCAL_KEY, o); },
+  /* The next number and the document, written together. */
+  async issue(bookId, key, start, rec) {
+    const o = lsGet(LOCAL_KEY, {});
+    const ck = `books/${bookId}/counters/${key}`;
+    const n = Math.max(Number(o[ck]?.next) || 0, start);
+    const d = { ...rec, number: n };
+    o[`books/${bookId}/documents/${rec.id}`] = d; o[ck] = { next: n + 1 };
+    lsSet(LOCAL_KEY, o);
+    return d;
+  },
+};
+const remote = {
+  async list(path) { const s = await getDocs(collection(cloud.db, ...path.split('/'))); return s.docs.map(d => ({ ...d.data(), id: d.id })); },
+  put: (path, id, data) => setDoc(doc(cloud.db, ...path.split('/'), id), data),
+  del: (path, id) => deleteDoc(doc(cloud.db, ...path.split('/'), id)),
+  patch: (path, id, fields) => updateDoc(doc(cloud.db, ...path.split('/'), id), fields),
+  /* In one transaction, so two devices can never take the same number and a
+     failed write never leaves a gap. */
+  issue(bookId, key, start, rec) {
+    const ck = doc(cloud.db, 'books', bookId, 'counters', key);
+    const dk = doc(cloud.db, 'books', bookId, 'documents', rec.id);
+    return runTransaction(cloud.db, async (tx) => {
+      const snap = await tx.get(ck);
+      const n = Math.max(snap.exists() ? Number(snap.data().next) || 0 : 0, start);
+      const d = { ...rec, number: n };
+      tx.set(ck, { next: n + 1 });
+      tx.set(dk, d);
+      return d;
+    });
+  },
+  /* Books I own, and books I was given to read (an accountant). */
+  async books(email) {
+    const e = email.toLowerCase();
+    const [own, clerk, view] = await Promise.all([
+      getDocs(query(collection(cloud.db, 'books'), where('owners', 'array-contains', e))),
+      getDocs(query(collection(cloud.db, 'books'), where('clerks', 'array-contains', e))).catch(() => ({ docs: [] })),
+      getDocs(query(collection(cloud.db, 'books'), where('viewers', 'array-contains', e))).catch(() => ({ docs: [] })),
+    ]);
+    const m = {}; [...own.docs, ...clerk.docs, ...view.docs].forEach(d => { m[d.id] = { ...d.data(), id: d.id }; });
+    return Object.values(m);
+  },
+};
+const DB = cloud ? remote : local;
+
+/* ------------------------------------------------------------ the store */
+/* The store's own Firebase. Signed in with the same user as the store's
+   console, so the store's existing rules decide what can be read — its
+   orders, documents and customers, for whoever runs it.
+   It writes in exactly one place, storeAddCustomer() below: a NEW customer,
+   on an explicit press, never overwriting a record that is already there.
+   Nothing else in this code writes to the store. */
+const STORE_FB = {
+  apiKey: "AIzaSyDiXMoYgZfMKV5vL58Viyxuztl3RI3DsB0",
+  authDomain: "tizonshoponline.firebaseapp.com",
+  projectId: "tizonshoponline",
+  storageBucket: "tizonshoponline.firebasestorage.app",
+  messagingSenderId: "310366165947",
+  appId: "1:310366165947:web:2e92ebe528b1c4d256829e"
+};
+let storeConn = null;
+function store() {
+  if (!storeConn) {
+    const app = initializeApp(STORE_FB, 'store');
+    storeConn = { db: initializeFirestore(app, { experimentalAutoDetectLongPolling: true }), auth: getAuth(app) };
+  }
+  return storeConn;
+}
+/* Who is signed in to the store on this device, once Firebase has looked. */
+const storeUser = () => new Promise(res => { const un = onAuthStateChanged(store().auth, u => { un(); res(u || null); }); });
+/* The store's own id for a customer — its docId() of the email — so a later
+   purchase with the same email lands on the same record. */
+const storeDocId = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '_').slice(0, 90);
+async function storeAddCustomer(tenant, c) {
+  let id = storeDocId(c.email) || ('c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+  /* Only ever a new record: if the id is taken, a new one, never an update. */
+  for (let i = 0; i < 3; i++) {
+    const ex = await getDoc(doc(store().db, 'tenants', tenant, 'customers', id));
+    if (!ex.exists()) break;
+    id = (storeDocId(c.email) || 'c') + '_' + Math.random().toString(36).slice(2, 7);
+  }
+  const rec = clean({
+    name: c.name, email: c.email || '', phone: c.phone || '',
+    address: [c.address, c.city].filter(Boolean).join(', '),
+    notes: 'נוסף מ-Tizon Books', createdAt: todayIso(), source: 'tizon-books',
+  });
+  await setDoc(doc(store().db, 'tenants', tenant, 'customers', id), rec);
+  return id;
+}
+async function storeRead(tenant, name) {
+  const s = await getDocs(collection(store().db, 'tenants', tenant, name));
+  return s.docs.map(d => ({ ...d.data(), id: d.id }));
+}
+
+const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs'];
+const bookCol = (bookId, name) => ({
+  list: () => DB.list(`books/${bookId}/${name}`),
+  put: (id, data) => DB.put(`books/${bookId}/${name}`, id, data),
+  del: (id) => DB.del(`books/${bookId}/${name}`, id),
+});
+const listBooks = (email) => DB.books(email);
+const putBook = (b) => DB.put('books', b.id, b);
+const delBook = (id) => DB.del('books', id);
+
+/* Everything, as one file: every book with its records. Same shape from
+   either storage, and restorable into either. */
+async function exportAll(email, src = DB) {
+  const books = await src.books(email);
+  const out = { app: 'tizon-books', version: VERSION, exportedAt: new Date().toISOString(), books: [] };
+  for (const b of books) {
+    const data = {};
+    for (const c of COLS) data[c] = await src.list(`books/${b.id}/${c}`);
+    out.books.push({ ...b, data });
+  }
+  return out;
+}
+async function importAll(file, me) {
+  if (!file || file.app !== 'tizon-books' || !Array.isArray(file.books)) throw new Error('זה לא קובץ גיבוי של המערכת');
+  let n = 0;
+  for (const bk of file.books) {
+    const { data = {}, ...b } = bk;
+    const owners = [...new Set([...(b.owners || []), ...(me ? [me.toLowerCase()] : [])])];
+    await putBook(clean({ ...b, owners }));
+    for (const c of COLS) for (const r of (data[c] || [])) {
+      const { id, ...rest } = r;
+      // Payment pages are written only by the server in the cloud; a restore skips them there.
+      try { await bookCol(b.id, c).put(id, clean(rest)); n++; } catch (e) { if (c !== 'payreqs') throw e; }
+    }
+  }
+  return { books: file.books.length, records: n };
+}
+function saveJSON(name, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* The config Firebase shows under Project settings, pasted as it is — the
+   whole <script> block, the object, or JSON. */
+function parseFirebaseConfig(text) {
+  const out = {};
+  ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].forEach(k => {
+    const m = String(text).match(new RegExp(`["']?${k}["']?\\s*:\\s*["']([^"']+)["']`));
+    if (m) out[k] = m[1];
+  });
+  return out.apiKey && out.projectId ? out : null;
+}
+
+const KINDS = { store: 'חנות', clinic: 'קליניקה', platform: 'פלטפורמה', other: 'אחר' };
+const DEALERS = { exempt: 'עוסק פטור', licensed: 'עוסק מורשה', company: 'חברה בע״מ' };
+const INC_CATS = ['טיפולים', 'ייעוץ', 'סדנאות וקורסים', 'מנויים ורישיונות', 'מוצרים', 'הרצאות', 'אחר'];
+const EXP_CATS = ['מלאי וחומרי גלם', 'שכירות', 'שיווק ופרסום', 'ציוד', 'שכר', 'ביטוח', 'רכב ונסיעות',
+                  'תוכנה ומנויים', 'משלוחים', 'עמלות סליקה', 'הנהלת חשבונות', 'אחר'];
+const PAY_METHODS = ['העברה בנקאית', 'כרטיס אשראי', 'ביט', 'פייבוקס', 'מזומן', 'צ׳ק', 'הוראת קבע'];
+const BOOK_COLORS = ['#8a6331', '#3f7a2a', '#2b4bb8', '#8a2450', '#35318a', '#1f5a5a'];
+
+/* ------------------------------------------------------------------ helpers */
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+/* The minus sign stays in front of the shekel sign inside Hebrew text. */
+const fmt = (n) => (r2(n) < 0 ? '\u200E-' : '') + '₪' + Math.abs(r2(n)).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const pad = (n) => String(n).padStart(2, '0');
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const clean = (o) => JSON.parse(JSON.stringify(o));
+const uid = (p = 'id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const withTimeout = (p, ms = 15000) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+function d10(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+  if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad(m[2])}-${pad(m[1])}`;
+  const t = Date.parse(s);
+  return isNaN(t) ? '' : new Date(t).toISOString().slice(0, 10);
+}
+const heDate = (d) => d ? d.split('-').reverse().join('/') : '—';
+const monthName = (ym) => {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('he-IL', { month: 'short', year: '2-digit' });
+};
+const addMonths = (ym, k) => {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 1 + k, 1);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+};
+/* Israeli bi-monthly VAT periods start on odd months: Jan–Feb, Mar–Apr … */
+const biStart = (ym) => { const [y, m] = ym.split('-').map(Number); return `${y}-${pad(m % 2 ? m : m - 1)}`; };
+const inMonths = (date, from, to) => { const m = (date || '').slice(0, 7); return m >= from && m <= to; };
+const vatOf = (gross, rate) => rate > 0 ? r2(gross * rate / (100 + rate)) : 0;
+const num = (s) => {
+  let t = String(s ?? '').replace(/[₪,\s]/g, '');
+  let neg = false;
+  if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
+  if (/-$/.test(t)) { neg = true; t = t.slice(0, -1); }
+  const n = parseFloat(t);
+  return isNaN(n) ? NaN : (neg ? -Math.abs(n) : n);
+};
+/* Who I am in a business. On this computer only (no cloud) there is one user,
+   and they own everything. */
+const ROLES = { owner: 'בעלים', clerk: 'מפיק מסמכים', viewer: 'צפייה בלבד' };
+const roleOf = (book, email) => {
+  if (!cloud) return 'owner';
+  const e = String(email || '').toLowerCase();
+  return (book?.owners || []).includes(e) ? 'owner' : (book?.clerks || []).includes(e) ? 'clerk' : 'viewer';
+};
+const rateOf = (book) => book?.dealerType === 'exempt' ? 0 : (Number(book?.vatRate) || 0);
+const paidOnPage = (o) => o?.paidVia === 'icount' || o?.payProvider === 'icountpay';
+const isPaidOrder = (o) => o && o.payStatus === 'paid' && o.status !== 'cancelled';
+
+function downloadCSV(name, rows) {
+  const body = rows.map(r => r.map(c => {
+    const s = String(c ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\n');
+  const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function splitLine(line, sep) {
+  const out = []; let cur = ''; let q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    /* A quote opens a quoted field only at its start: inside a word it is a
+       Hebrew abbreviation typed with a plain quote (מק"ט, מע"מ). */
+    if (ch === '"') {
+      if (q) { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else if (!cur.trim()) q = true; else cur += '"';
+    }
+    else if (ch === sep && !q) { out.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+/* A bank statement CSV into { date, desc, amount }. Israeli banks split money
+   out and in (חובה / זכות); others use one signed column. */
+function parseBankCSV(text) {
+  const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (!lines.length) return [];
+  const sep = [',', ';', '\t'].map(s => [s, lines[0].split(s).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = lines.map(l => splitLine(l, sep));
+  const hi = rows.findIndex(r => r.some(c => /תאריך|date/i.test(c)));
+  const head = hi >= 0 ? rows[hi] : null;
+  const col = (re) => head ? head.findIndex(c => re.test(c)) : -1;
+  const cDate = col(/תאריך|date/i), cDesc = col(/תיאור|פרטים|הפעולה|description|details/i);
+  const cDebit = col(/חובה|debit|חיוב/i), cCredit = col(/זכות|credit|זיכוי/i);
+  const cAmt = col(/סכום|amount/i);
+  const out = [];
+  rows.slice(hi >= 0 ? hi + 1 : 0).forEach(r => {
+    const date = d10(cDate >= 0 ? r[cDate] : r.find(c => d10(c) && /\d/.test(c)));
+    if (!date) return;
+    let amount = NaN;
+    if (cDebit >= 0 || cCredit >= 0) {
+      const dr = cDebit >= 0 ? num(r[cDebit]) : NaN, cr = cCredit >= 0 ? num(r[cCredit]) : NaN;
+      amount = (isNaN(cr) ? 0 : Math.abs(cr)) - (isNaN(dr) ? 0 : Math.abs(dr));
+      if (isNaN(dr) && isNaN(cr)) amount = NaN;
+    } else if (cAmt >= 0) amount = num(r[cAmt]);
+    else amount = r.map(num).find((n, i) => !isNaN(n) && !d10(r[i]));
+    if (isNaN(amount) || amount === 0) return;
+    const desc = cDesc >= 0 ? r[cDesc]
+      : r.filter(c => isNaN(num(c)) && !d10(c)).sort((a, b) => b.length - a.length)[0] || '';
+    out.push({ date, desc: String(desc).slice(0, 120), amount: r2(amount) });
+  });
+  return out;
+}
+
+/* ------------------------------------------------------------ the ledger */
+/* One list of income and one of expenses for a book, whatever their source. */
+function buildLedger(book, data) {
+  const rate = rateOf(book);
+  const docByOrder = Object.fromEntries((data?.docs || []).map(d => [d.orderId, d]));
+  /* A store order whose invoice came from iCount is already counted by the
+     imported iCount document: by its invoice number, or — for orders paid on
+     iCount's own page, which carry no number — by the same total within two
+     days. Each imported document can stand for one order only. */
+  const imp = (data?.documents || []).filter(d => d.series === 'import' && ['305', '320'].includes(d.type));
+  const impNums = new Set(imp.map(d => String(d.number)));
+  const impUsed = new Set();
+  const inICount = (o) => {
+    if (!imp.length) return false;
+    if (o.invoiceNo && impNums.has(String(o.invoiceNo))) return true;
+    if (!paidOnPage(o)) return false;
+    const t = Date.parse(d10(o.paidAt) || d10(o.createdIso) || d10(o.createdAt));
+    const hit = imp.find(d => !impUsed.has(d.id) && Math.abs(d.total - r2(o.total)) < 0.01 && Math.abs(Date.parse(d.date) - t) <= 2 * 86400000);
+    if (hit) { impUsed.add(hit.id); return true; }
+    return false;
+  };
+  const fromShop = (data?.orders || []).filter(isPaidOrder).filter(o => !inICount(o)).map(o => {
+    const gross = r2(o.total);
+    const d = docByOrder[o.id];
+    return {
+      id: 'o:' + o.id, src: 'shop', date: d10(o.paidAt) || d10(o.createdIso) || d10(o.createdAt),
+      desc: `הזמנה ${o.code || o.id}${o.customerName ? ' · ' + o.customerName : ''}`,
+      cat: 'מכירות בחנות', pay: o.payment || '', gross,
+      vat: rate === 0 ? 0 : (d && d.vat != null ? r2(d.vat) : vatOf(gross, rate)),
+      docNo: o.invoiceNo || (paidOnPage(o) ? 'iCount' : ''),
+    };
+  });
+  const manual = (data?.incomes || []).map(i => ({
+    ...i, src: i.src || 'manual', gross: r2(i.gross),
+    vat: rate === 0 || i.noVat ? 0 : (i.vat != null ? r2(i.vat) : vatOf(i.gross, rate)),
+  }));
+  /* Documents issued here, in real mode: invoices are income on their date,
+     credit notes take it back. A receipt is income only for an exempt
+     dealer, whose receipt is the document of the sale. Test documents never. */
+  const fromDocs = (data?.documents || []).filter(d => (d.series === 'live' || d.series === 'import') && !d.cancelled).flatMap(d => {
+    const sign = d.type === '330' ? -1 : 1;
+    const counts = ['305', '320', '330'].includes(d.type) || (d.type === '400' && book?.dealerType === 'exempt' && !d.refId);
+    if (!counts) return [];
+    return [{ id: 'd:' + d.id, src: 'doc', date: d.date, desc: `${docTitle(d)} · ${d.customer?.name || ''}`,
+              cat: 'מסמכים שהופקו', pay: (d.payments || []).map(p => p.kind).join(', '),
+              gross: sign * r2(d.total), vat: rate === 0 ? 0 : sign * r2(d.vat), docNo: docNum(d) }];
+  });
+  const income = [...fromShop, ...fromDocs, ...manual].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const outgo = (data?.expenses || []).map(e => ({ ...e, gross: r2(e.gross), vat: rate === 0 ? 0 : r2(e.vat) }))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  return { income, outgo, rate };
+}
+function totals(ledger, from, to) {
+  const inc = ledger.income.filter(i => inMonths(i.date, from, to));
+  const exp = ledger.outgo.filter(e => inMonths(e.date, from, to));
+  const incGross = inc.reduce((a, i) => a + i.gross, 0), incVat = inc.reduce((a, i) => a + i.vat, 0);
+  const expGross = exp.reduce((a, e) => a + e.gross, 0), expVat = exp.reduce((a, e) => a + e.vat, 0);
+  return { inc, exp, incGross, incVat, incNet: incGross - incVat, expGross, expVat, expNet: expGross - expVat,
+           profit: (incGross - incVat) - (expGross - expVat), vatDue: incVat - expVat };
+}
+function alertsOf(data, ledger) {
+  return {
+    unmatched: (data?.banktx || []).filter(b => !b.matchId && !b.ignored).length,
+    noDocOrders: (data?.orders || []).filter(o => isPaidOrder(o) && !o.invoiceNo && !paidOnPage(o)).length,
+    noDocExp: ledger.outgo.filter(e => !e.docNo && !e.hasDoc).length,
+    review: [...(data?.incomes || []), ...(data?.expenses || [])].filter(x => x.review).length,
+    unpaid: (data?.orders || []).filter(o => o && o.payStatus !== 'paid' && o.status !== 'cancelled'),
+  };
+}
+
+
+async function loadBook(book) {
+  const res = await Promise.all(COLS.map(c => withTimeout(bookCol(book.id, c).list()).catch(() => null)));
+  const out = { errors: [], orders: [], docs: [], storeErr: '', storeLogin: false };
+  COLS.forEach((c, i) => { out[c] = res[i] || []; if (!res[i]) out.errors.push(c); });
+  const t = String(book.tenant || '').trim();
+  if (t) {
+    try {
+      const u = await withTimeout(storeUser(), 10000);
+      if (!u) { out.storeLogin = true; return out; }
+      out.orders = await withTimeout(storeRead(t, 'orders'), 25000);
+      /* Documents are a nicety (the VAT figure of each invoice); without them
+         VAT is worked out from the order total. */
+      out.docs = await withTimeout(storeRead(t, 'documents'), 25000).catch(() => []);
+      out.storeAt = new Date().toISOString();
+    } catch (e) {
+      const c = String(e?.code || e?.message || e);
+      out.storeErr = c.includes('permission')
+        ? `המשתמש שמחובר לחנות לא מנהל את החנות "${t}". בדוק את מזהה החנות, או התחבר עם משתמש אחר.`
+        : `לא הצלחתי לקרוא את ההזמנות של החנות "${t}" (${c}).`;
+    }
+  }
+  return out;
+}
+
+/* ================================================================== styles */
+const CSS = `
+:root{--bg:#f7f3ea;--card:#fff;--ink:#2b2a26;--muted:#6b6557;--line:#e8dfcc;--green:#2f5d27;--green2:#4f8f35;
+  --gold:#a8783f;--bronze1:#8a6331;--bronze2:#c4a36e;--warn:#a2680f;--bad:#b3261e;--soft:#f1ece2}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Assistant','Segoe UI',system-ui,sans-serif;font-size:15px}
+button,input,select,textarea{font-family:inherit;font-size:14px}
+input,select,textarea{border:1.5px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff;color:var(--ink);width:100%;outline:none}
+input:focus,select:focus{border-color:var(--gold)}
+.shell{display:flex;min-height:100vh}
+.side{width:250px;background:#fffdf8;color:var(--ink);padding:18px 12px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;
+  border-inline-end:1px solid var(--line);box-shadow:0 0 24px rgba(120,90,40,.06)}
+.brand{padding:0 8px 12px;text-align:center;border-bottom:1px solid var(--line);margin-bottom:6px}
+.brand img.full{width:100%;max-width:190px;display:block;margin:0 auto}
+.brand img.mark{display:none;width:34px;height:34px}
+.brand small{display:block;font-size:13px;color:var(--gold);font-weight:700;margin-top:6px;letter-spacing:.02em}
+.side .sec{font-size:11px;letter-spacing:.08em;color:var(--muted);padding:12px 10px 4px}
+.side button.bk{display:flex;align-items:center;gap:10px;width:100%;text-align:right;background:none;border:0;color:inherit;
+  padding:10px;border-radius:10px;cursor:pointer;font-size:14px}
+.side button.bk:hover{background:#f6efe1}
+.side button.bk.on{background:linear-gradient(90deg,#f3e6cc,#faf4e8);color:#6e4d22;font-weight:800}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.side .foot{margin-top:auto;font-size:12px;color:var(--muted);padding:10px;line-height:1.7;border-top:1px solid var(--line)}
+.side .foot button{background:none;border:0;color:var(--gold);cursor:pointer;padding:0;text-decoration:underline;font-weight:700}
+.main{flex:1;padding:24px 28px;min-width:0}
+.mg-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px;padding:20px 22px;border-radius:20px;color:#fff;
+  background:linear-gradient(135deg,var(--h1,#8a6331),var(--h2,#c4a36e));box-shadow:0 12px 30px rgba(120,90,40,.18)}
+.mg-h > div:first-child{flex:1}
+.mg-h h2{margin:0;font-family:'Frank Ruhl Libre',serif;font-size:26px}
+.mg-h .sub{opacity:.9;font-size:14px;margin-top:4px}
+.mg-h .mg-btn{background:#fff;color:#6e4d22}
+.mg-h .mg-btn.ghost{background:rgba(255,255,255,.15);color:#fff;border:1.5px solid rgba(255,255,255,.4)}
+.mg-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.mg-tab{background:#fff;border:1.5px solid var(--line);border-radius:999px;padding:7px 15px;cursor:pointer;font-weight:600;color:var(--muted)}
+.mg-tab.on{background:var(--gold);border-color:var(--gold);color:#fff}
+.mg-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.mg-stat{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--gold);border-radius:16px;padding:16px 18px}
+.mg-stat:nth-child(4n+2){border-top-color:#2b4bb8}.mg-stat:nth-child(4n+3){border-top-color:#d9822b}.mg-stat:nth-child(4n+4){border-top-color:var(--green2)}
+.mg-stat .lb{font-size:13px;font-weight:700;color:var(--muted)}
+.mg-stat .vl{font-size:26px;font-weight:800;margin:6px 0 2px}
+.mg-stat .dl{font-size:12px;color:var(--muted)}
+.mg-card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px 20px}
+.mg-card h3{font-size:16px}
+.mg-note{background:var(--soft);border-radius:12px;padding:11px 14px;border-inline-start:4px solid var(--green2);font-size:14px;line-height:1.6}
+.mg-note.warn{background:#fbf3e4;border-inline-start-color:#d9822b}
+.mg-note.bad{background:#fbeceb;border-inline-start-color:var(--bad)}
+.mg-empty{border:2px dashed var(--line);border-radius:14px;padding:18px;text-align:center;color:var(--muted);background:#fff}
+.mg-tblwrap{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:16px}
+.mg-tbl{width:100%;border-collapse:collapse}
+.mg-tbl th{background:var(--soft);text-align:right;padding:10px 12px;font-size:13px;white-space:nowrap}
+.mg-tbl td{padding:10px 12px;border-top:1px solid #f0ebe0;font-size:14px;vertical-align:middle}
+.mg-tbl tr:hover td{background:#fbf9f4}
+.mg-tbl tfoot td{font-weight:800;background:var(--soft)}
+.mg-btn{display:inline-flex;align-items:center;gap:6px;background:var(--green);color:#fff;border:0;border-radius:11px;padding:9px 15px;
+  cursor:pointer;font-weight:700;white-space:nowrap}
+.mg-btn:disabled{opacity:.45;cursor:not-allowed}
+.mg-btn.ghost{background:#fff;color:var(--green);border:1.5px solid var(--line)}
+.mg-btn.sm{padding:5px 10px;font-size:13px;border-radius:9px}
+.mg-btn.danger{background:var(--bad)}
+.mg-chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;background:var(--soft);color:var(--muted)}
+.mg-chip.ok{background:#e3f1e8;color:#1f5a3d}.mg-chip.warn{background:#fbecd2;color:#8a5a0c}.mg-chip.bad{background:#fbe3e1;color:var(--bad)}
+.mg-fld{display:flex;flex-direction:column;gap:4px;min-width:150px}
+.mg-fld label{font-size:12px;font-weight:700;color:var(--muted)}
+.mg-linkish{background:none;border:0;color:var(--green2);text-decoration:underline;cursor:pointer;padding:0;font-weight:700}
+.mg-mod{position:fixed;inset:0;background:rgba(20,30,25,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.mg-mod-in{background:#fff;border-radius:20px;width:100%;max-width:560px;max-height:90vh;display:flex;flex-direction:column}
+.mg-mod-h{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line)}
+.mg-mod-h h3{margin:0}
+.mg-mod-b{padding:18px 20px;overflow-y:auto}
+.mg-mod-f{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--line)}
+.sf-x{background:none;border:0;font-size:22px;cursor:pointer;color:var(--muted)}
+.mlab{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;max-width:100%}
+@media (max-width:600px){.mlab{font-size:11px}}
+.ro .mg-btn:not(.keep),.ro .mg-linkish:not(.keep),.ro td select{display:none!important}
+.flash{position:fixed;bottom:20px;left:76px;background:#16271e;color:#fff;padding:12px 18px;border-radius:12px;z-index:60;
+  box-shadow:0 10px 30px rgba(0,0,0,.25);max-width:380px}
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:radial-gradient(circle at 30% 10%,#fffdf8,#efe4cc 70%)}
+.login img{width:200px;display:block;margin:0 auto 4px}
+.login .card{background:#fff;border-radius:22px;padding:30px;width:100%;max-width:380px;display:flex;flex-direction:column;gap:12px}
+.seg{display:flex;background:var(--soft);border-radius:12px;padding:4px;gap:4px}
+.seg button{flex:1;border:0;background:none;padding:9px;border-radius:9px;cursor:pointer;font-weight:700;color:var(--muted)}
+.seg button.on{background:#fff;color:#6e4d22;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.login-foot{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
+.login h1{margin:0;font-family:'Frank Ruhl Libre',serif;color:var(--gold);text-align:center;font-size:24px}
+.tour{position:fixed;inset:0;z-index:70}
+.tour-block{position:absolute;inset:0;background:rgba(30,24,12,.55)}
+.tour-spot{position:fixed;border-radius:14px;box-shadow:0 0 0 9999px rgba(30,24,12,.55);outline:2px solid var(--gold);pointer-events:none;
+  transition:top .25s,left .25s,width .25s,height .25s}
+.tour-card{position:fixed;background:#fff;border-radius:16px;padding:14px 16px 12px;box-shadow:0 18px 50px rgba(0,0,0,.28);
+  border-top:4px solid var(--gold);transition:top .25s,right .25s}
+.tour-top{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);font-weight:700}
+.tour-top span:first-child{flex:1}
+.tour-x{border:0;background:none;cursor:pointer;color:var(--muted);font-size:15px;padding:2px 4px}
+.tour-card h4{margin:8px 0 4px;font-size:17px;color:#6e4d22}
+.tour-card p{margin:0 0 10px;font-size:14px;line-height:1.7}
+.tour-dots{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
+.tour-dots i{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.tour-dots i.on{background:var(--gold)}
+.tour-nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tour-off{margin-inline-start:auto;border:0;background:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline}
+.help-btn{position:fixed;bottom:20px;left:20px;width:44px;height:44px;border-radius:50%;border:0;background:var(--gold);color:#fff;
+  font-size:21px;font-weight:800;cursor:pointer;box-shadow:0 8px 22px rgba(120,90,40,.35);z-index:40}
+.help-btn:hover{background:var(--bronze1)}
+.help-btn .nd{position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:50%;background:var(--bad);border:2px solid #fff}
+.tour-news{max-width:520px;width:100%;max-height:85vh;overflow:auto}
+@media print{.help-btn,.tour{display:none}}
+@media (max-width:820px){
+  .shell{flex-direction:column}
+  .side{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px}
+  .side .sec,.side .foot small{display:none}
+  .brand{padding:0 4px;border:0;margin:0}.brand small,.brand img.full{display:none}.brand img.mark{display:block}
+  .side button.bk{width:auto;padding:7px 10px}
+  .side .foot{margin:0;padding:4px 8px}
+  .main{padding:14px}
+}
+/* Phones: noticeably larger type everywhere (inputs at 17px also stop iOS from zooming in). */
+@media (max-width:820px){
+  body{font-size:18px;line-height:1.55}
+  button,input,select,textarea{font-size:17px}
+  input,select,textarea{padding:11px 12px}
+  .side button.bk{font-size:16.5px}
+  .side .foot{font-size:14.5px}
+  .mg-h{padding:18px}
+  .mg-h h2{font-size:29px}
+  .mg-h .sub{font-size:16.5px}
+  .mg-tab{font-size:16.5px;padding:9px 16px}
+  .mg-stat .lb{font-size:15.5px}
+  .mg-stat .vl{font-size:31px}
+  .mg-stat .dl{font-size:14.5px}
+  .mg-card h3{font-size:20px}
+  .mg-note{font-size:16.5px}
+  .mg-tbl th{font-size:15.5px;padding:11px 12px}
+  .mg-tbl td{font-size:16.5px;padding:12px}
+  .mg-btn{font-size:17px;padding:11px 16px}
+  .mg-btn.sm{font-size:15.5px;padding:8px 12px}
+  .mg-chip{font-size:14px;padding:3px 10px}
+  .mg-fld label{font-size:15px}
+  .mg-empty{font-size:16.5px}
+  .mlab{font-size:12px}
+  .login h1{font-size:28px}
+  .login-foot{font-size:14.5px}
+  .flash{font-size:16.5px}
+  .tour-top{font-size:14.5px}
+  .tour-card h4{font-size:20px}
+  .tour-card p{font-size:17px}
+  .tour-off{font-size:14.5px}
+  /* sizes set inline in the screens */
+  :is(.shell,.mg-mod,.login) [style*="font-size: 12px"]{font-size:14.5px !important}
+  :is(.shell,.mg-mod,.login) [style*="font-size: 13px"]{font-size:15.5px !important}
+  :is(.shell,.mg-mod,.login) [style*="font-size: 14px"]{font-size:16.5px !important}
+}
+`;
+
+/* ===================================================================== ui */
+function Field({ label, children }) { return <div className="mg-fld"><label>{label}</label>{children}</div>; }
+function Box({ title, onClose, children, footer, wide }) {
+  return (
+    <div className="mg-mod" onClick={onClose}>
+      <div className="mg-mod-in" style={wide ? { maxWidth: 780 } : undefined} onClick={e => e.stopPropagation()}>
+        <div className="mg-mod-h"><h3>{title}</h3><button className="sf-x" onClick={onClose} aria-label="סגור">×</button></div>
+        <div className="mg-mod-b">{children}</div>
+        {footer && <div className="mg-mod-f">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 };
+const row = { display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' };
+
+/* ================================================================== login */
+function Login() {
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [signup, setSignup] = useState(false);
+  const go = async (e) => {
+    e.preventDefault(); setBusy(true); setErr('');
+    try {
+      if (signup) await createUserWithEmailAndPassword(cloud.auth, email.trim(), pw);
+      else await signInWithEmailAndPassword(cloud.auth, email.trim(), pw);
+    } catch (x) {
+      const c = String(x?.code || '');
+      setErr(c.includes('email-already') ? 'המשתמש כבר קיים. היכנס עם הסיסמה שלו.'
+        : c.includes('weak-password') ? 'סיסמה חלשה מדי. לפחות 6 תווים.'
+        : c.includes('operation-not-allowed') || c.includes('configuration-not-found') ? 'בפרויקט ה-Firebase לא הופעלה כניסה באימייל וסיסמה (Authentication ← Sign-in method).'
+        : c.includes('invalid') || c.includes('wrong') || c.includes('not-found') ? 'אימייל או סיסמה שגויים'
+        : c.includes('too-many') ? 'יותר מדי ניסיונות. נסה שוב בעוד כמה דקות.' : 'הכניסה נכשלה: ' + c);
+    }
+    setBusy(false);
+  };
+  return (
+    <form className="login" onSubmit={go}>
+      <div className="card">
+        <img src={LOGO} alt="Tizon Health" />
+        <h1>Books · הנהלת חשבונות</h1>
+        <div className="seg">
+          <button type="button" className={!signup ? 'on' : ''} onClick={() => { setSignup(false); setErr(''); }}>כניסה</button>
+          <button type="button" className={signup ? 'on' : ''} onClick={() => { setSignup(true); setErr(''); }}>משתמש חדש</button>
+        </div>
+        {signup && <div className="mg-note" style={{ fontSize: 13 }}>
+          הוזמנת לעסק? נרשמים כאן <b>באימייל שבעל העסק הוסיף</b>, והעסקים שלך יופיעו מיד אחרי הכניסה.</div>}
+        <Field label="אימייל"><input type="email" dir="ltr" value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" autoFocus /></Field>
+        <Field label="סיסמה"><input type="password" dir="ltr" value={pw} onChange={e => setPw(e.target.value)} autoComplete={signup ? 'new-password' : 'current-password'} /></Field>
+        {err && <div className={'mg-note ' + (err.startsWith('נשלח') ? '' : 'bad')}>{err}</div>}
+        <button className="mg-btn" disabled={busy || !email || !pw} style={{ justifyContent: 'center', padding: '12px 15px' }}>{busy ? '…' : signup ? 'צור משתמש והיכנס' : 'כניסה'}</button>
+        {!signup && <button type="button" className="mg-linkish" style={{ alignSelf: 'center' }} disabled={!email}
+                onClick={async () => { try { await sendPasswordResetEmail(cloud.auth, email.trim()); setErr('נשלח מייל לאיפוס הסיסמה'); } catch { setErr('לא הצלחתי לשלוח מייל איפוס'); } }}>שכחתי סיסמה</button>}
+        <div className="login-foot">
+          <span dir="ltr">{cloud.cfg.projectId}</span> · גרסה {VERSION}
+          <button type="button" className="mg-linkish" style={{ fontSize: 12, color: 'var(--muted)' }}
+                  onClick={() => { if (window.confirm('לנתק את הענן ולחזור לשמירה במחשב הזה?')) { localStorage.removeItem(CLOUD_KEY); if (BUILT_IN_CLOUD) lsSet(LOCAL_ONLY_KEY, true); location.reload(); } }}>
+            עבודה בלי ענן</button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+/* ---------------------------------------------------------- device lock */
+/* An optional PIN for this device: a clinic computer others can reach. The
+   PIN never leaves the device; only a salted hash of it is kept. The lock
+   closes again after 15 minutes without activity. */
+const PIN_KEY = 'tzbooks_pin', UNLOCK_KEY = 'tzbooks_unlocked';
+async function pinHash(pin, salt) {
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin));
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function LockScreen({ onUnlock, who }) {
+  const [pin, setPin] = useState('');
+  const [err, setErr] = useState('');
+  const [tries, setTries] = useState(0);
+  const go = async (e) => {
+    e.preventDefault();
+    const p = lsGet(PIN_KEY, null);
+    if (p && await pinHash(pin, p.salt) === p.hash) { sessionStorage.setItem(UNLOCK_KEY, '1'); onUnlock(); return; }
+    setTries(t => t + 1); setPin(''); setErr('קוד שגוי');
+  };
+  return (
+    <form className="login" onSubmit={go}>
+      <div className="card" style={{ maxWidth: 340 }}>
+        <img src={LOGO} alt="Tizon Health" />
+        <h1>המערכת נעולה</h1>
+        {who && <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>{who}</div>}
+        <Field label="קוד"><input type="password" inputMode="numeric" dir="ltr" autoFocus value={pin} disabled={tries >= 5}
+          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))} style={{ textAlign: 'center', fontSize: 22, letterSpacing: 8 }} /></Field>
+        {err && <div className="mg-note bad">{err}{tries >= 5 ? '. יותר מדי ניסיונות: סגור את הדפדפן ונסה שוב.' : ''}</div>}
+        <button className="mg-btn" disabled={pin.length < 4 || tries >= 5} style={{ justifyContent: 'center' }}>פתח</button>
+      </div>
+    </form>
+  );
+}
+
+/* ==================================================================== app */
+const LOCAL_USER = { email: 'local' };
+/* ================================================================ guided tours
+   Every screen has a short tour. A step points at an element marked with
+   data-tour="…" and records the version it appeared in (since).
+     · The first time a screen is opened, its tour runs by itself.
+     · After an update, only the steps newer than the last visit run, marked
+       "חדש", and a "what's new" window lists the changes once.
+     · The "?" button (and the מדריך page) replays any tour at any time.
+   tour-check.mjs runs before every build and stops it when a step points at
+   an anchor that no longer exists, when a step is newer than VERSION, or when
+   VERSION has no entry in CHANGES. So the guide cannot fall behind the app:
+   a release that changes a screen has to update its tour to build at all. */
+const TOUR_KEY = 'tzbooks_tours';
+const SEEN_KEY = 'tzbooks_seen_version';
+const verCmp = (a, b) => {
+  const x = String(a || '0').split('.').map(Number), y = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < 3; i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0 ? 1 : -1; }
+  return 0;
+};
+
+const CHANGES = [
+  { v: '1.9.0', date: '30.09.26', items: [
+    'פריטים: קטלוג מוצרים ושירותים לכל עסק, עם ייבוא מ-iCount. בחשבונית בוחרים פריט והמחיר נכנס לבד.',
+    'דפי סליקה של זד קרדיט: שולחים ללקוח קישור, הוא משלם בכרטיס (גם בתשלומים), ומיד מופקת חשבונית מס קבלה חתומה ונשלחת אליו במייל.',
+    'הגדרה חד-פעמית: גיבוי וענן ← דפי סליקה.'] },
+  { v: '1.8.3', date: '30.09.26', items: ['כל ההגדרות עוברות אוטומטית בענן לכל מכשיר: רישום התוכנה, ההדרכות, הגיבוי השבועי והארכיון החודשי (בלי כפילויות בין מכשירים).'] },
+  { v: '1.8.2', date: '30.09.26', items: ['טקסט גדול משמעותית בטלפון: כפתורים, טבלאות, טפסים והדרכה.'] },
+  { v: '1.8.1', date: '30.09.26', items: [
+    'חיבור אוטומטי לענן בכל מכשיר: לא צריך יותר להדביק הגדרות. נכנסים עם אימייל וסיסמה.'] },
+  { v: '1.8.0', date: '30.09.26', items: [
+    'הדרכה אינטראקטיבית בכל מסך: סיור קצר שרץ בפעם הראשונה, ואחרי כל עדכון מציג רק את מה שחדש.',
+    'כפתור "?" בפינת המסך מפעיל שוב את ההדרכה של המסך הנוכחי.',
+    'דף "מדריך" בתפריט: כל הסיורים במקום אחד, ורשימת השינויים בכל גרסה.',
+    'חלון "מה חדש" שמופיע פעם אחת אחרי כל עדכון.'] },
+  { v: '1.7.0', date: '29.09.26', items: [
+    'מסך כניסה חדש, משתמשים והרשאות: בעלים, מפיק מסמכים וצופה. נעילה בקוד במכשיר.',
+    'מספרי הקצאה אוטומטיים מרשות המסים.',
+    'תקרת מזומן, ארכיון חודשי ורשומות הנהלת חשבונות (B100/B110) במבנה האחיד.'] },
+  { v: '1.6.0', date: '', items: ['שליחת לקוחות לחנות (סנכרון דו-כיווני): רק בלחיצה, ורק לקוחות חדשים.'] },
+  { v: '1.5.0', date: '', items: ['לשונית לקוחות וכרטיס לקוח, ייבוא לקוחות מ-iCount (אקסל או CSV) וסנכרון מהחנות.'] },
+  { v: '1.4.0', date: '', items: ['ייבוא מ-iCount (וכל תוכנה רשומה) דרך קובץ מבנה אחיד.'] },
+  { v: '1.3.0', date: '', items: ['PDF אמיתי, חתימה דיגיטלית ושליחה במייל, ניכוי במקור, יומן פעולות, צפייה בלבד לרואה חשבון וייצוא מבנה אחיד.'] },
+  { v: '1.2.0', date: '', items: ['הפקת מסמכים במספור רציף: חשבונית מס, קבלה, חשבונית מס קבלה, זיכוי ועוד.'] },
+  { v: '1.1.0', date: '', items: ['קישור לחנות בקריאה בלבד: הזמנות ששולמו נספרות כהכנסה.'] },
+  { v: '1.0.1', date: '', items: ['לוגו וצבעי המותג.'] },
+  { v: '1.0.0', date: '', items: ['הגרסה הראשונה: עסקים, הכנסות, הוצאות, ספקים, בנק, מע״מ ורווח והפסד.'] },
+];
+
+const TOUR_CTX = {
+  welcome: 'התחלה', all: 'כל העסקים', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
+  expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pnl: 'רווח והפסד', tax: 'רשות המסים',
+  items: 'פריטים', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
+};
+const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'import'];
+const WRITERS = ['owner', 'clerk'];
+
+const TOURS = {
+  welcome: [
+    { title: 'ברוך הבא ל-Tizon Books', text: 'סיור של דקה. מעבירים שלבים עם "הבא" או עם החצים במקלדת, ויוצאים בכל רגע עם Esc.', since: '1.0.0' },
+    { t: 'welcome-card', title: 'מתחילים מעסק', text: 'כל עסק הוא ספר נפרד, עם סוג עוסק ומע״מ משלו. אפשר להתחיל מהחנות, מהקליניקה או מכל עסק אחר.', since: '1.0.0' },
+    { t: 'side-new', title: 'עוד עסק', text: 'מכאן מוסיפים עסקים בכל רגע.', since: '1.0.0' },
+    { t: 'side-settings', title: 'גיבוי וענן', text: 'בלי ענן הנתונים נשמרים בדפדפן הזה בלבד. כדאי לחבר ענן או לגבות לעיתים קרובות.', since: '1.0.0' },
+    { t: 'help-btn', title: 'עזרה בכל מסך', text: 'הכפתור הזה מפעיל את ההדרכה של המסך שאתה נמצא בו.', since: '1.8.0' },
+  ],
+  all: [
+    { title: 'כל העסקים במבט אחד', text: 'המסך הזה מחבר את כל העסקים: הכנסות, הוצאות, מע״מ ומה דורש טיפול.', since: '1.0.0', roles: ['owner', 'viewer'] },
+    { title: 'ברוך הבא', text: 'יש לך הרשאה להפיק מסמכים ולנהל לקוחות בעסקים שבתפריט. בוחרים עסק כדי להתחיל.', since: '1.7.0', roles: ['clerk'] },
+    { t: 'all-period', title: 'תקופה', text: 'בוחרים חודש או תקופת דיווח, וכל המספרים במסך מתעדכנים.', since: '1.0.0' },
+    { t: 'all-stats', title: 'הסיכום', text: 'הכנסות, הוצאות ורווח של כל העסקים יחד, לפני מע״מ.', since: '1.0.0' },
+    { t: 'all-table', title: 'עסק עסק', text: 'שורה לכל עסק: הכנסות, הוצאות, רווח ומע״מ, ומעבר מהיר לעסק עצמו.', since: '1.0.0' },
+    { t: 'all-vat', title: 'מע״מ לפי עוסק', text: 'עסקים עם אותו מספר עוסק מדווחים יחד, ולכן מחוברים כאן לדיווח אחד.', since: '1.0.0' },
+    { t: 'all-alerts', title: 'מה דורש טיפול', text: 'הזמנות בלי מסמך, שורות בנק שלא הותאמו ועוד. כדאי לעבור על זה פעם בשבוע.', since: '1.0.0' },
+    { t: 'all-chart', title: '12 חודשים', text: 'המגמה לאורך השנה: הכנסות לפי עסק מול הוצאות.', since: '1.0.0' },
+    { t: 'side-books', title: 'העסקים שלך', text: 'כל עסק בתפריט נפתח לספר משלו, עם לשוניות למסמכים, לקוחות, הכנסות ועוד.', since: '1.0.0' },
+    { t: 'side-new', title: 'עסק חדש', text: 'מוסיפים עוד עסק בכל רגע.', since: '1.0.0' },
+    { t: 'side-users', title: 'משתמשים והרשאות', text: 'מי נכנס לאיזה עסק: בעלים, מפיק מסמכים או צופה.', since: '1.7.0' },
+    { t: 'side-settings', title: 'גיבוי וענן', text: 'גיבוי, ענן, חתימה דיגיטלית, חיבור לחנות ורשות המסים.', since: '1.0.0' },
+    { t: 'side-help', title: 'המדריך', text: 'כל ההדרכות במקום אחד, ורשימת השינויים בכל גרסה.', since: '1.8.0' },
+    { t: 'help-btn', title: 'עזרה בכל מסך', text: 'הכפתור הזה מפעיל את ההדרכה של המסך שאתה נמצא בו. אחרי כל עדכון ההדרכה מציגה רק את מה שחדש.', since: '1.8.0' },
+  ],
+  dash: [
+    { t: 'book-head', title: 'הספר של העסק', text: 'סוג העוסק, מספר העוסק ושיעור המע״מ. מכאן גם עורכים את פרטי העסק.', since: '1.0.0' },
+    { t: 'book-tabs', title: 'הלשוניות', text: 'כל עבודת העסק כאן: מסמכים, לקוחות, פריטים, הכנסות, הוצאות, בנק, מע״מ, רווח והפסד ורשות המסים.', since: '1.0.0' },
+    { t: 'dash-month', title: 'חודש', text: 'בוחרים חודש והמספרים מתעדכנים.', since: '1.0.0' },
+    { t: 'dash-stats', title: 'המספרים של החודש', text: 'הכנסות, הוצאות, רווח ומע״מ לתשלום.', since: '1.0.0' },
+    { t: 'dash-alerts', title: 'מה דורש טיפול', text: 'דברים שכדאי לסגור: הזמנות בלי מסמך, שורות בנק פתוחות ועוד. לחיצה מעבירה ללשונית המתאימה.', since: '1.0.0' },
+    { t: 'dash-chart', title: 'שנה אחורה', text: 'הכנסות מול הוצאות ב-12 החודשים האחרונים.', since: '1.0.0' },
+  ],
+  docs: [
+    { t: 'book-tabs', title: 'העסקים שלך', text: 'יש לך הרשאה להפיק מסמכים ולנהל לקוחות. שתי הלשוניות כאן.', since: '1.7.0', roles: ['clerk'] },
+    { t: 'docs-mode', title: 'ניסיון או אמיתי', text: 'במצב ניסיון המסמכים מסומנים T- ולא נספרים. במצב אמיתי הם מסמכי מס: מספור רציף, בלי מחיקה ובלי עריכה.', since: '1.2.0' },
+    { t: 'docs-new', title: 'הפקת מסמך', text: 'בוחרים סוג: חשבונית מס, קבלה, חשבונית מס קבלה, זיכוי ועוד. הסוגים מותאמים לסוג העוסק.', since: '1.2.0', roles: WRITERS },
+    { t: 'docs-filters', title: 'סינון', text: 'לפי חודש, סוג ומקור (Tizon Books או iCount). כאן רואים גם כמה חשבוניות עוד פתוחות.', since: '1.2.0' },
+    { t: 'docs-table', title: 'המסמכים', text: 'מכל מסמך אפשר להפיק PDF חתום, להדפיס ולשלוח במייל או בוואטסאפ. הדפסה חוזרת מסומנת "העתק".', since: '1.2.0' },
+    { t: 'docs-paynew', title: 'דף סליקה', text: 'קישור לתשלום בכרטיס (זד קרדיט) ששולחים ללקוח בוואטסאפ או במייל. כשהוא משלם, החשבונית מופקת ונשלחת אליו לבד.', since: '1.9.0', roles: WRITERS },
+    { t: 'docs-pay', title: 'מעקב אחרי תשלומים', text: 'כל הקישורים ששלחת: מה ממתין, מה שולם ואיזה מסמך הופק. הרשימה מתעדכנת לבד.', since: '1.9.0' },
+    { t: 'docs-table', title: 'מספר הקצאה', text: 'חשבונית מעל הסף לעוסק מורשה צריכה מספר הקצאה. כשרשות המסים מחוברת, מבקשים אותו מכאן בלחיצה.', since: '1.7.0' },
+  ],
+  customers: [
+    { t: 'cust-stats', title: 'הלקוחות', text: 'כמה לקוחות, כמה עם אימייל וטלפון, וכמה פעילים השנה.', since: '1.5.0' },
+    { t: 'cust-store', title: 'סנכרון עם החנות', text: 'לקוחות החנות נקראים לכאן. לחנות נוספים רק לקוחות חדשים, בלחיצה, ואף פרט קיים שם לא משתנה.', since: '1.6.0' },
+    { t: 'cust-tools', title: 'חיפוש, הוספה וייבוא', text: 'מחפשים לפי שם, טלפון, אימייל או ח.פ. אפשר להוסיף לקוח, לייבא מ-iCount ולייצא לאקסל.', since: '1.5.0', roles: WRITERS },
+    { t: 'cust-table', title: 'כרטיס לקוח', text: 'מחזור ופעילות אחרונה לכל לקוח. כפילויות מתאחדות לפי ח.פ., ורק כשהשם תואם גם לפי אימייל או טלפון.', since: '1.5.0' },
+  ],
+  items: [
+    { t: 'items-tools', title: 'פריטים', text: 'המוצרים והשירותים של העסק, עם מחיר. מוסיפים כאן או מייבאים את רשימת הפריטים מ-iCount (אקסל או CSV).', since: '1.9.0' },
+    { t: 'items-table', title: 'הקטלוג', text: 'בחשבונית ובדף סליקה בוחרים פריט, והמחיר נכנס לבד, גם כשהמסמך לפני מע״מ והמחיר כולל אותו. כאן רואים גם כמה נמכר מכל פריט.', since: '1.9.0' },
+  ],
+  income: [
+    { t: 'inc-filters', title: 'הכנסות', text: 'סינון לפי חודש, חיפוש וייצוא לאקסל. בעסק שמחובר לחנות, הזמנות ששולמו נכנסות לכאן לבד.', since: '1.0.0' },
+    { t: 'inc-table', title: 'הרשימה', text: 'כל הכנסה עם תאריך, לקוח, מסמך ומע״מ.', since: '1.0.0' },
+  ],
+  expenses: [
+    { t: 'exp-filters', title: 'הוצאות', text: 'סינון לפי חודש וקטגוריה, וייצוא לאקסל.', since: '1.0.0' },
+    { t: 'exp-table', title: 'הרשימה', text: 'כל הוצאה עם ספק, קטגוריה ומע״מ מוכר. הסכומים נכנסים לדוח המע״מ ולרווח והפסד.', since: '1.0.0' },
+  ],
+  suppliers: [
+    { t: 'sup-new', title: 'ספק חדש', text: 'שם, ח.פ., קטגוריה ופרטי קשר. ההוצאות מקושרות לספק.', since: '1.0.0', roles: ['owner'] },
+    { t: 'sup-table', title: 'הספקים', text: 'כמה שולם לכל ספק השנה.', since: '1.0.0' },
+  ],
+  bank: [
+    { t: 'bank-tools', title: 'דף בנק', text: 'מורידים מהבנק CSV ומעלים כאן. "התאמה אוטומטית" מחפשת הכנסה או הוצאה באותו סכום, עד שבוע מהתאריך.', since: '1.0.0', roles: ['owner'] },
+    { t: 'bank-stats', title: 'המצב', text: 'כמה שורות מותאמות וכמה עוד פתוחות.', since: '1.0.0' },
+    { t: 'bank-table', title: 'השורות', text: 'שורה שלא הותאמה לבד מתאימים ידנית.', since: '1.0.0' },
+  ],
+  vat: [
+    { t: 'vat-period', title: 'תקופת הדיווח', text: 'חודשי או דו-חודשי, ובחירת התקופה. מכאן גם יוצא הדוח לרואה החשבון.', since: '1.0.0' },
+    { t: 'vat-stats', title: 'לדיווח', text: 'עסקאות, מע״מ עסקאות, תשומות ומע״מ לתשלום. אלה המספרים שממלאים בדיווח.', since: '1.0.0' },
+  ],
+  pnl: [
+    { t: 'pnl-range', title: 'טווח', text: 'בוחרים מחודש עד חודש, ומייצאים את הדוח ואת כל התנועות לרואה החשבון.', since: '1.0.0' },
+    { t: 'pnl-cards', title: 'רווח והפסד', text: 'תמצית התקופה, הכנסות והוצאות לפי קטגוריה.', since: '1.0.0' },
+  ],
+  tax: [
+    { t: 'tax-export', title: 'מבנה אחיד', text: 'INI.TXT ו-BKMVDATA.TXT לפי הוראה 1.31: הקובץ שמבקר מס מבקש, וגם מה שמעבירים לרואה החשבון.', since: '1.3.0' },
+    { t: 'tax-register', title: 'רישום התוכנה', text: 'חמשת השלבים לרישום התוכנה ברשות המסים, והמקום לרשום את מספר הרישום שמתקבל.', since: '1.3.0' },
+    { t: 'tax-log', title: 'יומן פעולות', text: 'כל הפקה, הדפסה, שליחה וייצוא נרשמים כאן, ואי אפשר למחוק.', since: '1.3.0' },
+  ],
+  import: [
+    { t: 'imp-icount', title: 'ייבוא מ-iCount', text: 'מעלים את קובצי המבנה האחיד מ-iCount. המסמכים נשמרים כמו שהם, והזמנות שכבר בחנות לא נספרות פעמיים.', since: '1.4.0' },
+    { t: 'imp-erp', title: 'המערכת הישנה', text: 'העתקת הכנסות, הוצאות וספקים מה-ERP הקודם.', since: '1.0.0' },
+    { t: 'imp-danger', title: 'מחיקת העסק', text: 'מוחקת את הספר ואת כל הרשומות שלו. אי אפשר למחוק עסק שהופקו בו מסמכים אמיתיים.', since: '1.0.0' },
+  ],
+  settings: [
+    { t: 'set-backup', title: 'גיבוי', text: 'קובץ אחד עם כל העסקים. משחזרים ממנו בכל מחשב.', since: '1.0.0' },
+    { t: 'set-cloud', title: 'ענן', text: 'עם הענן הנתונים מאחורי כניסה, בכל מכשיר, ומסמכים אמיתיים אפשריים.', since: '1.0.0' },
+    { t: 'set-sign', title: 'חתימה דיגיטלית', text: 'מעלים את תעודת החתימה פעם אחת. מאז כל PDF נחתם, ואפשר לשלוח אותו במייל ישירות.', since: '1.3.0' },
+    { t: 'set-store', title: 'החנות', text: 'חיבור לקריאה בלבד: הזמנות ששולמו ומספרי חשבוניות.', since: '1.1.0' },
+    { t: 'set-ita', title: 'רשות המסים', text: 'מתחברים פעם בשלושה חודשים, ומספרי ההקצאה מתבקשים אוטומטית.', since: '1.7.0' },
+    { t: 'set-pay', title: 'דפי סליקה', text: 'מפתח השירות של Firebase ומפתח זד קרדיט לכל עסק. מגדירים פעם אחת, ומאז החשבונית יוצאת לבד אחרי כל תשלום.', since: '1.9.0' },
+    { t: 'set-pin', title: 'נעילה במכשיר', text: 'קוד לפתיחת המערכת במחשב משותף. ננעל לבד אחרי 15 דקות בלי פעילות.', since: '1.7.0' },
+    { t: 'set-archive', title: 'ארכיון חודשי', text: 'קבצי מבנה אחיד וגיבוי לכל חודש, במקום אחד.', since: '1.7.0' },
+  ],
+  users: [
+    { t: 'users-add', title: 'הוספת משתמש', text: 'אימייל, עסק ותפקיד. המשתמש נרשם עם "משתמש חדש" באותו אימייל.', since: '1.7.0' },
+    { t: 'users-table', title: 'מי רואה מה', text: 'בעלים עושה הכול. מפיק מסמכים רואה רק מסמכים ולקוחות. צופה רק רואה.', since: '1.7.0' },
+  ],
+  help: [
+    { t: 'help-list', title: 'כל ההדרכות', text: 'לכל מסך סיור משלו. "הצג" פותח את המסך ומריץ את הסיור.', since: '1.8.0' },
+    { t: 'help-auto', title: 'הדרכה אוטומטית', text: 'אפשר לכבות את ההדרכות שרצות לבד, או להפעיל את כולן מחדש.', since: '1.8.0' },
+    { t: 'help-changes', title: 'מה השתנה', text: 'כל הגרסאות והשינויים שבהן.', since: '1.8.0' },
+  ],
+};
+
+const tourAnchor = (t) => document.querySelector(`[data-tour="${t}"]`);
+const tourVisible = (t) => { const el = tourAnchor(t); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+/* The steps that can run now: allowed for this role, on screen, and — when
+   the screen was seen before — newer than that visit. */
+function tourSteps(ctx, role, seen) {
+  return (TOURS[ctx] || [])
+    .filter(s => (!s.roles || s.roles.includes(role)) && (!seen || verCmp(s.since, seen) > 0) && (!s.t || tourVisible(s.t)))
+    .map(s => ({ ...s, isNew: !!seen }));
+}
+const tourState = () => lsGet(TOUR_KEY, {});
+const tourMark = (ctx) => { try { lsSet(TOUR_KEY, { ...tourState(), [ctx]: VERSION }); } catch { /* private mode */ } };
+const tourPending = (ctx, role) => {
+  const seen = tourState()[ctx];
+  return !!seen && (TOURS[ctx] || []).some(s => (!s.roles || s.roles.includes(role)) && verCmp(s.since, seen) > 0);
+};
+
+function TourOverlay({ ctx, steps, auto, onDone, onOff }) {
+  const [i, setI] = useState(0);
+  const [rect, setRect] = useState(null);
+  const [cardH, setCardH] = useState(190);
+  const cardRef = useRef(null);
+  const step = steps[i];
+  const last = i === steps.length - 1;
+  const next = () => (last ? onDone() : setI(i + 1));
+  const back = () => i > 0 && setI(i - 1);
+
+  useEffect(() => {
+    const el = step.t && tourAnchor(step.t);
+    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    let raf, prev = '';
+    const tick = () => {
+      const e = step.t && tourAnchor(step.t);
+      const r = e ? e.getBoundingClientRect() : null;
+      const key = r ? [r.top, r.left, r.width, r.height].map(Math.round).join() : '';
+      if (key !== prev) { prev = key; setRect(r && r.width ? { top: r.top, left: r.left, width: r.width, height: r.height } : null); }
+      if (cardRef.current) { const h = cardRef.current.offsetHeight; setCardH(p => (p === h ? p : h)); }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [step]);
+
+  useEffect(() => {
+    const k = (e) => {
+      if (e.key === 'Escape') onDone();
+      else if (e.key === 'ArrowLeft' || e.key === 'Enter') { e.preventDefault(); next(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); back(); }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  });
+  useEffect(() => { cardRef.current?.querySelector('.tour-next')?.focus({ preventScroll: true }); }, [i]);
+
+  const vw = window.innerWidth, vh = window.innerHeight, pad = 6, W = Math.min(360, vw - 24);
+  let pos;
+  if (rect) {
+    const below = rect.top + rect.height + pad + 12, above = rect.top - pad - 12 - cardH;
+    const alignRight = Math.min(Math.max(8, vw - (rect.left + rect.width)), vw - W - 8);
+    const midTop = Math.min(Math.max(8, rect.top + 10), vh - cardH - 8);
+    if (below + cardH < vh - 8) pos = { top: below, right: alignRight, width: W };
+    else if (above >= 8) pos = { top: above, right: alignRight, width: W };
+    // A tall element: beside it when there is room, otherwise at the bottom of the screen.
+    else if (rect.left - pad - 12 >= W + 8) pos = { top: midTop, right: vw - rect.left + pad + 12, width: W };
+    else if (vw - rect.left - rect.width - pad - 12 >= W + 8) pos = { top: midTop, right: vw - (rect.left + rect.width + pad + 12) - W, width: W };
+    else pos = { top: Math.max(8, vh - cardH - 12), right: (vw - W) / 2, width: W };
+  } else pos = { top: Math.max(8, (vh - cardH) / 2), right: (vw - W) / 2, width: W };
+
+  return (
+    <div className="tour" role="dialog" aria-modal="true" aria-label={'הדרכה · ' + (TOUR_CTX[ctx] || '')}>
+      <div className="tour-block" onClick={e => e.stopPropagation()} style={rect ? { background: 'transparent' } : null} />
+      {rect && <div className="tour-spot" style={{ top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }} />}
+      <div className="tour-card" ref={cardRef} style={pos}>
+        <div className="tour-top">
+          <span>{TOUR_CTX[ctx]} · {i + 1}/{steps.length}</span>
+          {step.isNew && <span className="mg-chip ok">חדש בגרסה {step.since}</span>}
+          <button className="tour-x" aria-label="סגור" onClick={onDone}>✕</button>
+        </div>
+        <h4>{step.title}</h4>
+        <p>{step.text}</p>
+        <div className="tour-dots">{steps.map((_, j) => <i key={j} className={j === i ? 'on' : ''} />)}</div>
+        <div className="tour-nav">
+          <button className="mg-btn sm tour-next" onClick={next}>{last ? 'סיום' : 'הבא ←'}</button>
+          {i > 0 && <button className="mg-btn ghost sm" onClick={back}>→ הקודם</button>}
+          {auto && <button className="tour-off" onClick={onOff}>לא להציג הדרכות לבד</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WhatsNew({ since, onClose, onHelp }) {
+  const list = CHANGES.filter(c => verCmp(c.v, since) > 0);
+  return (
+    <div className="mg-mod" onClick={onClose}>
+      <div className="mg-card tour-news" onClick={e => e.stopPropagation()} role="dialog" aria-label="מה חדש">
+        <h3 style={{ marginTop: 0 }}>מה חדש בגרסה {VERSION}</h3>
+        {list.map(c => (
+          <div key={c.v} style={{ marginBottom: 10 }}>
+            {list.length > 1 && <b>גרסה {c.v}</b>}
+            <ul style={{ margin: '4px 0', paddingInlineStart: 20, lineHeight: 1.8 }}>{c.items.map((x, j) => <li key={j}>{x}</li>)}</ul>
+          </div>
+        ))}
+        <p className="mg-note" style={{ margin: '10px 0' }}>בכל מסך שהשתנה תופיע הדרכה קצרה על מה שחדש בו.</p>
+        <div style={row}>
+          <button className="mg-btn" onClick={onClose}>הבנתי</button>
+          <button className="mg-btn ghost" onClick={onHelp}>למדריך</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HelpView({ role, clerkOnly, onStart, flash }) {
+  const [st, setSt] = useState(tourState);
+  const ctxs = Object.keys(TOURS).filter(c => c !== 'help' && (!clerkOnly || ['docs', 'customers', 'items', 'help'].includes(c)));
+  const setAll = (v) => { try { lsSet(TOUR_KEY, v); } catch { /* ignore */ } setSt(v); };
+  return (
+    <>
+      <div className="mg-h" style={{ '--h1': '#8a6331', '--h2': '#c4a36e' }}>
+        <div><h2>מדריך</h2><div className="sub">גרסה {VERSION} · סיור לכל מסך, ומה השתנה בכל גרסה</div></div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>
+        <div data-tour="help-list" className="mg-card">
+          <h3 style={{ marginTop: 0 }}>ההדרכות</h3>
+          <table className="mg-tbl"><tbody>
+            {ctxs.map(c => {
+              const steps = TOURS[c].filter(s => !s.roles || s.roles.includes(role));
+              const seen = st[c];
+              const fresh = seen && steps.some(s => verCmp(s.since, seen) > 0);
+              return (
+                <tr key={c}>
+                  <td><b>{TOUR_CTX[c]}</b> {fresh && <span className="mg-chip ok">חדש</span>}
+                    {!seen && <span className="mg-chip">טרם נצפה</span>}</td>
+                  <td style={{ color: 'var(--muted)', fontSize: 13 }}>{steps.length} שלבים</td>
+                  <td style={{ textAlign: 'left' }}><button className="mg-btn ghost sm keep" onClick={() => onStart(c)}>הצג</button></td>
+                </tr>
+              );
+            })}
+          </tbody></table>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div data-tour="help-auto" className="mg-card">
+            <h3 style={{ marginTop: 0 }}>הדרכה אוטומטית</h3>
+            <p style={{ marginTop: 0, fontSize: 14 }}>כשנכנסים למסך בפעם הראשונה, ההדרכה שלו רצה לבד. אחרי עדכון היא מציגה רק את מה שחדש.</p>
+            <div style={row}>
+              {st.off
+                ? <button className="mg-btn sm keep" onClick={() => { setAll({ ...st, off: false }); flash('ההדרכות האוטומטיות הופעלו'); }}>הפעל הדרכות לבד</button>
+                : <button className="mg-btn ghost sm keep" onClick={() => { setAll({ ...st, off: true }); flash('ההדרכות לא ירוצו לבד. הכפתור "?" עדיין זמין'); }}>כבה הדרכות לבד</button>}
+              <button className="mg-btn ghost sm keep" onClick={() => { setAll({ off: false }); flash('כל ההדרכות יוצגו שוב'); }}>הצג שוב את כולן</button>
+            </div>
+          </div>
+          <div data-tour="help-changes" className="mg-card">
+            <h3 style={{ marginTop: 0 }}>מה השתנה</h3>
+            {CHANGES.map(c => (
+              <div key={c.v} style={{ marginBottom: 10 }}>
+                <b>גרסה {c.v}</b>{c.date && <span style={{ color: 'var(--muted)', fontSize: 13 }}> · {c.date}</span>}
+                <ul style={{ margin: '4px 0', paddingInlineStart: 20, lineHeight: 1.7, fontSize: 14 }}>{c.items.map((x, j) => <li key={j}>{x}</li>)}</ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function App() {
+  const [user, setUser] = useState(cloud ? undefined : LOCAL_USER);
+  const [books, setBooks] = useState(null);
+  const [cur, setCur] = useState('all');
+  const [datas, setDatas] = useState({});
+  const [loading, setLoading] = useState({});
+  const [msg, setMsg] = useState('');
+  const [bookForm, setBookForm] = useState(null);
+  const [booksErr, setBooksErr] = useState('');
+  const [storeLogin, setStoreLogin] = useState(false);
+  const [storeTick, setStoreTick] = useState(0);
+  const [server, setServer] = useState(null);
+  const [locked, setLocked] = useState(() => !!lsGet(PIN_KEY, null) && sessionStorage.getItem(UNLOCK_KEY) !== '1');
+  useEffect(() => {
+    if (!lsGet(PIN_KEY, null)) return;
+    let t; const reset = () => { clearTimeout(t); t = setTimeout(() => { sessionStorage.removeItem(UNLOCK_KEY); setLocked(true); }, 15 * 60000); };
+    ['mousemove', 'keydown', 'click', 'touchstart'].forEach(ev => window.addEventListener(ev, reset));
+    reset();
+    return () => { clearTimeout(t); ['mousemove', 'keydown', 'click', 'touchstart'].forEach(ev => window.removeEventListener(ev, reset)); };
+  }, [locked]);
+  useEffect(() => { fnStatus().then(setServer); }, []);
+  /* Back from the Tax Authority's consent page. */
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search); const r = q.get('ita');
+    if (!r) return;
+    setTimeout(() => flash(r === 'ok' ? 'החיבור לרשות המסים הצליח. מספרי הקצאה יתבקשו אוטומטית.' : 'החיבור לרשות המסים נכשל · ' + (q.get('m') || '')), 800);
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+
+  /* Guided tours: which screen is showing, and whether its tour should run. */
+  const [bookTab, setBookTab] = useState(null);
+  const [tabReq, setTabReq] = useState(null);
+  const [tour, setTour] = useState(null);
+  const [tourWant, setTourWant] = useState(null);
+  const [news, setNews] = useState(() => {
+    const seen = lsGet(SEEN_KEY, null);
+    // Someone who used an earlier version has data or settings saved already.
+    const before = seen || (lsGet(LOCAL_KEY, null) || lsGet(CLOUD_KEY, null) || lsGet(BACKUP_KEY, null) ? '1.7.0' : null);
+    if (!before) { try { lsSet(SEEN_KEY, VERSION); } catch { /* ignore */ } return null; }
+    return verCmp(VERSION, before) > 0 ? before : null;
+  });
+  const closeNews = () => { try { lsSet(SEEN_KEY, VERSION); } catch { /* ignore */ } setNews(null); };
+  const flashT = useRef(null);
+  const flash = (m) => { setMsg(m); clearTimeout(flashT.current); flashT.current = setTimeout(() => setMsg(''), 4200); };
+
+  useEffect(() => {
+    if (!cloud) return;
+    return onAuthStateChanged(cloud.auth, u => { setUser(u || null); if (!u) { prefUid = null; setBooks(null); setDatas({}); } });
+  }, []);
+  /* The user's settings from the cloud, before the screens read them. */
+  const [prefsReady, setPrefsReady] = useState(!cloud);
+  useEffect(() => {
+    if (!cloud || !user) return;
+    setPrefsReady(false);
+    prefPull(user).finally(() => {
+      const seen = lsGet(SEEN_KEY, null);
+      if (seen) setNews(verCmp(VERSION, seen) > 0 ? seen : null);
+      setPrefsReady(true);
+    });
+  }, [user?.uid]);
+
+  const sortBooks = (b) => [...b].sort((x, y) => (x.order ?? 99) - (y.order ?? 99) || (x.name || '').localeCompare(y.name || '', 'he'));
+  const refreshBooks = async () => {
+    try {
+      const b = sortBooks(await withTimeout(listBooks(user.email)));
+      setBooks(b); setBooksErr('');
+      if (!['all', 'settings', 'users'].includes(cur) && !b.some(x => x.id === cur)) setCur('all');
+    } catch (e) {
+      setBooks([]);
+      setBooksErr(String(e?.code || e?.message || '').includes('permission')
+        ? 'אין הרשאה לקרוא את העסקים. צריך לפרסם בפרויקט ה-Firebase את קובץ החוקים שמגיע עם המערכת.'
+        : 'לא הצלחתי לטעון את העסקים. בדוק את החיבור.');
+    }
+  };
+  useEffect(() => { if (user) refreshBooks(); }, [user]);
+
+  /* Once a week, a backup of every book I own to my own inbox — when the
+     cloud and the mail function are both there. */
+  useEffect(() => {
+    if (!prefsReady || !cloud || !user || !server?.mail || !books?.some(b => (b.owners || []).includes(user.email.toLowerCase()))) return;
+    const last = lsGet('tzbooks_autobk', null);
+    if (last && Date.now() - Date.parse(last) < 7 * 86400000) return;
+    (async () => {
+      try {
+        const data = await exportAll(user.email);
+        data.books = data.books.filter(b => (b.owners || []).includes(user.email.toLowerCase()));
+        await fnCall({ action: 'backup', data: JSON.stringify(data), filename: `tizon-books-backup-${todayIso()}.json` });
+        lsSet('tzbooks_autobk', new Date().toISOString()); lsSet(BACKUP_KEY, new Date().toISOString());
+        flash('גיבוי שבועי נשלח למייל שלך');
+      } catch (e) { console.warn('auto backup', e); }
+    })();
+  }, [books, server, prefsReady]);
+
+  useEffect(() => {
+    if (!prefsReady || !cloud || !user || !server?.mail || !books?.length) return;
+    const mine = books.filter(b => (b.owners || []).includes(user.email.toLowerCase()));
+    const prev = addMonths(thisMonth(), -1);
+    if (!mine.length || lsGet(ARCH_KEY, '') === prev) return;
+    (async () => {
+      try {
+        const { zip, lines } = await makeArchive(mine, prev, user.email);
+        await fnCall({ action: 'archive', subject: `Tizon Books · ארכיון ${prev}`, text: `ארכיון חודשי ל-${prev}:\n${lines.join('\n')}`,
+                       files: [{ name: `tizon-books-archive-${prev}.zip`, b64: b64(zip), type: 'application/zip' }] });
+        lsSet(ARCH_KEY, prev);
+        for (const b of mine) await logAct(b.id, { action: 'archive', title: `${prev} נשלח ל-${user.email}`, series: 'live' });
+        flash(`ארכיון ${prev} נשלח למייל`);
+      } catch (e) { console.warn('archive', e); }
+    })();
+  }, [books, server, prefsReady]);
+
+  const ensure = async (book, force) => {
+    if (!force && (datas[book.id] || loading[book.id])) return;
+    setLoading(l => ({ ...l, [book.id]: true }));
+    const d = await loadBook(book);
+    setDatas(x => ({ ...x, [book.id]: d }));
+    setLoading(l => ({ ...l, [book.id]: false }));
+  };
+  useEffect(() => {
+    if (!books) return;
+    if (cur === 'all') books.forEach(b => ensure(b));
+    else { const b = books.find(x => x.id === cur); if (b) ensure(b); }
+  }, [cur, books]);
+
+  /* After signing in to the store, or out: read every linked book again. */
+  const reloadLinked = () => (books || []).filter(b => b.tenant).forEach(b => ensure(b, true));
+
+  const patch = (bookId) => (name, fn) =>
+    setDatas(d => ({ ...d, [bookId]: { ...d[bookId], [name]: fn(d[bookId]?.[name] || []) } }));
+
+  const saveBook = async (b) => {
+    const owners = cloud
+      ? [...new Set([user.email.toLowerCase(), ...(b.owners || []).map(x => String(x).trim().toLowerCase()).filter(x => x.includes('@'))])]
+      : (b.owners || []);
+    const rec = clean({ ...b, owners, name: b.name.trim(), updatedAt: new Date().toISOString() });
+    try { await withTimeout(putBook(rec)); }
+    catch (e) { flash('שמירת העסק נכשלה · ' + (e?.code || e?.message || '')); return false; }
+    const was = books.find(x => x.id === rec.id);
+    setBooks(bs => sortBooks([...bs.filter(x => x.id !== rec.id), rec]));
+    if (!was && !rec.tenant) setDatas(x => ({ ...x, [rec.id]: { errors: [], orders: [], docs: [], storeErr: '', storeLogin: false, incomes: [], expenses: [], suppliers: [], banktx: [] } }));
+    else if (!was || (was.tenant || '') !== (rec.tenant || '')) ensure(rec, true);
+    flash('העסק נשמר');
+    return true;
+  };
+
+  const deleteBook = async (b) => {
+    const docsNow = datas[b.id]?.documents || await bookCol(b.id, 'documents').list().catch(() => []);
+    if (docsNow.some(d => d.series === 'live')) { flash('אי אפשר למחוק עסק שהופקו בו מסמכים אמיתיים. מסמכי מס נשמרים שבע שנים.'); return; }
+    if (!window.confirm(`למחוק את "${b.name}" עם כל ההכנסות, ההוצאות, הספקים ושורות הבנק שלו? אי אפשר לשחזר.`)) return;
+    if (window.prompt('כדי לאשר, הקלד את שם העסק:') !== b.name) { flash('המחיקה בוטלה'); return; }
+    try {
+      for (const c of COLS) {
+        const list = await bookCol(b.id, c).list();
+        for (const r of list) await bookCol(b.id, c).del(r.id).catch(e => { if (c !== 'payreqs') throw e; });
+      }
+      await delBook(b.id);
+      setBooks(bs => bs.filter(x => x.id !== b.id)); setCur('all'); flash('העסק נמחק');
+    } catch (e) { flash('המחיקה נכשלה · ' + (e?.code || '')); }
+  };
+
+  const tourBook = books?.find(b => b.id === cur);
+  const tourRole = tourBook && user ? roleOf(tourBook, user.email) : (user && (books || []).length && (books || []).every(b => roleOf(b, user.email) === 'clerk') ? 'clerk' : 'owner');
+  const tourCtx = !user || !prefsReady || locked || !books ? null
+    : cur === 'settings' || cur === 'users' || cur === 'help' ? cur
+    : !books.length ? 'welcome'
+    : cur === 'all' ? 'all'
+    : tourBook && datas[tourBook.id] && BOOK_CTX.includes(bookTab) ? bookTab : null;
+  const tourBusy = !!(tour || news || bookForm || storeLogin);
+  useEffect(() => {
+    if (!tourCtx || tourBusy) return;
+    const want = tourWant === tourCtx;
+    const t = setTimeout(() => {
+      if (want) {
+        setTourWant(null);
+        const steps = tourSteps(tourCtx, tourRole, null);
+        if (steps.length) setTour({ ctx: tourCtx, steps, auto: false }); else flash('אין הדרכה זמינה למסך הזה');
+        return;
+      }
+      const st = tourState();
+      if (st.off) return;
+      const steps = tourSteps(tourCtx, tourRole, st[tourCtx]);
+      if (steps.length) setTour({ ctx: tourCtx, steps, auto: true });
+      else if (st[tourCtx] !== VERSION) tourMark(tourCtx);
+    }, want ? 500 : 900);
+    return () => clearTimeout(t);
+  }, [tourCtx, tourBusy, tourWant, tourRole]);
+  const startTour = (ctx) => {
+    if (!BOOK_CTX.includes(ctx)) { setCur(ctx === 'welcome' && books?.length ? 'all' : ctx); setTourWant(ctx === 'welcome' && books?.length ? 'all' : ctx); return; }
+    const pick = [tourBook, ...(books || [])].find(b => b && (roleOf(b, user.email) !== 'clerk' || ['docs', 'customers', 'items'].includes(ctx))
+      && (roleOf(b, user.email) !== 'viewer' || ctx !== 'import'));
+    if (!pick) { flash('כדי לראות את ההדרכה הזו צריך קודם עסק'); return; }
+    setCur(pick.id); setTabReq({ book: pick.id, k: ctx }); setTourWant(ctx);
+  };
+
+  if (user === undefined) return <div className="login"><div style={{ color: 'var(--gold)' }}>טוען…</div></div>;
+  if (!user) return <Login />;
+  if (!prefsReady) return <div className="login"><div style={{ color: 'var(--gold)' }}>טוען את ההגדרות…</div></div>;
+  if (locked) return <LockScreen who={cloud ? user.email : ''} onUnlock={() => setLocked(false)} />;
+
+  const book = books?.find(b => b.id === cur);
+  const lastBackup = lsGet(BACKUP_KEY, null);
+  const stale = !cloud && books?.length > 0 && (!lastBackup || Date.now() - Date.parse(lastBackup) > 7 * 86400000);
+
+  return (
+    <div className="shell">
+      <aside className="side">
+        <div className="brand"><img className="full" src={LOGO} alt="Tizon Health" /><img className="mark" src={MARK} alt="Tizon" /><small>Books · הנהלת חשבונות</small></div>
+        <button className={'bk' + (cur === 'all' ? ' on' : '')} onClick={() => setCur('all')}>
+          <span className="dot" style={{ background: 'var(--bronze2)' }} />כל העסקים</button>
+        <div data-tour="side-books" className="sec">העסקים</div>
+        {(books || []).map(b => (
+          <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '')} onClick={() => setCur(b.id)}>
+            <span className="dot" style={{ background: b.color || '#2f7d5b' }} />{b.name}
+          </button>
+        ))}
+        <button data-tour="side-new" className="bk" onClick={() => setBookForm({})} style={{ color: 'var(--gold)', fontWeight: 700 }}>＋ עסק חדש</button>
+        {cloud && (books || []).some(b => roleOf(b, user.email) === 'owner') && (
+          <button data-tour="side-users" className={'bk' + (cur === 'users' ? ' on' : '')} onClick={() => setCur('users')}>
+            <span className="dot" style={{ background: '#2b4bb8' }} />משתמשים והרשאות</button>)}
+        <button data-tour="side-settings" className={'bk' + (cur === 'settings' ? ' on' : '')} onClick={() => setCur('settings')}>
+          <span className="dot" style={{ background: cloud ? '#4f9d6f' : '#d9822b' }} />גיבוי וענן</button>
+        <button data-tour="side-help" className={'bk' + (cur === 'help' ? ' on' : '')} onClick={() => setCur('help')}>
+          <span className="dot" style={{ background: 'var(--gold)' }} />מדריך</button>
+        <div className="foot">
+          <small>{cloud ? user.email : 'נשמר במחשב הזה'}</small><br />
+          <button onClick={() => { setDatas({}); refreshBooks(); }}>רענון</button>
+          {cloud && <> · <button onClick={() => signOut(cloud.auth)}>יציאה</button></>}
+          {lsGet(PIN_KEY, null) && <> · <button onClick={() => { sessionStorage.removeItem(UNLOCK_KEY); setLocked(true); }}>נעל</button></>}
+          <br /><small style={{ opacity: .6 }}>גרסה {VERSION} · {BUILD_DATE}</small>
+        </div>
+      </aside>
+
+      <main className="main">
+        {booksErr && <div className="mg-note bad" style={{ marginBottom: 14 }}>{booksErr}</div>}
+        {stale && cur !== 'settings' && (
+          <div className="mg-note warn" style={{ marginBottom: 14 }}>
+            הנתונים שמורים רק בדפדפן הזה{lastBackup ? `, והגיבוי האחרון נעשה ב-${heDate(lastBackup.slice(0, 10))}` : ' ועדיין לא נעשה גיבוי'}.{' '}
+            <button className="mg-linkish" onClick={() => setCur('settings')}>לגיבוי או למעבר לענן</button></div>
+        )}
+        {books === null && <div className="mg-empty">טוען את העסקים…</div>}
+
+        {cur === 'settings' && (
+          <SettingsView key={storeTick} user={user} flash={flash} books={books || []} server={server}
+                        onServer={() => fnStatus().then(setServer)}
+                        onRestored={() => { setDatas({}); refreshBooks(); }}
+                        onStoreLogin={() => setStoreLogin(true)} onStoreChanged={reloadLinked} />
+        )}
+
+        {cur === 'help' && <HelpView role={tourRole} clerkOnly={tourRole === 'clerk'} onStart={startTour} flash={flash} />}
+        {cur === 'users' && books && <UsersView books={books} user={user} flash={flash} onSave={saveBook} />}
+        {cur !== 'settings' && cur !== 'users' && cur !== 'help' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
+
+        {cur === 'all' && books && books.length > 0 && (() => {
+          /* The financial overview is for owners and viewers; someone who only
+             issues documents sees their businesses, not the totals. */
+          const seen = books.filter(b => roleOf(b, user.email) !== 'clerk');
+          return seen.length
+            ? <AllView books={seen} datas={datas} loading={loading} onOpen={setCur} onStoreLogin={() => setStoreLogin(true)} />
+            : <div className="mg-card" style={{ maxWidth: 560 }}><h3 style={{ marginTop: 0 }}>שלום {user.email}</h3>
+                <p>יש לך הרשאה להפיק מסמכים בעסקים שבתפריט. בחר עסק כדי להתחיל.</p></div>;
+        })()}
+
+        {book && (datas[book.id]
+          ? <BookView key={book.id} book={book} data={datas[book.id]} patch={patch(book.id)} flash={flash} server={server}
+                      role={roleOf(book, user.email)} ro={roleOf(book, user.email) === 'viewer'}
+                      onReload={() => ensure(book, true)} onEditBook={() => setBookForm(book)}
+                      onStoreLogin={() => setStoreLogin(true)}
+                      onDeleteBook={() => deleteBook(book)}
+                      onTab={setBookTab} tabReq={tabReq?.book === book.id ? tabReq.k : null} onTabDone={() => setTabReq(null)} />
+          : <div className="mg-empty">טוען את {book.name}…</div>)}
+      </main>
+
+      {bookForm && (
+        <BookForm rec={bookForm} me={user.email} count={books?.length || 0}
+                  hasLive={(datas[bookForm.id]?.documents || []).some(d => d.series === 'live')}
+                  onClose={() => setBookForm(null)}
+                  onSave={async (b) => { if (await saveBook(b)) { setBookForm(null); setCur(b.id); } }} />
+      )}
+      {storeLogin && <StoreLogin onClose={() => setStoreLogin(false)}
+                                 onDone={(email) => { setStoreLogin(false); setStoreTick(t => t + 1); flash('מחובר לחנות כ-' + email); reloadLinked(); }} />}
+      {tourCtx && (
+        <button data-tour="help-btn" className="help-btn" title="הדרכה למסך הזה" aria-label="הדרכה למסך הזה"
+                onClick={() => setTourWant(tourCtx)}>?
+          {tourState().off && tourPending(tourCtx, tourRole) && <span className="nd" />}</button>)}
+      {tour && <TourOverlay key={tour.ctx + tour.steps.length} ctx={tour.ctx} steps={tour.steps} auto={tour.auto}
+                            onDone={() => { tourMark(tour.ctx); setTour(null); }}
+                            onOff={() => { try { lsSet(TOUR_KEY, { ...tourState(), off: true, [tour.ctx]: VERSION }); } catch { /* ignore */ }
+                                           setTour(null); flash('ההדרכות לא ירוצו לבד. הכפתור "?" ודף המדריך זמינים תמיד'); }} />}
+      {news && !locked && <WhatsNew since={news} onClose={closeNews} onHelp={() => { closeNews(); setCur('help'); }} />}
+      {msg && <div className="flash">{msg}</div>}
+    </div>
+  );
+}
+
+/* Who can do what, in every business I own. Each change is saved to that
+   business at once. A new person signs up with "משתמש חדש" in the same email. */
+function UsersView({ books, user, flash, onSave }) {
+  const me = user.email.toLowerCase();
+  const owned = books.filter(b => roleOf(b, me) === 'owner');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('clerk');
+  const [pick, setPick] = useState(() => Object.fromEntries(owned.map(b => [b.id, true])));
+  const people = {};
+  owned.forEach(b => [['owners', 'owner'], ['clerks', 'clerk'], ['viewers', 'viewer']].forEach(([f, r]) =>
+    (b[f] || []).forEach(e => { (people[e] = people[e] || {})[b.id] = r; })));
+  const assign = async (b, e, r) => {
+    e = e.trim().toLowerCase();
+    if (e === me && r !== 'owner') { flash('אי אפשר להוריד את עצמך מבעלות'); return; }
+    const without = (arr) => (arr || []).filter(x => x !== e);
+    const nb = { ...b, owners: without(b.owners), clerks: without(b.clerks), viewers: without(b.viewers) };
+    if (r) nb[{ owner: 'owners', clerk: 'clerks', viewer: 'viewers' }[r]].push(e);
+    if (!nb.owners.length) { flash('לכל עסק צריך להישאר בעלים אחד לפחות'); return; }
+    await onSave(nb);
+  };
+  const add = async () => {
+    const e = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { flash('אימייל לא תקין'); return; }
+    for (const b of owned.filter(b => pick[b.id])) await assign(b, e, role);
+    setEmail(''); flash(`${e} נוסף`);
+    /* The system sends no email of its own: an invitation ready to send. */
+    const link = window.location.origin;
+    window.location.href = `mailto:${e}?subject=${encodeURIComponent('הזמנה ל-Tizon Books')}&body=${encodeURIComponent(
+      `שלום,\n\nהוספתי אותך כ${ROLES[role]} ב-Tizon Books.\nנכנסים כאן: ${link}\nבוחרים "משתמש חדש", נרשמים עם האימייל הזה (${e}) ובוחרים סיסמה.\n\n${user.email}`)}`;
+  };
+  return (
+    <>
+      <div className="mg-h"><div><h2>משתמשים והרשאות</h2><div className="sub">מי נכנס לאיזה עסק, ומה מותר לו לעשות</div></div></div>
+      <div data-tour="users-add" className="mg-card" style={{ marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>הוספת משתמש</h3>
+        <div style={row}>
+          <Field label="אימייל"><input dir="ltr" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
+          <Field label="תפקיד"><select value={role} onChange={e => setRole(e.target.value)}>
+            {Object.entries(ROLES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+        </div>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '10px 0' }}>
+          {owned.map(b => <label key={b.id} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={!!pick[b.id]} onChange={e => setPick(p => ({ ...p, [b.id]: e.target.checked }))} />{b.name}</label>)}
+        </div>
+        <button className="mg-btn" disabled={!email.trim() || !owned.some(b => pick[b.id])} onClick={add}>＋ הוסף</button>
+        <div className="mg-note" style={{ marginTop: 12, fontSize: 13, lineHeight: 1.8 }}>
+          <b>בעלים</b>: הכול. · <b>מפיק מסמכים</b>: מפיק מסמכים ומנהל לקוחות, בלי הכנסות, הוצאות, דוחות והגדרות. · <b>צפייה בלבד</b>: רואה הכול ומייצא, לא משנה דבר (לרואה החשבון).<br />
+          המשתמש החדש נכנס למערכת ובוחר "משתמש חדש" עם אותו אימייל. כדי שיוכל גם לשלוח מסמכים חתומים, צריך להוסיף את האימייל שלו גם ל-<span dir="ltr">ALLOWED_EMAILS</span> ב-Netlify.
+        </div>
+      </div>
+      <div data-tour="users-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>משתמש</th>{owned.map(b => <th key={b.id}>{b.name}</th>)}</tr></thead>
+        <tbody>
+          {Object.keys(people).sort((a, b) => (a === me ? -1 : b === me ? 1 : a.localeCompare(b))).map(e => (
+            <tr key={e}><td dir="ltr" style={{ textAlign: 'right' }}><b>{e}</b>{e === me && <span className="mg-chip" style={{ marginInlineStart: 6 }}>את/ה</span>}</td>
+              {owned.map(b => (
+                <td key={b.id}><select value={people[e][b.id] || ''} disabled={e === me} style={{ width: 'auto' }}
+                  onChange={ev => assign(b, e, ev.target.value || null)}>
+                  <option value="">— אין גישה —</option>{Object.entries(ROLES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
+              ))}</tr>
+          ))}
+        </tbody>
+      </table></div>
+    </>
+  );
+}
+
+function PinCard({ flash }) {
+  const [has, setHas] = useState(!!lsGet(PIN_KEY, null));
+  const set = async () => {
+    const a = window.prompt('קוד חדש (4 עד 8 ספרות):'); if (!a) return;
+    if (!/^\d{4,8}$/.test(a)) { flash('הקוד צריך להיות 4 עד 8 ספרות'); return; }
+    if (window.prompt('הקלד שוב את הקוד:') !== a) { flash('הקודים לא זהים'); return; }
+    const salt = [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(16).padStart(2, '0')).join('');
+    lsSet(PIN_KEY, { salt, hash: await pinHash(a, salt) }); sessionStorage.setItem(UNLOCK_KEY, '1'); setHas(true); flash('נעילה הופעלה');
+  };
+  return (
+    <div data-tour="set-pin" className="mg-card">
+      <h3 style={{ marginTop: 0 }}>נעילה במכשיר הזה</h3>
+      <p style={{ marginTop: 0, fontSize: 14 }}>קוד שנדרש כדי לפתוח את המערכת במחשב הזה, למשל במחשב של הקליניקה. אחרי 15 דקות בלי פעילות, המערכת ננעלת שוב.</p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="mg-btn" onClick={set}>{has ? 'החלף קוד' : 'הפעל נעילה'}</button>
+        {has && <button className="mg-btn ghost" onClick={() => { if (window.confirm('לבטל את הנעילה במכשיר הזה?')) { localStorage.removeItem(PIN_KEY); setHas(false); flash('הנעילה בוטלה'); } }}>בטל נעילה</button>}
+      </div>
+      <div className="mg-note" style={{ marginTop: 10 }}>הקוד נשמר רק במכשיר הזה. אם שכחת אותו: מוחקים את נתוני האתר בדפדפן. בענן הנתונים לא נפגעים; בעבודה בלי ענן, קודם גיבוי.</div>
+    </div>
+  );
+}
+
+function ArchiveCard({ books, user, server, flash }) {
+  const [month, setMonth] = useState(addMonths(thisMonth(), -1));
+  const [busy, setBusy] = useState(false);
+  const last = lsGet(ARCH_KEY, '');
+  const mine = books.filter(b => !cloud || (b.owners || []).includes(user.email.toLowerCase()));
+  return (
+    <div data-tour="set-archive" className="mg-card">
+      <h3 style={{ marginTop: 0 }}>ארכיון חודשי</h3>
+      <p style={{ marginTop: 0, fontSize: 14 }}>לכל חודש: קבצי מבנה אחיד של כל עסק (מסמכים ופקודות יומן) וגיבוי מלא, בקובץ אחד. את הקבצים צריך לשמור 7 שנים.</p>
+      <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+        {cloud && server?.mail ? `נשלח אוטומטית למייל בתחילת כל חודש. אחרון: ${last || 'עוד לא'}` : `אחרון שהורד: ${last || 'עוד לא'}`}</div>
+      <div style={row}>
+        <Field label="חודש"><input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} /></Field>
+        <button className="mg-btn keep" disabled={busy || !mine.length} onClick={async () => {
+          setBusy(true);
+          try { const { zip } = await makeArchive(mine, month, user.email); saveBytes(`tizon-books-archive-${month}.zip`, zip, 'application/zip');
+                if (month === addMonths(thisMonth(), -1)) lsSet(ARCH_KEY, month); flash('הארכיון ירד'); }
+          catch (e) { flash('הפקת הארכיון נכשלה · ' + e.message); }
+          setBusy(false);
+        }}>{busy ? 'מכין…' : '⬇ הורד ארכיון'}</button>
+      </div>
+    </div>
+  );
+}
+
+/* Allocation numbers: which businesses are connected to the Tax Authority,
+   and the button that sends the owner there to give consent. */
+function ItaCard({ server, books, user, flash }) {
+  const mine = books.filter(b => digitsOf(b.taxId).length === 9 && (!cloud || (b.owners || []).includes(user.email.toLowerCase())));
+  const [st, setSt] = useState({});
+  useEffect(() => {
+    if (!cloud || !server?.ita?.configured) return;
+    mine.forEach(b => fnCall({ action: 'ita-status', vat: digitsOf(b.taxId) }).then(r => setSt(x => ({ ...x, [b.id]: r }))).catch(() => {}));
+  }, [server?.ita?.configured, books.length]);
+  const connect = async (b) => {
+    try { const r = await fnCall({ action: 'ita-connect', vat: digitsOf(b.taxId) }); window.location.href = r.url; }
+    catch (e) { flash('החיבור נכשל · ' + e.message); }
+  };
+  return (
+    <div data-tour="set-ita" className="mg-card">
+      <h3 style={{ marginTop: 0 }}>מספרי הקצאה אוטומטיים</h3>
+      {!server ? <p style={{ marginTop: 0 }}>זמין רק בהתקנה מ-GitHub, עם שרת.</p>
+      : !server.ita?.configured ? (
+        <p style={{ marginTop: 0, fontSize: 14 }}>
+          עוד לא מוגדר. אחרי רישום התוכנה ופתיחת אפליקציה בפורטל המפתחים של רשות המסים, מגדירים ב-Netlify את
+          <span dir="ltr"> ITA_CLIENT_ID, ITA_CLIENT_SECRET, ITA_REDIRECT_URI </span>(ולייצור: <span dir="ltr">ITA_ENV=production</span>).
+          עד אז מזינים את מספר ההקצאה ידנית.</p>
+      ) : !cloud ? <p style={{ marginTop: 0 }}>צריך להיות מחובר לענן.</p> : (
+        <>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>סביבה: <b>{server.ita.env === 'production' ? 'ייצור' : 'בדיקות (sandbox)'}</b></div>
+          {mine.map(b => (
+            <div key={b.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f0ebe0', flexWrap: 'wrap' }}>
+              <b style={{ flex: 1 }}>{b.name} <span dir="ltr" style={{ fontWeight: 400, color: 'var(--muted)' }}>{b.taxId}</span></b>
+              {st[b.id]?.connected ? <span className="mg-chip ok">מחובר עד {heDate(String(st[b.id].expires || '').slice(0, 10))}</span> : <span className="mg-chip">לא מחובר</span>}
+              <button className="mg-btn ghost sm" onClick={() => connect(b)}>{st[b.id]?.connected ? 'חדש חיבור' : 'התחבר לרשות המסים'}</button>
+            </div>
+          ))}
+          {!mine.length && <div className="mg-empty">אין עסק עם מספר עוסק בן 9 ספרות.</div>}
+          <div className="mg-note" style={{ marginTop: 10 }}>החיבור נעשה בכניסה שלך לאתר רשות המסים, ותקף שלושה חודשים. אחר כך מתחברים מחדש.</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* Signing in to the store — the console's own user and password. Kept by
+   Firebase on this device, separately from this app's own login. */
+function StoreLogin({ onClose, onDone }) {
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true); setErr('');
+    try { const c = await signInWithEmailAndPassword(store().auth, email.trim(), pw); onDone(c.user.email); }
+    catch (x) {
+      const c = String(x?.code || '');
+      setErr(c.includes('invalid') || c.includes('wrong') || c.includes('not-found') ? 'אימייל או סיסמה שגויים'
+        : c.includes('too-many') ? 'יותר מדי ניסיונות. נסה שוב בעוד כמה דקות.' : 'הכניסה נכשלה: ' + c);
+    }
+    setBusy(false);
+  };
+  return (
+    <Box title="התחברות לחנות" onClose={onClose}
+         footer={<><button className="mg-btn" disabled={busy || !email || !pw} onClick={go}>{busy ? 'מתחבר…' : 'התחבר'}</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <p style={{ marginTop: 0 }}>אותו אימייל וסיסמה של קונסולת החנות.</p>
+      <div style={grid}>
+        <Field label="אימייל"><input type="email" dir="ltr" value={email} onChange={e => setEmail(e.target.value)} autoComplete="username" /></Field>
+        <Field label="סיסמה"><input type="password" dir="ltr" value={pw} onChange={e => setPw(e.target.value)} autoComplete="current-password"
+                                    onKeyDown={e => e.key === 'Enter' && email && pw && go()} /></Field>
+      </div>
+      {err && <div className="mg-note bad" style={{ marginTop: 12 }}>{err}</div>}
+      <div className="mg-note" style={{ marginTop: 12 }}>
+        <b>קריאה בלבד.</b> המערכת קוראת את ההזמנות ששולמו ואת מספרי החשבוניות, ולא כותבת לחנות דבר.
+        לא משנה קוד, חוקים או נתונים בחנות.
+      </div>
+    </Box>
+  );
+}
+
+function Welcome({ onNew }) {
+  return (
+    <div data-tour="welcome-card" className="mg-card" style={{ maxWidth: 640 }}>
+      <h2 style={{ marginTop: 0, fontFamily: 'Frank Ruhl Libre,serif' }}>ברוך הבא</h2>
+      <p>כל עסק מנוהל כספר נפרד, עם סוג עוסק ומע״מ משלו. בדף "כל העסקים" רואים את כולם יחד.</p>
+      <div style={row}>
+        <button className="mg-btn" onClick={() => onNew({ name: 'החנות', kind: 'store', tenant: 'main' })}>הוסף את החנות</button>
+        <button className="mg-btn ghost" onClick={() => onNew({ name: 'הקליניקה', kind: 'clinic' })}>הוסף קליניקה</button>
+        <button className="mg-btn ghost" onClick={() => onNew({})}>עסק אחר</button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ business form */
+function BookForm({ rec, me, count, hasLive, onSave, onClose }) {
+  const [f, setF] = useState(() => ({
+    id: uid('book'), name: '', kind: 'other', legalName: '', taxId: '', dealerType: 'licensed', vatRate: 18,
+    color: BOOK_COLORS[count % BOOK_COLORS.length], order: count, owners: cloud ? [me.toLowerCase()] : [],
+    ...rec, ownersText: (rec.owners || (cloud ? [me.toLowerCase()] : [])).join(', '), viewersText: (rec.viewers || []).join(', '), clerksText: (rec.clerks || []).join(', ')
+  }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const submit = () => {
+    const { ownersText, viewersText, clerksText, ...b } = f;
+    onSave({ ...b, vatRate: Number(b.vatRate) || 0, owners: ownersText.split(/[,\s]+/).filter(Boolean),
+             viewers: viewersText.split(/[,\s]+/).map(x => x.trim().toLowerCase()).filter(x => x.includes('@')),
+             clerks: clerksText.split(/[,\s]+/).map(x => x.trim().toLowerCase()).filter(x => x.includes('@')) });
+  };
+  return (
+    <Box title={rec.id ? 'הגדרות העסק' : 'עסק חדש'} onClose={onClose} wide
+         footer={<><button className="mg-btn" disabled={!String(f.name).trim()} onClick={submit}>שמור</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div style={grid}>
+        <Field label="שם העסק (לתצוגה)"><input value={f.name} onChange={e => set('name', e.target.value)} /></Field>
+        <Field label="סוג"><select value={f.kind} onChange={e => set('kind', e.target.value)}>
+          {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+        <Field label="שם משפטי"><input value={f.legalName} onChange={e => set('legalName', e.target.value)} /></Field>
+        <Field label="ח.פ. / ע.מ."><input dir="ltr" value={f.taxId} onChange={e => set('taxId', e.target.value)} /></Field>
+        <Field label="כתובת"><input value={f.address || ''} onChange={e => set('address', e.target.value)} /></Field>
+        <Field label="טלפון"><input dir="ltr" value={f.phone || ''} onChange={e => set('phone', e.target.value)} /></Field>
+        <Field label="אימייל"><input dir="ltr" value={f.email || ''} onChange={e => set('email', e.target.value)} /></Field>
+        <Field label="סוג עוסק"><select value={f.dealerType} onChange={e => set('dealerType', e.target.value)}>
+          {Object.entries(DEALERS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+        {f.dealerType !== 'exempt' && <Field label="שיעור מע״מ (%)"><input inputMode="decimal" value={f.vatRate} onChange={e => set('vatRate', e.target.value)} /></Field>}
+        <Field label="קישור לחנות · מזהה החנות (אופציונלי)"><input dir="ltr" value={f.tenant || ''} onChange={e => set('tenant', e.target.value.trim())} placeholder="main" /></Field>
+        <Field label="צבע"><div style={{ display: 'flex', gap: 6 }}>
+          {BOOK_COLORS.map(c => <button key={c} type="button" onClick={() => set('color', c)}
+            style={{ width: 28, height: 28, borderRadius: '50%', background: c, border: f.color === c ? '3px solid #c4a36e' : '2px solid #fff', cursor: 'pointer', boxShadow: '0 0 0 1px #ddd' }} />)}
+        </div></Field>
+      </div>
+      <div className="mg-card" style={{ marginTop: 14, background: '#fbf8f1' }}>
+        <h3 style={{ marginTop: 0 }}>מסמכים</h3>
+        <div style={grid}>
+          <Field label="לוגו למסמכים">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {f.logo && <img src={f.logo} alt="" style={{ height: 40, maxWidth: 120, objectFit: 'contain' }} />}
+              <label className="mg-btn ghost sm" style={{ cursor: 'pointer' }}>{f.logo ? 'החלף' : 'העלה'}
+                <input type="file" accept="image/*" hidden onChange={e => {
+                  const file = e.target.files?.[0]; if (!file) return;
+                  const img = new Image(); const url = URL.createObjectURL(file);
+                  img.onload = () => { const k = Math.min(1, 400 / img.width, 160 / img.height); const c = document.createElement('canvas');
+                    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                    set('logo', c.toDataURL('image/png')); URL.revokeObjectURL(url); };
+                  img.src = url; e.target.value = ''; }} /></label>
+              {f.logo && <button type="button" className="mg-btn ghost sm" onClick={() => set('logo', '')}>הסר</button>}
+            </div></Field>
+          <Field label="מצב">
+            <select value={f.docMode || 'test'} onChange={e => set('docMode', e.target.value)} disabled={!cloud}>
+              <option value="test">ניסיון (T-, לא לצורכי מס)</option><option value="live">אמיתי</option></select></Field>
+          <Field label="מספר ראשון למסמכים אמיתיים"><input inputMode="numeric" value={f.docStart || 1} disabled={hasLive}
+            onChange={e => set('docStart', e.target.value.replace(/\D/g, ''))} /></Field>
+        </div>
+        {!cloud && <div className="mg-note" style={{ marginTop: 10 }}>מסמכים אמיתיים אפשריים רק כשהמערכת מחוברת לענן. מסמך מס לא יכול להישמר רק בדפדפן.</div>}
+        {cloud && f.docMode === 'live' && <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, fontSize: 14 }}>
+          <input type="checkbox" style={{ width: 'auto', marginTop: 3 }} checked={!!f.docApproved} onChange={e => set('docApproved', e.target.checked)} />
+          <span>רואה החשבון שלי אישר להפיק מסמכי מס מהמערכת הזו. מסמך אמיתי לא נמחק ולא נערך, והמספור שלו רץ ברצף.</span></label>}
+        {hasLive && <div className="mg-note" style={{ marginTop: 10 }}>כבר הופקו מסמכים אמיתיים, ולכן המספר הראשון נעול.</div>}
+      </div>
+      {cloud && <div style={{ marginTop: 12 }}>
+        <Field label="בעלים · גישה מלאה (אימיילים, מופרדים בפסיק)">
+          <input dir="ltr" value={f.ownersText} onChange={e => set('ownersText', e.target.value)} /></Field>
+        <div style={{ marginTop: 10 }}><Field label="מפיקי מסמכים · מסמכים ולקוחות בלבד (אימיילים, מופרדים בפסיק)">
+          <input dir="ltr" value={f.clerksText} onChange={e => set('clerksText', e.target.value)} /></Field></div>
+        <div style={{ marginTop: 10 }}><Field label="צפייה בלבד · למשל רואה החשבון (אימיילים, מופרדים בפסיק)">
+          <input dir="ltr" value={f.viewersText} onChange={e => set('viewersText', e.target.value)} /></Field></div>
+      </div>}
+      <div className="mg-note" style={{ marginTop: 12 }}>
+        <b>קישור לחנות:</b> ההזמנות ששולמו בחנות נכנסות לספר הזה כהכנסות, עם מספרי החשבוניות, בקריאה בלבד.
+        מזהה החנות הוא מה שמופיע בכתובת הקונסולה אחרי <span dir="ltr">/t/</span>. לחנות הראשית זה <b dir="ltr">main</b>. משאירים ריק לעסק שאינו חנות.<br />
+        שני עסקים עם אותו ע.מ. מדווחים מע״מ יחד, ובדף "כל העסקים" הם מאוחדים בדוח המע״מ.
+        {cloud && ' רואה החשבון נכנס עם משתמש משלו ("משתמש חדש" במסך הכניסה) ורואה רק את הספרים שבהם הוא מופיע.'}
+      </div>
+    </Box>
+  );
+}
+
+/* ---------------------------------------------------------- backup & cloud */
+function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreChanged, server, onServer }) {
+  const [busy, setBusy] = useState(false);
+  const [cfgText, setCfgText] = useState('');
+  const lastBackup = lsGet(BACKUP_KEY, null);
+  const linked = books.filter(b => b.tenant);
+  const [storeEmail, setStoreEmail] = useState(undefined);
+  useEffect(() => { if (linked.length) storeUser().then(u => setStoreEmail(u ? u.email : null)); }, [linked.length]);
+
+  const backup = async () => {
+    setBusy(true);
+    try {
+      const data = await exportAll(user.email);
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      saveJSON(`tizon-books-backup-${stamp}.json`, data);
+      lsSet(BACKUP_KEY, new Date().toISOString());
+      flash(`הגיבוי ירד · ${data.books.length} עסקים`);
+    } catch (e) { flash('הגיבוי נכשל · ' + (e?.message || '')); }
+    setBusy(false);
+  };
+  const restore = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const r = await importAll(JSON.parse(await file.text()), cloud ? user.email : '');
+      flash(`שוחזרו ${r.books} עסקים ו-${r.records} רשומות`); onRestored();
+    } catch (e) { flash('השחזור נכשל · ' + (e?.message || '')); }
+    setBusy(false);
+  };
+  const connect = () => {
+    const c = parseFirebaseConfig(cfgText);
+    if (!c) { flash('לא זיהיתי apiKey ו-projectId בטקסט שהודבק'); return; }
+    if (c.projectId === 'tizonshoponline' && !window.confirm('זה הפרויקט של החנות. המערכת צריכה פרויקט נפרד. להמשיך בכל זאת?')) return;
+    lsSet(CLOUD_KEY, c); localStorage.removeItem(LOCAL_ONLY_KEY); location.reload();
+  };
+  const moveUp = async () => {
+    if (!window.confirm('להעתיק את כל הנתונים שנשמרו במחשב הזה לענן?')) return;
+    setBusy(true);
+    try {
+      const data = await exportAll('', local);
+      const r = await importAll(data, user.email);
+      flash(`הועברו ${r.books} עסקים ו-${r.records} רשומות לענן`); onRestored();
+    } catch (e) { flash('ההעברה נכשלה · ' + (e?.code || e?.message || '')); }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <div className="mg-h" style={{ '--h1': '#8a6331', '--h2': '#c4a36e' }}>
+        <div><h2>גיבוי וענן</h2><div className="sub">גרסה {VERSION} · {cloud ? `מחובר לענן · ${cloud.cfg.projectId}` : 'הנתונים נשמרים במחשב הזה'}</div></div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>
+        <div data-tour="set-backup" className="mg-card">
+          <h3 style={{ marginTop: 0 }}>גיבוי</h3>
+          <p style={{ marginTop: 0 }}>קובץ אחד עם כל העסקים וכל הרשומות. אפשר לשחזר ממנו בכל מחשב, גם אחרי מעבר לענן.</p>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>
+            גיבוי אחרון מהמכשיר הזה: {lastBackup ? heDate(lastBackup.slice(0, 10)) : 'עוד לא'}</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="mg-btn" disabled={busy} onClick={backup}>⬇ הורד גיבוי</button>
+            <label className="mg-btn ghost" style={{ cursor: 'pointer' }}>⬆ שחזר מגיבוי
+              <input type="file" accept=".json,application/json" hidden onChange={e => { restore(e.target.files?.[0]); e.target.value = ''; }} /></label>
+          </div>
+          <div className="mg-note" style={{ marginTop: 12 }}>שחזור מוסיף ומעדכן רשומות לפי המזהה שלהן. הוא לא מוחק רשומות שכבר קיימות.</div>
+        </div>
+
+        <div data-tour="set-sign" className="mg-card">
+          <h3 style={{ marginTop: 0 }}>חתימה דיגיטלית ושליחה</h3>
+          {!server ? (
+            <p style={{ marginTop: 0 }}>שירות החתימה לא זמין באתר הזה. הוא פועל רק כשהמערכת מותקנת מ-GitHub (לא בגרירת zip), לפי המדריך המצורף.</p>
+          ) : (
+            <>
+              <div style={{ lineHeight: 1.9, fontSize: 14 }}>
+                <div>{server.project ? '✓' : '✗'} מזהה הפרויקט (BOOKS_PROJECT_ID)</div>
+                <div>{server.guarded ? '✓' : '✗'} רשימת מורשים (ALLOWED_EMAILS)</div>
+                <div>{server.password ? '✓' : '✗'} סיסמת התעודה (SIGN_P12_PASSWORD)</div>
+                <div>{server.sign ? '✓' : '✗'} תעודה {server.cert ? <>· <b>{server.cert.name}</b> · {server.cert.issuer} · בתוקף עד {heDate(server.cert.expires.slice(0, 10))}</> : server.certError ? `· שגיאה: ${server.certError}` : '· לא הועלתה'}</div>
+                <div>{server.mail ? '✓' : '✗'} שליחת מייל (SMTP)</div>
+              </div>
+              {cloud && server.password && server.guarded && (
+                <label className="mg-btn ghost" style={{ cursor: 'pointer', marginTop: 10 }}>⬆ {server.sign ? 'החלף תעודה' : 'העלה תעודה'} (.p12 / .pfx)
+                  <input type="file" accept=".p12,.pfx,application/x-pkcs12" hidden onChange={async e => {
+                    const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
+                    try { const r = await fnCall({ action: 'cert', p12: b64(await file.arrayBuffer()) });
+                          flash(`התעודה נשמרה · ${r.cert.name}`); onServer(); }
+                    catch (x) { flash('העלאת התעודה נכשלה · ' + x.message); }
+                  }} /></label>
+              )}
+              {server.sign && server.cert && Date.parse(server.cert.expires) - Date.now() < 30 * 86400000 &&
+                <div className="mg-note warn" style={{ marginTop: 10 }}>התעודה פגה בקרוב. כדאי לחדש מול הגורם המאשר.</div>}
+            </>
+          )}
+          <div className="mg-note" style={{ marginTop: 12 }}>התעודה נשמרת בשרת בלבד ולא עוברת בדפדפן אחרי ההעלאה. הסיסמה שלה נשמרת בנפרד, בהגדרות של Netlify.</div>
+        </div>
+
+        <PinCard flash={flash} />
+        <ItaCard server={server} books={books} user={user} flash={flash} />
+        <PayCard server={server} books={books} user={user} flash={flash} onServer={onServer} />
+        <ArchiveCard books={books} user={user} server={server} flash={flash} />
+
+        <div data-tour="set-store" className="mg-card">
+          <h3 style={{ marginTop: 0 }}>חיבור לחנות</h3>
+          {!linked.length ? (
+            <p style={{ marginTop: 0 }}>אף עסק לא מקושר לחנות. מקשרים בהגדרות העסק, בשדה "מזהה החנות".</p>
+          ) : (
+            <>
+              <p style={{ marginTop: 0 }}>מקושרים: {linked.map(b => <b key={b.id}>{b.name} (<span dir="ltr">{b.tenant}</span>) </b>)}</p>
+              <p>{storeEmail === undefined ? 'בודק…' : storeEmail ? <>מחובר לחנות כ-<b dir="ltr">{storeEmail}</b></> : 'לא מחובר לחנות במכשיר הזה.'}</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="mg-btn" onClick={onStoreLogin}>{storeEmail ? 'החלף משתמש' : 'התחבר לחנות'}</button>
+                {storeEmail && <button className="mg-btn ghost" onClick={async () => { await signOut(store().auth); setStoreEmail(null); onStoreChanged(); flash('התנתקת מהחנות'); }}>התנתק מהחנות</button>}
+              </div>
+            </>
+          )}
+          <div className="mg-note" style={{ marginTop: 12 }}>קריאה בלבד: הזמנות ששולמו ומספרי חשבוניות. המערכת לא כותבת לחנות דבר.</div>
+        </div>
+
+        <div data-tour="set-cloud" className="mg-card">
+          <h3 style={{ marginTop: 0 }}>ענן</h3>
+          {!cloud ? (
+            <>
+              {BUILT_IN_CLOUD && <div className="mg-note warn" style={{ marginBottom: 12 }}>
+                המכשיר הזה נותק מהענן של Tizon Books.{' '}
+                <button className="mg-btn sm" onClick={() => { localStorage.removeItem(LOCAL_ONLY_KEY); location.reload(); }}>חזרה לענן</button></div>}
+              <p style={{ marginTop: 0 }}>
+                כרגע הכול נשמר בדפדפן הזה בלבד. כדי לעבוד מכל מכשיר, מחברים פרויקט Firebase <b>נפרד</b>, לא הפרויקט של החנות:
+              </p>
+              <ol style={{ paddingInlineStart: 18, lineHeight: 1.8, fontSize: 14, marginTop: 0 }}>
+                <li>ב-console.firebase.google.com יוצרים פרויקט חדש, למשל tizon-books.</li>
+                <li>Authentication ← Sign-in method ← מפעילים Email/Password.</li>
+                <li>Firestore Database ← Create database.</li>
+                <li>Firestore ← Rules ← מדביקים את הקובץ firestore.rules שמגיע עם המערכת ← Publish.</li>
+                <li>Project settings ← Your apps ← Web ← מעתיקים את ה-firebaseConfig ומדביקים כאן.</li>
+              </ol>
+              <textarea rows={6} dir="ltr" value={cfgText} onChange={e => setCfgText(e.target.value)}
+                        placeholder={'const firebaseConfig = {\n  apiKey: "…",\n  projectId: "…",\n  …\n};'} />
+              <div style={{ marginTop: 10 }}><button className="mg-btn" disabled={!cfgText.trim()} onClick={connect}>חבר לענן</button></div>
+              <div className="mg-note" style={{ marginTop: 12 }}>הנתונים שכבר נשמרו במחשב לא נמחקים. אחרי הכניסה לענן יופיע כפתור להעביר אותם.</div>
+            </>
+          ) : (
+            <>
+              <p style={{ marginTop: 0 }}>מחובר לפרויקט <b dir="ltr">{cloud.cfg.projectId}</b> כ-<b dir="ltr">{user.email}</b>.</p>
+              {prefErr
+                ? <div className="mg-note bad" style={{ marginBottom: 12 }}>ההגדרות האישיות לא מסתנכרנות בין המכשירים ({prefErr}). כנראה צריך לפרסם מחדש את firestore.rules של גרסה 1.8.3 (Firestore ← Rules ← Publish).</div>
+                : <div className="mg-note" style={{ marginBottom: 12 }}>כל הנתונים וההגדרות נשמרים בענן ועוברים לכל מכשיר שנכנסים ממנו. במכשיר נשארים רק נעילת הקוד וההתחברות לחנות.</div>}
+              {hasLocalData() && (
+                <div className="mg-note warn" style={{ marginBottom: 12 }}>
+                  יש במחשב הזה נתונים מלפני המעבר לענן.{' '}
+                  <button className="mg-btn sm" disabled={busy} onClick={moveUp}>העבר אותם לענן</button></div>
+              )}
+              <button className="mg-btn ghost" onClick={() => { if (window.confirm('לנתק את הענן במכשיר הזה? הנתונים בענן נשארים שם.')) { localStorage.removeItem(CLOUD_KEY); if (BUILT_IN_CLOUD) lsSet(LOCAL_ONLY_KEY, true); location.reload(); } }}>
+                נתק את הענן במכשיר הזה</button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+/* ============================================================ all businesses */
+function AllView({ books, datas, loading, onOpen, onStoreLogin }) {
+  const [mode, setMode] = useState('month');
+  const [month, setMonth] = useState(thisMonth());
+  const y = month.slice(0, 4);
+  const [from, to] = mode === 'month' ? [month, month]
+    : mode === 'bi' ? [biStart(month), addMonths(biStart(month), 1)]
+    : mode === 'ytd' ? [y + '-01', month] : [y + '-01', y + '-12'];
+  const label = from === to ? monthName(from) : `${monthName(from)}–${monthName(to)}`;
+
+  const rows = books.map(b => {
+    const d = datas[b.id];
+    if (!d) return { b, pending: true };
+    const L = buildLedger(b, d);
+    return { b, d, L, t: totals(L, from, to), a: alertsOf(d, L) };
+  });
+  const ready = rows.filter(r => !r.pending);
+  const sum = (k) => ready.reduce((a, r) => a + r.t[k], 0);
+
+  /* VAT is reported per dealer: businesses under one tax id file one return. */
+  const vatGroups = {};
+  ready.filter(r => r.L.rate > 0).forEach(r => {
+    const k = String(r.b.taxId || '').trim() || 'book:' + r.b.id;
+    const g = vatGroups[k] = vatGroups[k] || { taxId: r.b.taxId, names: [], incVat: 0, expVat: 0 };
+    g.names.push(r.b.name); g.incVat += r.t.incVat; g.expVat += r.t.expVat;
+  });
+
+  const months = Array.from({ length: 12 }, (_, i) => addMonths(thisMonth(), i - 11));
+  const series = months.map(m => ({ m, parts: ready.map(r => ({ b: r.b, v: totals(r.L, m, m) })) }));
+  const top = Math.max(1, ...series.map(s => Math.max(s.parts.reduce((a, p) => a + p.v.incNet, 0), s.parts.reduce((a, p) => a + p.v.expNet, 0))));
+
+  const alerts = ready.flatMap(r => {
+    const out = [];
+    if (r.d.storeLogin) out.push({ r, t: 'מקושר לחנות, אבל עוד לא התחברת אליה במכשיר הזה.', login: true });
+    if (r.d.storeErr) out.push({ r, t: r.d.storeErr, bad: true });
+    if (r.d.errors?.length) out.push({ r, t: 'חלק מהנתונים לא נטענו. בדוק את חוקי ה-Firestore.', bad: true });
+    if (r.a.noDocOrders) out.push({ r, t: `${r.a.noDocOrders} הזמנות ששולמו בלי חשבונית` });
+    if (r.a.unmatched) out.push({ r, t: `${r.a.unmatched} שורות בנק לא מותאמות` });
+    if (r.a.noDocExp) out.push({ r, t: `${r.a.noDocExp} הוצאות בלי מספר חשבונית` });
+    if (r.a.review) out.push({ r, t: `${r.a.review} רשומות מיובאות לבדיקה` });
+    return out;
+  });
+
+  return (
+    <>
+      <div className="mg-h" style={{ '--h1': '#8a6331', '--h2': '#c4a36e' }}>
+        <div><h2>כל העסקים</h2><div className="sub">{label} · {books.length} עסקים</div></div>
+      </div>
+
+      <div data-tour="all-period" style={{ ...row, marginBottom: 14 }}>
+        <Field label="תקופה"><select value={mode} onChange={e => setMode(e.target.value)}>
+          <option value="month">חודש</option><option value="bi">תקופת מע״מ (חודשיים)</option>
+          <option value="ytd">מתחילת השנה</option><option value="year">שנה מלאה</option></select></Field>
+        <Field label={mode === 'year' || mode === 'ytd' ? 'עד חודש' : 'חודש'}>
+          <input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} /></Field>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`all-${from}_${to}.csv`, [
+          ['עסק', 'הכנסות לפני מע״מ', 'הוצאות לפני מע״מ', 'רווח', 'מע״מ עסקאות', 'מע״מ תשומות'],
+          ...ready.map(r => [r.b.name, r2(r.t.incNet), r2(r.t.expNet), r2(r.t.profit), r2(r.t.incVat), r2(r.t.expVat)]),
+          ['סה״כ', r2(sum('incNet')), r2(sum('expNet')), r2(sum('profit')), r2(sum('incVat')), r2(sum('expVat'))]
+        ])}>⬇ ייצוא</button>
+      </div>
+
+      <div data-tour="all-stats" className="mg-stats" style={{ marginBottom: 16 }}>
+        <div className="mg-stat"><div className="lb">הכנסות (לפני מע״מ)</div><div className="vl">{fmt(sum('incNet'))}</div><div className="dl">כל העסקים · {label}</div></div>
+        <div className="mg-stat"><div className="lb">הוצאות (לפני מע״מ)</div><div className="vl">{fmt(sum('expNet'))}</div></div>
+        <div className="mg-stat"><div className="lb">רווח</div><div className="vl" style={sum('profit') < 0 ? { color: 'var(--bad)' } : undefined}>{fmt(sum('profit'))}</div></div>
+        <div className="mg-stat"><div className="lb">מע״מ נטו</div><div className="vl">{fmt(sum('vatDue'))}</div><div className="dl">{sum('vatDue') >= 0 ? 'לתשלום' : 'להחזר'}</div></div>
+      </div>
+
+      <div data-tour="all-table" className="mg-tblwrap" style={{ marginBottom: 16 }}><table className="mg-tbl">
+        <thead><tr><th>עסק</th><th>סוג</th><th>הכנסות</th><th>הוצאות</th><th>רווח</th><th>מע״מ</th><th></th></tr></thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.b.id}>
+              <td><span className="dot" style={{ background: r.b.color, display: 'inline-block', marginInlineEnd: 8 }} /><b>{r.b.name}</b></td>
+              <td><span className="mg-chip">{KINDS[r.b.kind] || 'אחר'}</span> <span className="mg-chip">{DEALERS[r.b.dealerType]}</span></td>
+              {r.pending
+                ? <td colSpan={4} style={{ color: 'var(--muted)' }}>{loading[r.b.id] ? 'טוען…' : '—'}</td>
+                : <><td>{fmt(r.t.incNet)}</td><td>{fmt(r.t.expNet)}</td>
+                    <td style={{ color: r.t.profit < 0 ? 'var(--bad)' : undefined, fontWeight: 700 }}>{fmt(r.t.profit)}</td>
+                    <td>{r.L.rate > 0 ? fmt(r.t.vatDue) : 'פטור'}</td></>}
+              <td><button className="mg-btn ghost sm" onClick={() => onOpen(r.b.id)}>פתח</button></td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot><tr><td colSpan={2}>סה״כ</td><td>{fmt(sum('incNet'))}</td><td>{fmt(sum('expNet'))}</td><td>{fmt(sum('profit'))}</td><td>{fmt(sum('vatDue'))}</td><td></td></tr></tfoot>
+      </table></div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16, marginBottom: 16 }}>
+        <div data-tour="all-vat" className="mg-card">
+          <h3 style={{ marginTop: 0 }}>מע״מ לפי עוסק · {label}</h3>
+          {Object.values(vatGroups).map((g, i) => (
+            <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid #f0ebe0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                <span>{g.taxId ? <span dir="ltr">{g.taxId}</span> : 'ללא ע.מ.'}</span>
+                <span dir="ltr">{fmt(g.incVat - g.expVat)}</span></div>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>{g.names.join(' + ')} · עסקאות {fmt(g.incVat)} · תשומות {fmt(g.expVat)}</div>
+            </div>
+          ))}
+          {!Object.keys(vatGroups).length && <div className="mg-empty">כל העסקים מוגדרים כפטורים.</div>}
+          {Object.values(vatGroups).some(g => !g.taxId) && (
+            <div className="mg-note warn" style={{ marginTop: 10 }}>לעסקים בלי ע.מ. בהגדרות אי אפשר לדעת אם הם מדווחים יחד. כדאי למלא.</div>
+          )}
+        </div>
+        <div data-tour="all-alerts" className="mg-card">
+          <h3 style={{ marginTop: 0 }}>מה דורש טיפול</h3>
+          {alerts.map((x, i) => (
+            <div key={i} className={'mg-note' + (x.bad ? ' bad' : ' warn')} style={{ marginBottom: 8 }}>
+              <b>{x.r.b.name}:</b> {x.t}{' '}
+              {x.login ? <button className="mg-linkish" onClick={onStoreLogin}>התחבר לחנות</button>
+                       : <button className="mg-linkish" onClick={() => onOpen(x.r.b.id)}>פתח</button>}</div>
+          ))}
+          {!alerts.length && <div className="mg-empty">הכול מסודר.</div>}
+        </div>
+      </div>
+
+      <div data-tour="all-chart" className="mg-card">
+        <h3 style={{ marginTop: 0 }}>12 חודשים · הכנסות לפי עסק (ימין) מול הוצאות (שמאל)</h3>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 190, padding: '8px 0' }}>
+          {series.map(s => (
+            <div key={s.m} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%' }}>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 2, width: '100%', justifyContent: 'center' }}>
+                <div style={{ width: '42%', display: 'flex', flexDirection: 'column-reverse', height: '100%' }}>
+                  {s.parts.map(p => <div key={p.b.id} title={`${p.b.name} · ${fmt(p.v.incNet)}`}
+                    style={{ height: `${Math.max(0, p.v.incNet) / top * 100}%`, background: p.b.color }} />)}
+                </div>
+                <div style={{ width: '30%', display: 'flex', flexDirection: 'column-reverse', height: '100%' }}>
+                  <div title={`הוצאות · ${fmt(s.parts.reduce((a, p) => a + p.v.expNet, 0))}`}
+                       style={{ height: `${s.parts.reduce((a, p) => a + p.v.expNet, 0) / top * 100}%`, background: '#d8cfbd', borderRadius: '3px 3px 0 0' }} />
+                </div>
+              </div>
+              <div className="mlab">{monthName(s.m)}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13, color: 'var(--muted)' }}>
+          {books.map(b => <span key={b.id}><span style={{ color: b.color }}>■</span> {b.name}</span>)}
+          <span><span style={{ color: '#d8cfbd' }}>■</span> הוצאות (כל העסקים)</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ================================================================ one book */
+function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone }) {
+  const clerk = role === 'clerk';
+  const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
+  useEffect(() => { onTab?.(sub); }, [sub]);
+  useEffect(() => { if (tabReq) { if (SUBS.some(([k]) => k === tabReq)) setSub(tabReq); onTabDone?.(); } }, [tabReq]);
+  const [edit, setEdit] = useState(null);
+  const cols = useMemo(() => Object.fromEntries(COLS.map(c => [c, bookCol(book.id, c)])), [book.id]);
+  const ledger = useMemo(() => buildLedger(book, data), [book, data]);
+  const rate = ledger.rate;
+  const tot = (f, t) => totals(ledger, f, t);
+  const alerts = alertsOf(data, ledger);
+  const suppliers = data.suppliers || [];
+  const supName = (id) => suppliers.find(s => s.id === id)?.name || '';
+
+  const save = async (name, rec) => {
+    const r = clean({ ...rec, updatedAt: new Date().toISOString() });
+    try { await withTimeout(cols[name].put(r.id, r), 12000); }
+    catch { flash('השמירה נכשלה. בדוק את החיבור ואת חוקי Firestore.'); return false; }
+    patch(name, list => [...list.filter(x => x.id !== r.id), r]);
+    return true;
+  };
+  const remove = async (name, id, what) => {
+    if (!window.confirm(`למחוק את ${what}?`)) return;
+    try { await withTimeout(cols[name].del(id), 12000); patch(name, list => list.filter(x => x.id !== id)); flash('נמחק'); }
+    catch { flash('המחיקה נכשלה'); }
+  };
+
+  /* Issue: the number is taken with the document; the stamp is worked out
+     from its final content. Then only printCount and the like may change. */
+  /* Allocation numbers: is this business connected to the Tax Authority? */
+  const [ita, setIta] = useState(null);
+  useEffect(() => {
+    if (!cloud || !server?.ita?.configured || digitsOf(book.taxId).length !== 9) { setIta(null); return; }
+    fnCall({ action: 'ita-status', vat: digitsOf(book.taxId) }).then(setIta).catch(() => setIta(null));
+  }, [book.taxId, server?.ita?.configured]);
+  const setAlloc = async (d, no, how) => {
+    const at = new Date().toISOString();
+    await DB.patch(`books/${book.id}/documents`, d.id, { allocationNo: String(no), allocationAt: at });
+    patch('documents', list => list.map(x => x.id === d.id ? { ...x, allocationNo: String(no), allocationAt: at } : x));
+    log({ action: 'allocation', docId: d.id, title: `${docTitle(d)} · ${String(no).slice(-9)}${how === 'manual' ? ' (ידני)' : ''}`, series: d.series });
+  };
+  const requestAlloc = async (d) => {
+    try {
+      const r = await fnCall({ action: 'ita-approve', invoice: itaPayload(book, d) });
+      if (r.approved && r.confirmation_number && r.confirmation_number !== '0') { await setAlloc(d, r.confirmation_number, 'ita'); flash(`התקבל מספר הקצאה ${String(r.confirmation_number).slice(-9)}`); return true; }
+      const why = typeof r.message === 'string' ? r.message : (r.message?.errors || []).map(e => `${e.code} ${e.message}`).join(', ');
+      flash('רשות המסים לא אישרה · ' + (why || 'ללא פירוט'));
+    } catch (e) {
+      flash(e.message === 'ita-not-connected' ? 'העסק לא מחובר לרשות המסים (גיבוי וענן ← מספרי הקצאה)'
+          : e.message === 'ita-expired' ? 'החיבור לרשות המסים פג. צריך להתחבר מחדש (פעם בשלושה חודשים)' : 'בקשת מספר ההקצאה נכשלה · ' + e.message);
+    }
+    return false;
+  };
+  const issueDoc = async (rec) => {
+    const key = `${rec.series}_${rec.type}`;
+    const have = (data.documents || []).filter(d => d.series === rec.series && d.type === rec.type).map(d => Number(d.number) || 0);
+    const start = Math.max(rec.series === 'live' ? (Number(book.docStart) || 1) : 1, have.length ? Math.max(...have) + 1 : 0);
+    const withStamp = { ...rec, stamp: await stampOf({ ...rec, number: '?' }) };
+    const d = await withTimeout(DB.issue(book.id, key, start, clean(withStamp)), 20000);
+    patch('documents', list => [...list, d]);
+    /* The customer on the document joins the list, or fills in what it lacked. */
+    const cp = planCustomers(data.customers || [], [d.customer || {}], 'doc');
+    if (cp.add.length + cp.upd.length) {
+      await saveCustomers(cols.customers, [...cp.add, ...cp.upd]);
+      patch('customers', () => cp.all);
+    }
+    log({ action: 'issue', docId: d.id, title: docTitle(d) + ' · ' + fmt(d.total), series: d.series });
+    /* Straight after issuing, when it needs one and none was typed in. */
+    if (needsAlloc(book, d) && !d.allocationNo && ita?.connected) requestAlloc(d);
+    return d;
+  };
+  const log = async (entry) => { const l = await logAct(book.id, entry); patch('log', list => [...list, l]); };
+  /* Payment pages: can this business make them? */
+  const [payOk, setPayOk] = useState(null);
+  useEffect(() => {
+    if (!cloud || !server?.pay?.admin || ro) { setPayOk(null); return; }
+    fnCall({ action: 'pay-status', book: book.id }).then(setPayOk).catch(() => setPayOk(null));
+  }, [book.id, server?.pay?.admin]);
+  const payCreated = async (r, cust) => {
+    patch('payreqs', l => [...l.filter(x => x.id !== r.id), r]);
+    const cp = planCustomers(data.customers || [], [cust || {}], 'doc');
+    if (cp.add.length + cp.upd.length) { await saveCustomers(cols.customers, [...cp.add, ...cp.upd]); patch('customers', () => cp.all); }
+  };
+  const payCancel = async (p) => {
+    if (!window.confirm(`לבטל את הקישור לתשלום של ${p.customer?.name} (${fmt(p.total)})? מי שיפתח אותו יראה שהוא בוטל.`)) return;
+    const f = { status: 'cancelled', cancelledAt: new Date().toISOString(), cancelledBy: cloud?.auth?.currentUser?.email || '' };
+    try { await DB.patch(`books/${book.id}/payreqs`, p.id, f); patch('payreqs', l => l.map(x => x.id === p.id ? { ...x, ...f } : x)); flash('הקישור בוטל'); }
+    catch { flash('הביטול נכשל (אולי כבר שולם). רענן ונסה שוב.'); }
+  };
+  const payRefresh = async () => {
+    const [p, d] = await Promise.all([cols.payreqs.list().catch(() => null), cols.documents.list().catch(() => null)]);
+    if (p) patch('payreqs', () => p); if (d) patch('documents', () => d);
+  };
+  const sentDoc = async (d, to) => {
+    const n = (d.printCount || 0) + 1, at = new Date().toISOString();
+    try { await DB.patch(`books/${book.id}/documents`, d.id, { printCount: n, sentAt: at, sentTo: to }); } catch {}
+    patch('documents', list => list.map(x => x.id === d.id ? { ...x, printCount: n, sentAt: at, sentTo: to } : x));
+    log({ action: 'send', docId: d.id, title: `${docTitle(d)} ← ${to}`, series: d.series });
+  };
+  const printedDoc = async (d, quiet) => {
+    if (!quiet) log({ action: 'print', docId: d.id, title: docTitle(d) + ((d.printCount || 0) > 0 ? ' (העתק)' : ' (מקור)'), series: d.series });
+    const n = (d.printCount || 0) + 1;
+    try { await DB.patch(`books/${book.id}/documents`, d.id, { printCount: n, printedAt: new Date().toISOString() }); } catch {}
+    patch('documents', list => list.map(x => x.id === d.id ? { ...x, printCount: n } : x));
+  };
+
+  const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'],
+    ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ...(ro ? [] : [['import', 'ייבוא']])]
+    .filter(([k]) => !clerk || ['docs', 'customers', 'items'].includes(k));
+
+  return (
+    <div className={ro ? 'ro' : ''}>
+      {ro && <div className="mg-note" style={{ marginBottom: 12 }}><b>צפייה בלבד.</b> אפשר לראות, להדפיס ולייצא. הפקה ושינויים שמורים לבעלי העסק.</div>}
+      <div data-tour="book-head" className="mg-h" style={{ '--h1': book.color || '#8a6331', '--h2': '#c4a36e' }}>
+        <div><h2>{book.name}</h2>
+          <div className="sub">{DEALERS[book.dealerType]}{book.taxId ? ' · ' + book.taxId : ''}{rate > 0 ? ` · מע״מ ${rate}%` : ''}
+            {book.tenant ? ` · מקושר לחנות ${book.tenant}` : ''}</div></div>
+        {role === 'owner' && <>
+          <button className="mg-btn ghost" onClick={() => setEdit({ kind: 'expense', rec: null })}>＋ הוצאה</button>
+          <button className="mg-btn ghost" onClick={() => setEdit({ kind: 'income', rec: null })}>＋ הכנסה</button>
+          <button className="mg-btn ghost" onClick={onEditBook}>הגדרות</button></>}
+        {role !== 'owner' && <span className="mg-chip" style={{ background: 'rgba(255,255,255,.2)', color: '#fff' }}>{ROLES[role]}</span>}
+      </div>
+
+      {data.storeLogin && <div className="mg-note warn" style={{ marginBottom: 12 }}>
+        העסק מקושר לחנות <b dir="ltr">{book.tenant}</b>. כדי למשוך ממנה את ההזמנות צריך להתחבר אליה פעם אחת במכשיר הזה.{' '}
+        <button className="mg-btn sm" onClick={onStoreLogin}>התחבר לחנות</button></div>}
+      {data.storeErr && <div className="mg-note bad" style={{ marginBottom: 12 }}>{data.storeErr}{' '}
+        <button className="mg-linkish" onClick={onStoreLogin}>התחבר עם משתמש אחר</button></div>}
+      {book.tenant && data.storeAt && (
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>
+          נמשכו מהחנות {data.orders.length} הזמנות ({data.orders.filter(isPaidOrder).length} ששולמו) · עודכן {new Date(data.storeAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}{' '}
+          <button className="mg-linkish keep" onClick={onReload}>רענן מהחנות</button></div>
+      )}
+      {data.errors?.length > 0 && <div className="mg-note bad" style={{ marginBottom: 12 }}>
+        חלק מהנתונים לא נטענו ({data.errors.join(', ')}). בדוק שחוקי ה-Firestore המעודכנים פורסמו.{' '}
+        <button className="mg-linkish" onClick={onReload}>נסה שוב</button></div>}
+
+      <div data-tour="book-tabs" className="mg-tabs" style={{ marginBottom: 16 }}>
+        {SUBS.map(([k, l]) => <button key={k} className={'mg-tab' + (sub === k ? ' on' : '')} onClick={() => setSub(k)}>{l}</button>)}
+      </div>
+
+      {sub === 'dash' && <Dash totals={tot} rate={rate} alerts={alerts} onSub={setSub} linked={!!book.tenant} />}
+      {sub === 'income' && <IncomeList income={ledger.income} linked={!!book.tenant}
+        onEdit={(r) => setEdit({ kind: 'income', rec: r })} onDel={(r) => remove('incomes', r.id, 'ההכנסה')} />}
+      {sub === 'expenses' && <ExpenseList outgo={ledger.outgo} supName={supName}
+        onEdit={(r) => setEdit({ kind: 'expense', rec: r })} onDel={(r) => remove('expenses', r.id, 'ההוצאה')} />}
+      {sub === 'suppliers' && <SupplierList suppliers={suppliers} outgo={ledger.outgo}
+        onEdit={(r) => setEdit({ kind: 'supplier', rec: r })} onDel={(r) => remove('suppliers', r.id, 'הספק')} />}
+      {sub === 'bank' && <BankTab bank={data.banktx || []} income={ledger.income} outgo={ledger.outgo} flash={flash}
+        onSave={(r) => save('banktx', r)} onDel={(r) => remove('banktx', r.id, 'השורה')}
+        onBulk={async (recs) => { let ok = 0; for (const r of recs) if (await save('banktx', r)) ok++; return ok; }} />}
+      {sub === 'vat' && <VatTab totals={tot} rate={rate} book={book} />}
+      {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} />}
+      {sub === 'docs' && <DocsTab book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
+                                  ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
+                                  onLog={log} server={server} ro={ro} flash={flash}
+                                  payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh} />}
+      {sub === 'items' && <ItemsTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role} />}
+      {sub === 'customers' && <CustomersTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role}
+                                            onReload={onReload} onStoreLogin={onStoreLogin} />}
+      {sub === 'tax' && <TaxTab book={book} docs={data.documents || []} log={data.log || []} ro={ro} onLog={log} flash={flash} ledger={ledger} />}
+      {sub === 'import' && <ImportTab book={book} data={data} cols={cols} flash={flash} onDone={onReload} onDeleteBook={onDeleteBook} onLog={log} />}
+
+      {edit?.kind === 'income' && <IncomeForm rec={edit.rec} rate={rate} onClose={() => setEdit(null)}
+        onSave={async (r) => { if (await save('incomes', r)) { flash('ההכנסה נשמרה'); setEdit(null); } }} />}
+      {edit?.kind === 'expense' && <ExpenseForm rec={edit.rec} rate={rate} suppliers={suppliers} onClose={() => setEdit(null)}
+        onNewSupplier={(s) => save('suppliers', s)}
+        onSave={async (r) => { if (await save('expenses', r)) { flash('ההוצאה נשמרה'); setEdit(null); } }} />}
+      {edit?.kind === 'supplier' && <SupplierForm rec={edit.rec} onClose={() => setEdit(null)}
+        onSave={async (r) => { if (await save('suppliers', r)) { flash('הספק נשמר'); setEdit(null); } }} />}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------- סקירה */
+function Dash({ totals, rate, alerts, onSub, linked }) {
+  const [month, setMonth] = useState(thisMonth());
+  const t = totals(month, month);
+  const year = month.slice(0, 4);
+  const y = totals(year + '-01', year + '-12');
+  const months = Array.from({ length: 12 }, (_, i) => addMonths(month, i - 11));
+  const series = months.map(m => { const x = totals(m, m); return { m, inc: x.incNet, exp: x.expNet }; });
+  const top = Math.max(1, ...series.map(s => Math.max(s.inc, s.exp)));
+  const pStart = biStart(month);
+  const vp = totals(pStart, addMonths(pStart, 1));
+
+  return (
+    <>
+      <div data-tour="dash-month" style={{ ...row, marginBottom: 14 }}>
+        <Field label="חודש"><input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} /></Field>
+      </div>
+      <div data-tour="dash-stats" className="mg-stats" style={{ marginBottom: 18 }}>
+        <div className="mg-stat"><div className="lb">הכנסות (לפני מע״מ)</div><div className="vl">{fmt(t.incNet)}</div>
+          <div className="dl">{t.inc.length} תנועות · השנה {fmt(y.incNet)}</div></div>
+        <div className="mg-stat"><div className="lb">הוצאות (לפני מע״מ)</div><div className="vl">{fmt(t.expNet)}</div>
+          <div className="dl">{t.exp.length} תנועות · השנה {fmt(y.expNet)}</div></div>
+        <div className="mg-stat"><div className="lb">רווח</div>
+          <div className="vl" style={t.profit < 0 ? { color: 'var(--bad)' } : undefined}>{fmt(t.profit)}</div>
+          <div className="dl">השנה {fmt(y.profit)}</div></div>
+        <div className="mg-stat"><div className="lb">{rate > 0 ? `מע״מ ${monthName(pStart)}–${monthName(addMonths(pStart, 1))}` : 'מע״מ'}</div>
+          <div className="vl">{rate > 0 ? fmt(vp.vatDue) : '—'}</div>
+          <div className="dl">{rate > 0 ? (vp.vatDue >= 0 ? 'לתשלום' : 'להחזר') : 'עוסק פטור'}</div></div>
+      </div>
+
+      {linked && alerts.unpaid.length > 0 && (
+        <div className="mg-note" style={{ marginBottom: 14 }}>
+          בחנות יש {alerts.unpaid.length} הזמנות שעדיין לא שולמו, בסך {fmt(alerts.unpaid.reduce((a, o) => a + (Number(o.total) || 0), 0))}.
+          הן ייכנסו להכנסות ברגע שיסומנו כשולמו בקונסולת החנות.
+        </div>
+      )}
+      {(alerts.noDocOrders > 0 || alerts.unmatched > 0 || alerts.noDocExp > 0 || alerts.review > 0) && (
+        <div data-tour="dash-alerts" className="mg-card" style={{ marginBottom: 18 }}>
+          <h3 style={{ marginTop: 0 }}>מה דורש טיפול</h3>
+          {alerts.noDocOrders > 0 && <div className="mg-note warn" style={{ marginBottom: 8 }}>
+            {alerts.noDocOrders} הזמנות ששולמו ועדיין אין להן חשבונית. מפיקים במסך ההזמנות בקונסולת החנות.</div>}
+          {alerts.unmatched > 0 && <div className="mg-note warn" style={{ marginBottom: 8 }}>
+            {alerts.unmatched} שורות בנק שלא הותאמו. <button className="mg-linkish" onClick={() => onSub('bank')}>להתאמה</button></div>}
+          {alerts.noDocExp > 0 && <div className="mg-note warn" style={{ marginBottom: 8 }}>
+            {alerts.noDocExp} הוצאות בלי מספר חשבונית. בלי חשבונית אי אפשר לקזז את המע״מ שלהן.{' '}
+            <button className="mg-linkish" onClick={() => onSub('expenses')}>להוצאות</button></div>}
+          {alerts.review > 0 && <div className="mg-note warn">{alerts.review} רשומות שיובאו מהמערכת הישנה מסומנות לבדיקה.</div>}
+        </div>
+      )}
+
+      <div data-tour="dash-chart" className="mg-card">
+        <h3 style={{ marginTop: 0 }}>12 חודשים · הכנסות מול הוצאות (לפני מע״מ)</h3>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 180, padding: '8px 0' }}>
+          {series.map(s => (
+            <div key={s.m} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%' }}
+                 title={`${monthName(s.m)} · הכנסות ${fmt(s.inc)} · הוצאות ${fmt(s.exp)}`}>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 2, width: '100%', justifyContent: 'center' }}>
+                <div style={{ width: '40%', height: `${Math.max(0, s.inc) / top * 100}%`, background: 'var(--green2)', borderRadius: '4px 4px 0 0' }} />
+                <div style={{ width: '40%', height: `${s.exp / top * 100}%`, background: '#d9822b', borderRadius: '4px 4px 0 0' }} />
+              </div>
+              <div className="mlab">{monthName(s.m)}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 14, fontSize: 13, color: 'var(--muted)' }}>
+          <span><span style={{ color: 'var(--green2)' }}>■</span> הכנסות{linked ? ' (כולל החנות)' : ''}</span>
+          <span><span style={{ color: '#d9822b' }}>■</span> הוצאות</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ הכנסות */
+function IncomeList({ income, linked, onEdit, onDel }) {
+  const [month, setMonth] = useState('');
+  const [src, setSrc] = useState('all');
+  const [q, setQ] = useState('');
+  const list = income.filter(i => (!month || (i.date || '').startsWith(month))
+    && (src === 'all' || (src === 'shop' ? i.src === 'shop' : i.src !== 'shop'))
+    && (!q || (i.desc + ' ' + (i.docNo || '') + ' ' + (i.customer || '')).includes(q.trim())));
+  const sum = list.reduce((a, i) => a + i.gross, 0), vat = list.reduce((a, i) => a + i.vat, 0);
+  return (
+    <>
+      <div data-tour="inc-filters" style={{ ...row, marginBottom: 12 }}>
+        <Field label="חודש"><input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
+        {linked && <Field label="מקור"><select value={src} onChange={e => setSrc(e.target.value)}>
+          <option value="all">הכול</option><option value="shop">מהחנות</option><option value="manual">ידני</option></select></Field>}
+        <Field label="חיפוש"><input value={q} onChange={e => setQ(e.target.value)} placeholder="שם, מספר, מסמך" /></Field>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`income-${month || 'all'}.csv`, [
+          ['תאריך', 'תיאור', 'לקוח', 'קטגוריה', 'אמצעי תשלום', 'מסמך', 'לפני מע״מ', 'מע״מ', 'סה״כ', 'מקור'],
+          ...list.map(i => [i.date, i.desc, i.customer || '', i.cat, i.pay, i.docNo, r2(i.gross - i.vat), i.vat, i.gross, i.src === 'shop' ? 'חנות' : 'ידני'])
+        ])}>⬇ ייצוא</button>
+      </div>
+      {linked && <div className="mg-note" style={{ marginBottom: 12 }}>
+        הזמנות מהחנות נכנסות לכאן מעצמן ברגע שהן מסומנות כשולמו. את החשבונית שלהן מפיקים בקונסולת החנות.
+      </div>}
+      <div data-tour="inc-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>תאריך</th><th>תיאור</th><th>קטגוריה</th><th>תשלום</th><th>מסמך</th><th>לפני מע״מ</th><th>מע״מ</th><th>סה״כ</th><th></th></tr></thead>
+        <tbody>
+          {list.map(i => (
+            <tr key={i.id}>
+              <td>{heDate(i.date)}</td>
+              <td>{i.desc}{i.customer ? <span style={{ color: 'var(--muted)' }}> · {i.customer}</span> : null}
+                {i.review && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>לבדיקה</span>}</td>
+              <td><span className={'mg-chip ' + (i.src === 'shop' ? 'ok' : '')}>{i.cat}</span></td>
+              <td>{i.pay || '—'}</td>
+              <td>{i.docNo || <span style={{ color: 'var(--warn)' }}>חסר</span>}</td>
+              <td>{fmt(i.gross - i.vat)}</td><td>{fmt(i.vat)}</td><td><b>{fmt(i.gross)}</b></td>
+              <td>{!['shop', 'doc'].includes(i.src) && <div style={{ display: 'flex', gap: 4 }}>
+                <button className="mg-btn ghost sm" onClick={() => onEdit(i)}>✎</button>
+                <button className="mg-btn ghost sm" onClick={() => onDel(i)}>🗑</button></div>}</td>
+            </tr>
+          ))}
+          {!list.length && <tr><td colSpan={9}><div className="mg-empty">אין הכנסות בסינון הזה.</div></td></tr>}
+        </tbody>
+      </table></div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 10, gap: 18, fontSize: 14 }}>
+        <span>סה״כ: <b>{fmt(sum)}</b></span><span>מתוכו מע״מ: <b>{fmt(vat)}</b></span><span>לפני מע״מ: <b>{fmt(sum - vat)}</b></span>
+      </div>
+    </>
+  );
+}
+
+function IncomeForm({ rec, rate, onSave, onClose }) {
+  const [f, setF] = useState(() => ({
+    id: uid('inc'), date: todayIso(), desc: '', cat: INC_CATS[0], pay: PAY_METHODS[0],
+    gross: '', noVat: false, docNo: '', customer: '', ...(rec || {})
+  }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const g = Number(f.gross) || 0;
+  const vat = f.noVat ? 0 : vatOf(g, rate);
+  const ok = String(f.desc).trim() && g > 0 && f.date;
+  return (
+    <Box title={rec ? 'עריכת הכנסה' : 'הכנסה חדשה'} onClose={onClose} wide
+         footer={<><button className="mg-btn" disabled={!ok}
+                           onClick={() => onSave({ ...f, src: f.src === 'erp' ? 'erp' : 'manual', gross: g, vat, desc: String(f.desc).trim(), review: false })}>שמור</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div style={grid}>
+        <Field label="תאריך"><input type="date" value={f.date} onChange={e => set('date', e.target.value)} /></Field>
+        <Field label="תיאור"><input value={f.desc} onChange={e => set('desc', e.target.value)} placeholder="טיפול דיקור" /></Field>
+        <Field label="לקוח"><input value={f.customer} onChange={e => set('customer', e.target.value)} /></Field>
+        <Field label="קטגוריה"><select value={f.cat} onChange={e => set('cat', e.target.value)}>{INC_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="אמצעי תשלום"><select value={f.pay} onChange={e => set('pay', e.target.value)}>{PAY_METHODS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="מספר מסמך (חשבונית / קבלה)"><input value={f.docNo} onChange={e => set('docNo', e.target.value)} /></Field>
+        <Field label="סכום כולל מע״מ (₪)"><input inputMode="decimal" value={f.gross} onChange={e => set('gross', e.target.value)} /></Field>
+      </div>
+      {rate > 0 && <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, fontSize: 14 }}>
+        <input type="checkbox" style={{ width: 'auto' }} checked={!!f.noVat} onChange={e => set('noVat', e.target.checked)} />הכנסה פטורה ממע״מ</label>}
+      <div className="mg-note" style={{ marginTop: 12 }}>
+        לפני מע״מ <b>{fmt(g - vat)}</b> · מע״מ <b>{fmt(vat)}</b> · סה״כ <b>{fmt(g)}</b>
+      </div>
+    </Box>
+  );
+}
+
+/* ------------------------------------------------------------------ הוצאות */
+function ExpenseList({ outgo, supName, onEdit, onDel }) {
+  const [month, setMonth] = useState('');
+  const [cat, setCat] = useState('');
+  const list = outgo.filter(e => (!month || (e.date || '').startsWith(month)) && (!cat || e.cat === cat));
+  const sum = list.reduce((a, e) => a + e.gross, 0), vat = list.reduce((a, e) => a + e.vat, 0);
+  return (
+    <>
+      <div data-tour="exp-filters" style={{ ...row, marginBottom: 12 }}>
+        <Field label="חודש"><input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
+        <Field label="קטגוריה"><select value={cat} onChange={e => setCat(e.target.value)}>
+          <option value="">הכול</option>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`expenses-${month || 'all'}.csv`, [
+          ['תאריך', 'ספק', 'תיאור', 'קטגוריה', 'אמצעי תשלום', 'מסמך', 'לפני מע״מ', 'מע״מ מוכר', 'סה״כ'],
+          ...list.map(e => [e.date, supName(e.supplierId) || e.supplierName || '', e.desc, e.cat, e.pay, e.docNo, r2(e.gross - e.vat), e.vat, e.gross])
+        ])}>⬇ ייצוא</button>
+      </div>
+      <div data-tour="exp-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>תאריך</th><th>ספק</th><th>תיאור</th><th>קטגוריה</th><th>מסמך</th><th>לפני מע״מ</th><th>מע״מ</th><th>סה״כ</th><th></th></tr></thead>
+        <tbody>
+          {list.map(e => (
+            <tr key={e.id}>
+              <td>{heDate(e.date)}</td>
+              <td>{supName(e.supplierId) || e.supplierName || '—'}</td>
+              <td>{e.desc}{e.review && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>לבדיקה</span>}</td>
+              <td><span className="mg-chip">{e.cat}</span></td>
+              <td>{e.docNo || (e.hasDoc ? 'יש' : <span style={{ color: 'var(--warn)' }}>חסר</span>)}</td>
+              <td>{fmt(e.gross - e.vat)}</td><td>{fmt(e.vat)}</td><td><b>{fmt(e.gross)}</b></td>
+              <td><div style={{ display: 'flex', gap: 4 }}>
+                <button className="mg-btn ghost sm" onClick={() => onEdit(e)}>✎</button>
+                <button className="mg-btn ghost sm" onClick={() => onDel(e)}>🗑</button></div></td>
+            </tr>
+          ))}
+          {!list.length && <tr><td colSpan={9}><div className="mg-empty">אין הוצאות בסינון הזה.</div></td></tr>}
+        </tbody>
+      </table></div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 10, gap: 18, fontSize: 14 }}>
+        <span>סה״כ: <b>{fmt(sum)}</b></span><span>מע״מ לקיזוז: <b>{fmt(vat)}</b></span><span>לפני מע״מ: <b>{fmt(sum - vat)}</b></span>
+      </div>
+    </>
+  );
+}
+
+function ExpenseForm({ rec, rate, suppliers, onSave, onClose, onNewSupplier }) {
+  const [f, setF] = useState(() => ({
+    id: uid('exp'), date: todayIso(), supplierId: '', desc: '', cat: EXP_CATS[0], pay: PAY_METHODS[0],
+    gross: '', vatMode: rate > 0 ? 'full' : 'none', vatManual: '', docNo: '', ...(rec || {})
+  }));
+  const [newSup, setNewSup] = useState('');
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const g = Number(f.gross) || 0;
+  /* Deductible VAT: full, a private car's two thirds, none, or typed in. */
+  const vat = rate === 0 ? 0
+            : f.vatMode === 'full' ? vatOf(g, rate)
+            : f.vatMode === 'car' ? r2(vatOf(g, rate) * 2 / 3)
+            : f.vatMode === 'manual' ? r2(Number(f.vatManual) || 0) : 0;
+  const ok = String(f.desc).trim() && g > 0 && f.date;
+  const pickSupplier = (id) => {
+    const s = suppliers.find(x => x.id === id);
+    setF(p => ({ ...p, supplierId: id, cat: s?.cat && !rec ? s.cat : p.cat }));
+  };
+  return (
+    <Box title={rec ? 'עריכת הוצאה' : 'הוצאה חדשה'} onClose={onClose} wide
+         footer={<><button className="mg-btn" disabled={!ok}
+                           onClick={() => onSave({ ...f, gross: g, vat, desc: String(f.desc).trim(), hasDoc: !!f.docNo || !!f.hasDoc, review: false })}>שמור</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div style={grid}>
+        <Field label="תאריך"><input type="date" value={f.date} onChange={e => set('date', e.target.value)} /></Field>
+        <Field label="ספק"><select value={f.supplierId} onChange={e => pickSupplier(e.target.value)}>
+          <option value="">— ללא —</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+        <Field label="או ספק חדש">
+          <div style={{ display: 'flex', gap: 6 }}><input value={newSup} onChange={e => setNewSup(e.target.value)} />
+            <button type="button" className="mg-btn ghost sm" disabled={!newSup.trim()} onClick={async () => {
+              const s = { id: uid('sup'), name: newSup.trim(), cat: f.cat, taxId: '', phone: '', email: '' };
+              if (await onNewSupplier(s)) { setF(p => ({ ...p, supplierId: s.id })); setNewSup(''); }
+            }}>＋</button></div></Field>
+        <Field label="תיאור"><input value={f.desc} onChange={e => set('desc', e.target.value)} /></Field>
+        <Field label="קטגוריה"><select value={f.cat} onChange={e => set('cat', e.target.value)}>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="אמצעי תשלום"><select value={f.pay} onChange={e => set('pay', e.target.value)}>{PAY_METHODS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="מספר חשבונית של הספק"><input value={f.docNo} onChange={e => set('docNo', e.target.value)} /></Field>
+        <Field label="סכום כולל מע״מ (₪)"><input inputMode="decimal" value={f.gross} onChange={e => set('gross', e.target.value)} /></Field>
+        {rate > 0 && <Field label="מע״מ מוכר לקיזוז"><select value={f.vatMode} onChange={e => set('vatMode', e.target.value)}>
+          <option value="full">מלא ({rate}%)</option><option value="car">רכב פרטי (2/3)</option>
+          <option value="none">ללא (ספק פטור / חו״ל)</option><option value="manual">סכום ידני</option></select></Field>}
+        {rate > 0 && f.vatMode === 'manual' && <Field label="סכום המע״מ"><input inputMode="decimal" value={f.vatManual} onChange={e => set('vatManual', e.target.value)} /></Field>}
+      </div>
+      <div className="mg-note" style={{ marginTop: 12 }}>
+        לפני מע״מ <b>{fmt(g - vat)}</b> · מע״מ לקיזוז <b>{fmt(vat)}</b> · סה״כ <b>{fmt(g)}</b>
+      </div>
+    </Box>
+  );
+}
+
+/* ------------------------------------------------------------------- ספקים */
+function SupplierList({ suppliers, outgo, onEdit, onDel }) {
+  const year = new Date().getFullYear().toString();
+  return (
+    <>
+      <div data-tour="sup-new" style={{ marginBottom: 12 }}><button className="mg-btn" onClick={() => onEdit(null)}>＋ ספק חדש</button></div>
+      <div data-tour="sup-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>שם</th><th>ח.פ. / ע.מ.</th><th>טלפון</th><th>אימייל</th><th>קטגוריה</th><th>השנה</th><th>סה״כ</th><th></th></tr></thead>
+        <tbody>
+          {[...suppliers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he')).map(s => {
+            const mine = outgo.filter(e => e.supplierId === s.id);
+            return (
+              <tr key={s.id}>
+                <td><b>{s.name}</b>{s.review && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>יובא</span>}</td>
+                <td dir="ltr" style={{ textAlign: 'right' }}>{s.taxId || '—'}</td>
+                <td dir="ltr" style={{ textAlign: 'right' }}>{s.phone || '—'}</td>
+                <td>{s.email || '—'}</td><td>{s.cat || '—'}</td>
+                <td>{fmt(mine.filter(e => (e.date || '').startsWith(year)).reduce((a, e) => a + e.gross, 0))}</td>
+                <td>{fmt(mine.reduce((a, e) => a + e.gross, 0))} <span style={{ color: 'var(--muted)', fontSize: 12 }}>({mine.length})</span></td>
+                <td><div style={{ display: 'flex', gap: 4 }}>
+                  <button className="mg-btn ghost sm" onClick={() => onEdit(s)}>✎</button>
+                  <button className="mg-btn ghost sm" onClick={() => onDel(s)}>🗑</button></div></td>
+              </tr>
+            );
+          })}
+          {!suppliers.length && <tr><td colSpan={8}><div className="mg-empty">עוד אין ספקים.</div></td></tr>}
+        </tbody>
+      </table></div>
+    </>
+  );
+}
+
+function SupplierForm({ rec, onSave, onClose }) {
+  const [f, setF] = useState(() => ({ id: uid('sup'), name: '', taxId: '', phone: '', email: '', cat: EXP_CATS[0], notes: '', ...(rec || {}) }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  return (
+    <Box title={rec ? 'עריכת ספק' : 'ספק חדש'} onClose={onClose}
+         footer={<><button className="mg-btn" disabled={!String(f.name).trim()} onClick={() => onSave({ ...f, name: String(f.name).trim(), review: false })}>שמור</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div style={grid}>
+        <Field label="שם"><input value={f.name} onChange={e => set('name', e.target.value)} /></Field>
+        <Field label="ח.פ. / ע.מ."><input dir="ltr" value={f.taxId} onChange={e => set('taxId', e.target.value)} /></Field>
+        <Field label="טלפון"><input dir="ltr" value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
+        <Field label="אימייל"><input dir="ltr" value={f.email} onChange={e => set('email', e.target.value)} /></Field>
+        <Field label="קטגוריה קבועה"><select value={f.cat} onChange={e => set('cat', e.target.value)}>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="הערות"><input value={f.notes || ''} onChange={e => set('notes', e.target.value)} /></Field>
+      </div>
+    </Box>
+  );
+}
+
+/* --------------------------------------------------------------------- בנק */
+function BankTab({ bank, income, outgo, onSave, onDel, onBulk, flash }) {
+  const [show, setShow] = useState('open');
+  const [add, setAdd] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const taken = new Set(bank.map(b => b.matchId).filter(Boolean));
+  /* Same amount, within a week. */
+  const candidates = (b) => {
+    const t = Date.parse(b.date);
+    const near = (d) => Math.abs(Date.parse(d) - t) <= 7 * 86400000;
+    const pool = b.amount > 0
+      ? income.map(i => ({ id: i.id, label: `${heDate(i.date)} · ${i.desc}`, amt: i.gross, date: i.date }))
+      : outgo.map(e => ({ id: 'e:' + e.id, label: `${heDate(e.date)} · ${e.desc}`, amt: e.gross, date: e.date }));
+    return pool.filter(p => Math.abs(p.amt - Math.abs(b.amount)) < 1 && p.date && near(p.date)
+                         && (!taken.has(p.id) || p.id === b.matchId));
+  };
+  const labelOf = (id) => {
+    if (id.startsWith('e:')) { const e = outgo.find(x => 'e:' + x.id === id); return e ? `הוצאה · ${e.desc}` : 'הוצאה שנמחקה'; }
+    const i = income.find(x => x.id === id); return i ? `הכנסה · ${i.desc}` : 'הכנסה שנמחקה';
+  };
+
+  const autoMatch = async () => {
+    setBusy(true);
+    const used = new Set(taken);
+    const recs = [];
+    bank.filter(b => !b.matchId && !b.ignored).forEach(b => {
+      const c = candidates(b).filter(x => !used.has(x.id));
+      if (c.length === 1) { used.add(c[0].id); recs.push({ ...b, matchId: c[0].id }); }
+    });
+    const n = recs.length ? await onBulk(recs) : 0;
+    setBusy(false);
+    flash(n ? `הותאמו ${n} שורות` : 'לא נמצאו התאמות חד-משמעיות. אפשר להתאים ידנית.');
+  };
+
+  const importFile = async (file) => {
+    if (!file) return;
+    const rows = parseBankCSV(await file.text());
+    if (!rows.length) { flash('לא זוהו שורות בקובץ. צריך CSV עם תאריך, תיאור וסכום.'); return; }
+    const have = new Set(bank.map(b => `${b.date}|${b.amount}|${b.desc}`));
+    const batch = uid('imp');
+    const fresh = rows.filter(r => !have.has(`${r.date}|${r.amount}|${r.desc}`))
+      .map(r => ({ ...r, id: uid('bk'), batch, matchId: '', ignored: false }));
+    setBusy(true);
+    const n = fresh.length ? await onBulk(fresh) : 0;
+    setBusy(false);
+    flash(`יובאו ${n} שורות חדשות${rows.length - fresh.length ? ` · ${rows.length - fresh.length} כבר היו` : ''}`);
+  };
+
+  const list = [...bank].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .filter(b => show === 'all' || (show === 'open' ? !b.matchId && !b.ignored : !!b.matchId));
+
+  return (
+    <>
+      <div data-tour="bank-stats" className="mg-stats" style={{ marginBottom: 14 }}>
+        <div className="mg-stat"><div className="lb">שורות בנק</div><div className="vl">{bank.length}</div></div>
+        <div className="mg-stat"><div className="lb">הותאמו</div><div className="vl">{bank.filter(b => b.matchId).length}</div></div>
+        <div className="mg-stat"><div className="lb">פתוחות</div><div className="vl">{bank.filter(b => !b.matchId && !b.ignored).length}</div></div>
+        <div className="mg-stat"><div className="lb">תנועה נטו</div><div className="vl">{fmt(bank.reduce((a, b) => a + (Number(b.amount) || 0), 0))}</div></div>
+      </div>
+      <div data-tour="bank-tools" style={{ ...row, marginBottom: 12, alignItems: 'center' }}>
+        <label className="mg-btn" style={{ cursor: 'pointer' }}>⬆ ייבוא דף בנק (CSV)
+          <input type="file" accept=".csv,text/csv,.txt" hidden onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }} /></label>
+        <button className="mg-btn ghost" disabled={busy} onClick={autoMatch}>↻ התאמה אוטומטית</button>
+        <button className="mg-btn ghost" onClick={() => setAdd({ id: uid('bk'), date: todayIso(), desc: '', amount: '', matchId: '' })}>＋ שורה ידנית</button>
+        <select value={show} onChange={e => setShow(e.target.value)} style={{ width: 'auto' }}>
+          <option value="open">פתוחות</option><option value="done">מותאמות</option><option value="all">הכול</option></select>
+      </div>
+      <div className="mg-note" style={{ marginBottom: 12 }}>
+        מורידים מאתר הבנק את התנועות לאקסל, שומרים כ-CSV ומעלים כאן. ההתאמה מחפשת תנועה באותו סכום, עד שבוע מהתאריך.
+      </div>
+      <div data-tour="bank-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>תאריך</th><th>תיאור בבנק</th><th>סכום</th><th>מותאם ל</th><th></th></tr></thead>
+        <tbody>
+          {list.map(b => {
+            const c = candidates(b);
+            return (
+              <tr key={b.id} style={b.ignored ? { opacity: .5 } : undefined}>
+                <td>{heDate(b.date)}</td><td>{b.desc}</td>
+                <td style={{ color: b.amount > 0 ? 'var(--green2)' : 'var(--bad)', fontWeight: 700 }} dir="ltr">{fmt(b.amount)}</td>
+                <td>{b.matchId ? <span className="mg-chip ok">{labelOf(b.matchId)}</span>
+                  : b.ignored ? <span className="mg-chip">לא רלוונטי</span>
+                  : c.length
+                    ? <select value="" onChange={e => e.target.value && onSave({ ...b, matchId: e.target.value })}>
+                        <option value="">{c.length} הצעות, בחר…</option>
+                        {c.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}</select>
+                    : <span style={{ color: 'var(--warn)', fontSize: 13 }}>אין תנועה תואמת. הוסף הכנסה או הוצאה.</span>}</td>
+                <td><div style={{ display: 'flex', gap: 4 }}>
+                  {b.matchId && <button className="mg-btn ghost sm" onClick={() => onSave({ ...b, matchId: '' })}>בטל התאמה</button>}
+                  {!b.matchId && <button className="mg-btn ghost sm" onClick={() => onSave({ ...b, ignored: !b.ignored })}>{b.ignored ? 'החזר' : 'התעלם'}</button>}
+                  <button className="mg-btn ghost sm" onClick={() => onDel(b)}>🗑</button></div></td>
+              </tr>
+            );
+          })}
+          {!list.length && <tr><td colSpan={5}><div className="mg-empty">{show === 'open' ? 'אין שורות פתוחות.' : 'אין שורות.'}</div></td></tr>}
+        </tbody>
+      </table></div>
+
+      {add && (
+        <Box title="שורת בנק" onClose={() => setAdd(null)}
+             footer={<><button className="mg-btn" disabled={!add.date || !num(add.amount)}
+                               onClick={async () => { if (await onSave({ ...add, amount: r2(num(add.amount)) })) setAdd(null); }}>שמור</button>
+                       <button className="mg-btn ghost" onClick={() => setAdd(null)}>ביטול</button></>}>
+          <div style={grid}>
+            <Field label="תאריך"><input type="date" value={add.date} onChange={e => setAdd(a => ({ ...a, date: e.target.value }))} /></Field>
+            <Field label="תיאור"><input value={add.desc} onChange={e => setAdd(a => ({ ...a, desc: e.target.value }))} /></Field>
+            <Field label="סכום (זיכוי חיובי, חיוב במינוס)"><input dir="ltr" value={add.amount} onChange={e => setAdd(a => ({ ...a, amount: e.target.value }))} /></Field>
+          </div>
+        </Box>
+      )}
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------- מע״מ */
+function VatTab({ totals, rate, book }) {
+  const [mode, setMode] = useState('bi');
+  const [month, setMonth] = useState(thisMonth());
+  const start = mode === 'bi' ? biStart(month) : month;
+  const end = mode === 'bi' ? addMonths(start, 1) : start;
+  const t = totals(start, end);
+  const label = start === end ? monthName(start) : `${monthName(start)}–${monthName(end)}`;
+
+  if (rate === 0) return (
+    <div className="mg-note">
+      העסק מוגדר כ<b>עוסק פטור</b>, ולכן אין דיווח מע״מ תקופתי. מחזור השנה עד כה:{' '}
+      <b>{fmt(totals(month.slice(0, 4) + '-01', month.slice(0, 4) + '-12').incGross)}</b>.
+      עוסק פטור שעובר את תקרת המחזור השנתית צריך לעבור לעוסק מורשה.
+    </div>
+  );
+
+  return (
+    <>
+      <div data-tour="vat-period" style={{ ...row, marginBottom: 14 }}>
+        <Field label="תדירות דיווח"><select value={mode} onChange={e => setMode(e.target.value)}>
+          <option value="bi">דו-חודשי</option><option value="month">חודשי</option></select></Field>
+        <Field label="תקופה"><input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} /></Field>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`vat-${book.name}-${start}${start !== end ? '_' + end : ''}.csv`, [
+          ['דוח מע״מ', label], ['עוסק', book.legalName || book.name, book.taxId || ''], [],
+          ['', 'בסיס (לפני מע״מ)', 'מע״מ'],
+          ['עסקאות חייבות', r2(t.incNet), r2(t.incVat)],
+          ['תשומות', r2(t.expNet), r2(t.expVat)],
+          ['לתשלום / להחזר', '', r2(t.vatDue)], [],
+          ['פירוט עסקאות'], ['תאריך', 'תיאור', 'מסמך', 'לפני מע״מ', 'מע״מ', 'סה״כ'],
+          ...t.inc.map(i => [i.date, i.desc, i.docNo, r2(i.gross - i.vat), i.vat, i.gross]), [],
+          ['פירוט תשומות'], ['תאריך', 'תיאור', 'מסמך', 'לפני מע״מ', 'מע״מ', 'סה״כ'],
+          ...t.exp.map(e => [e.date, e.desc, e.docNo, r2(e.gross - e.vat), e.vat, e.gross]),
+        ])}>⬇ דוח לרואה החשבון</button>
+      </div>
+      <div data-tour="vat-stats" className="mg-stats" style={{ marginBottom: 16 }}>
+        <div className="mg-stat"><div className="lb">עסקאות (לפני מע״מ)</div><div className="vl">{fmt(t.incNet)}</div><div className="dl">מע״מ עסקאות {fmt(t.incVat)}</div></div>
+        <div className="mg-stat"><div className="lb">תשומות (לפני מע״מ)</div><div className="vl">{fmt(t.expNet)}</div><div className="dl">מע״מ תשומות {fmt(t.expVat)}</div></div>
+        <div className="mg-stat"><div className="lb">{t.vatDue >= 0 ? 'לתשלום' : 'להחזר'} · {label}</div><div className="vl">{fmt(Math.abs(t.vatDue))}</div>
+          <div className="dl">עד ה-15 בחודש שאחרי התקופה</div></div>
+      </div>
+      {t.inc.some(i => !i.docNo) && <div className="mg-note warn" style={{ marginBottom: 12 }}>
+        {t.inc.filter(i => !i.docNo).length} הכנסות בתקופה בלי מסמך. המע״מ שלהן נספר, אבל כל אחת צריכה חשבונית.</div>}
+      {t.exp.some(e => e.vat > 0 && !e.docNo && !e.hasDoc) && <div className="mg-note warn" style={{ marginBottom: 12 }}>
+        יש תשומות בלי מספר חשבונית. בלי חשבונית מס מקורית אי אפשר לקזז אותן.</div>}
+      <div className="mg-note">
+        חישוב עזר לפי מה שרשום במערכת, לא דיווח רשמי. אם כמה עסקים רשומים תחת אותו ע.מ., הדיווח המאוחד נמצא בדף "כל העסקים".
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------ רווח והפסד */
+function PnlTab({ totals, supName, book }) {
+  const y = new Date().getFullYear();
+  const [from, setFrom] = useState(`${y}-01`);
+  const [to, setTo] = useState(thisMonth());
+  const t = totals(from, to);
+  const group = (list, key) => {
+    const g = {};
+    list.forEach(x => { const k = key(x); g[k] = (g[k] || 0) + (x.gross - x.vat); });
+    return Object.entries(g).sort((a, b) => b[1] - a[1]);
+  };
+  const incBy = group(t.inc, i => i.cat || 'אחר');
+  const expBy = group(t.exp, e => e.cat || 'אחר');
+  const supBy = group(t.exp.filter(e => e.supplierId || e.supplierName), e => supName(e.supplierId) || e.supplierName).slice(0, 8);
+  const margin = t.incNet ? Math.round(t.profit / t.incNet * 100) : 0;
+  const Line = ({ l, v, strong, color }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f0ebe0', fontWeight: strong ? 800 : 400, color }}>
+      <span>{l}</span><span dir="ltr">{fmt(v)}</span></div>
+  );
+  return (
+    <>
+      <div data-tour="pnl-range" style={{ ...row, marginBottom: 14 }}>
+        <Field label="מחודש"><input type="month" value={from} onChange={e => e.target.value && setFrom(e.target.value)} /></Field>
+        <Field label="עד חודש"><input type="month" value={to} onChange={e => e.target.value && setTo(e.target.value)} /></Field>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`pnl-${book.name}-${from}_${to}.csv`, [
+          ['דוח רווח והפסד', book.legalName || book.name, `${from} עד ${to}`], [],
+          ['הכנסות לפי קטגוריה'], ...incBy.map(([k, v]) => [k, r2(v)]), ['סה״כ הכנסות', r2(t.incNet)], [],
+          ['הוצאות לפי קטגוריה'], ...expBy.map(([k, v]) => [k, r2(v)]), ['סה״כ הוצאות', r2(t.expNet)], [],
+          ['רווח', r2(t.profit)]
+        ])}>⬇ ייצוא</button>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`ledger-${book.name}-${from}_${to}.csv`, [
+          ['סוג', 'תאריך', 'תיאור', 'קטגוריה', 'ספק / מקור', 'מסמך', 'אמצעי תשלום', 'לפני מע״מ', 'מע״מ', 'סה״כ'],
+          ...t.inc.map(i => ['הכנסה', i.date, i.desc, i.cat, i.src === 'shop' ? 'חנות' : 'ידני', i.docNo, i.pay, r2(i.gross - i.vat), i.vat, i.gross]),
+          ...t.exp.map(e => ['הוצאה', e.date, e.desc, e.cat, supName(e.supplierId) || e.supplierName || '', e.docNo, e.pay, r2(e.gross - e.vat), e.vat, e.gross]),
+        ])}>⬇ כל התנועות לרואה החשבון</button>
+      </div>
+      <div data-tour="pnl-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 16 }}>
+        <div className="mg-card">
+          <h3 style={{ marginTop: 0 }}>תמצית · {monthName(from)} עד {monthName(to)}</h3>
+          <Line l="הכנסות (לפני מע״מ)" v={t.incNet} color="var(--green2)" />
+          <Line l="הוצאות (לפני מע״מ)" v={-t.expNet} color="#b8641c" />
+          <Line l="רווח" v={t.profit} strong color={t.profit < 0 ? 'var(--bad)' : 'var(--green)'} />
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>שיעור רווח: {margin}%</div>
+        </div>
+        <div className="mg-card">
+          <h3 style={{ marginTop: 0 }}>הכנסות לפי קטגוריה</h3>
+          {incBy.map(([k, v]) => <Line key={k} l={k} v={v} />)}
+          {!incBy.length && <div className="mg-empty">אין הכנסות בטווח.</div>}
+        </div>
+        <div className="mg-card">
+          <h3 style={{ marginTop: 0 }}>הוצאות לפי קטגוריה</h3>
+          {expBy.map(([k, v]) => (
+            <div key={k} style={{ padding: '6px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{k}</span><span dir="ltr">{fmt(v)}</span></div>
+              <div style={{ height: 6, background: '#f0ebe0', borderRadius: 4, marginTop: 4 }}>
+                <div style={{ width: `${t.expNet ? v / t.expNet * 100 : 0}%`, height: '100%', background: '#d9822b', borderRadius: 4 }} /></div>
+            </div>
+          ))}
+          {!expBy.length && <div className="mg-empty">אין הוצאות בטווח.</div>}
+        </div>
+        {supBy.length > 0 && <div className="mg-card">
+          <h3 style={{ marginTop: 0 }}>ספקים מובילים</h3>
+          {supBy.map(([k, v]) => <Line key={k} l={k} v={v} />)}
+        </div>}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------- ייבוא */
+/* The old ERP (tizon-event) kept everything in one Realtime Database node.
+   Copied into this book under ids built from the old ones, so a second run
+   skips what is already here. Its amounts never separated VAT. */
+function ImportTab({ book, data, cols, flash, onDone, onDeleteBook, onLog }) {
+  const [old, setOld] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [pick, setPick] = useState({ incomes: true, expenses: true, suppliers: true });
+
+  const fetchOld = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(OLD_ERP_URL);
+      if (!res.ok) throw new Error(res.status === 401 ? 'המערכת הישנה דורשת הרשאה' : 'שגיאה ' + res.status);
+      const d = await res.json();
+      if (!d) throw new Error('המערכת הישנה ריקה');
+      const arr = (x) => Array.isArray(x) ? x.filter(Boolean) : x && typeof x === 'object' ? Object.values(x) : [];
+      setOld({ incomes: arr(d.incomes), expenses: arr(d.expenses), suppliers: arr(d.suppliers), customers: arr(d.customers) });
+    } catch (e) { setErr(String(e.message || e)); }
+    setBusy(false);
+  };
+
+  const run = async () => {
+    setBusy(true);
+    const have = new Set([...(data.incomes || []), ...(data.expenses || []), ...(data.suppliers || [])].map(x => x.id));
+    const put = async (col, rec) => { try { await withTimeout(col.put(rec.id, clean(rec)), 12000); return 1; } catch { return 0; } };
+    let n = 0, skipped = 0;
+    if (pick.suppliers) for (const s of old.suppliers) {
+      const id = 'erp_sup_' + s.id;
+      if (have.has(id)) { skipped++; continue; }
+      n += await put(cols.suppliers, { id, name: s.name || '', phone: s.phone || '', email: s.email || '', taxId: '',
+                                       cat: 'אחר', notes: s.service || '', review: true, src: 'erp' });
+    }
+    if (pick.incomes) for (const i of old.incomes) {
+      const id = 'erp_inc_' + i.id;
+      if (have.has(id)) { skipped++; continue; }
+      n += await put(cols.incomes, { id, src: 'erp', date: d10(i.date), desc: i.desc || 'הכנסה מהמערכת הישנה',
+                                     cat: 'אחר', pay: i.status || '', gross: r2(i.totalAmount), docNo: '', review: true });
+    }
+    if (pick.expenses) for (const e of old.expenses) {
+      const id = 'erp_exp_' + e.id;
+      if (have.has(id)) { skipped++; continue; }
+      n += await put(cols.expenses, { id, src: 'erp', date: d10(e.date), desc: e.desc || 'הוצאה מהמערכת הישנה',
+                                      cat: EXP_CATS.includes(e.cat) ? e.cat : 'אחר',
+                                      ...(e.cat && !EXP_CATS.includes(e.cat) ? { oldCat: e.cat } : {}),
+                                      pay: '', gross: r2(e.totalAmount), vat: 0, vatMode: 'none', docNo: '', hasDoc: false, review: true });
+    }
+    setBusy(false);
+    flash(`יובאו ${n} רשומות${skipped ? ` · ${skipped} כבר היו` : ''}`);
+    onDone();
+  };
+
+  return (
+    <>
+      <ICountImport book={book} data={data} cols={cols} flash={flash} onDone={onDone} onLog={onLog} />
+      <div data-tour="imp-erp" className="mg-card" style={{ marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>ייבוא מה-ERP הישן</h3>
+        <p style={{ marginTop: 0 }}>מעתיק לעסק הזה את ההכנסות, ההוצאות והספקים מהמערכת הקודמת (tizon-event). המערכת הישנה לא נפגעת, והרצה חוזרת לא מכפילה.</p>
+        {!old && <button className="mg-btn" disabled={busy} onClick={fetchOld}>{busy ? 'קורא…' : 'קרא את המערכת הישנה'}</button>}
+        {err && <div className="mg-note bad" style={{ marginTop: 10 }}>לא הצלחתי לקרוא: {err}</div>}
+        {old && <>
+          <div className="mg-stats" style={{ margin: '12px 0' }}>
+            <div className="mg-stat"><div className="lb">הכנסות</div><div className="vl">{old.incomes.length}</div>
+              <div className="dl">{fmt(old.incomes.reduce((a, i) => a + (Number(i.totalAmount) || 0), 0))}</div></div>
+            <div className="mg-stat"><div className="lb">הוצאות</div><div className="vl">{old.expenses.length}</div>
+              <div className="dl">{fmt(old.expenses.reduce((a, i) => a + (Number(i.totalAmount) || 0), 0))}</div></div>
+            <div className="mg-stat"><div className="lb">ספקים</div><div className="vl">{old.suppliers.length}</div></div>
+            <div className="mg-stat"><div className="lb">לקוחות</div><div className="vl">{old.customers.length}</div><div className="dl">לא מיובאים</div></div>
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+            {[['incomes', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים']].map(([k, l]) => (
+              <label key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={pick[k]} onChange={e => setPick(p => ({ ...p, [k]: e.target.checked }))} />{l}</label>
+            ))}
+          </div>
+          <div className="mg-note warn" style={{ marginBottom: 12 }}>
+            במערכת הישנה הסכומים נשמרו בלי פירוק מע״מ. ההוצאות ייכנסו בלי מע״מ לקיזוז ויסומנו "לבדיקה". פותחים כל אחת ומעדכנים.
+            אם חלק מההכנסות הישנות הן מכירות שכבר נמשכות מהחנות, מוחקים אותן כדי שלא ייספרו פעמיים.
+          </div>
+          <button className="mg-btn" disabled={busy} onClick={run}>{busy ? 'מייבא…' : 'ייבא לעסק הזה'}</button>
+        </>}
+      </div>
+      <div data-tour="imp-danger" className="mg-card" style={{ borderColor: '#f0c9c5' }}>
+        <h3 style={{ marginTop: 0, color: 'var(--bad)' }}>מחיקת העסק</h3>
+        <p style={{ marginTop: 0 }}>מוחק את הספר ואת כל ההכנסות, ההוצאות, הספקים ושורות הבנק שלו. ההזמנות בחנות לא נפגעות.</p>
+        <button className="mg-btn danger" onClick={onDeleteBook}>מחק את העסק</button>
+      </div>
+    </>
+  );
+}
+
+/* ================================================================ documents */
+/* Phase 1 of issuing documents from Tizon Books itself.
+
+   The rules it keeps, because a tax document is not an ordinary record:
+     · every type has its own running number, with no gaps and no repeats —
+       the number is taken in the same transaction that writes the document;
+     · a document is never edited or deleted once issued. A mistake is put
+       right with a credit note (330) that points at it;
+     · dates go forward: a document cannot be dated before the last one of
+       its type;
+     · the first print is the original, every later one says "copy";
+     · a book starts in TEST mode — its own "T-" numbers, a watermark on every
+       page, and nothing counted as income. REAL mode needs the cloud and an
+       explicit tick that the accountant approved it.
+   The type codes are the Tax Authority's, for the unified file of phase 2. */
+const DOC_TYPES = {
+  320: { label: 'חשבונית מס קבלה', short: 'מס קבלה', lines: true, pay: true, vat: true },
+  305: { label: 'חשבונית מס', short: 'חשבונית', lines: true, pay: false, vat: true },
+  400: { label: 'קבלה', short: 'קבלה', lines: false, pay: true, vat: false },
+  330: { label: 'חשבונית זיכוי', short: 'זיכוי', lines: true, pay: false, vat: true, credit: true },
+  300: { label: 'חשבון עסקה', short: 'עסקה', lines: true, pay: false, vat: true },
+};
+const allowedTypes = (book) => book.dealerType === 'exempt' ? ['400', '300'] : ['320', '305', '400', '330', '300'];
+/* Invoices with VAT above this, before VAT, to a dealer, need an allocation
+   number (from 1.6.2026). Kept in one place because it keeps changing. */
+const ALLOC_THRESHOLD = 5000;
+/* חוק לצמצום השימוש במזומן: a business may take up to ₪6,000 in cash; above
+   that, the lower of ₪6,000 and 10% of the deal. */
+const CASH_CAP = 6000;
+const cashAllowed = (deal) => deal <= CASH_CAP ? deal : Math.min(CASH_CAP, deal * 0.1);
+/* Which real invoices need an allocation number: a tax invoice (305) or tax
+   invoice-receipt (320) with VAT, to a dealer (9-digit number), above the
+   threshold before VAT. */
+const digitsOf = (v) => String(v || '').replace(/\D/g, '');
+const needsAlloc = (book, d) => d?.series === 'live' && ['305', '320'].includes(d.type) && rateOf(book) > 0
+  && digitsOf(d.customer?.taxId).length === 9 && (Number(d.net) || 0) > ALLOC_THRESHOLD;
+/* The request to the Approval API (v2), field names as published. */
+function itaPayload(book, d) {
+  const soft = lsGet('tzbooks_software', {});
+  const rate = Number(d.vatRate) || 0;
+  return {
+    invoice_id: d.id, invoice_type: Number(d.type), vat_number: Number(digitsOf(book.taxId)),
+    user_name: String(d.createdBy || cloud?.auth?.currentUser?.email || '').slice(0, 25),
+    invoice_reference_number: String(d.number), customer_vat_number: Number(digitsOf(d.customer?.taxId)),
+    customer_name: String(d.customer?.name || '').slice(0, 25), invoice_date: d.date, invoice_issuance_date: todayIso(),
+    accounting_software_number: Number(digitsOf(soft.regNo)) || 0,
+    amount_before_discount: r2(d.net), discount: 0, payment_amount: r2(d.net), vat_amount: r2(d.vat), payment_amount_including_vat: r2(d.total),
+    items_list: (d.lines || []).map((l, i) => {
+      const unit = d.incl && rate ? (Number(l.price) || 0) / (1 + rate / 100) : (Number(l.price) || 0);
+      const net = r2(unit * (Number(l.qty) || 0));
+      return { index: i + 1, description: String(l.desc || '').slice(0, 30), quantity: Number(l.qty) || 0, price_per_unit: r2(unit),
+               discount: 0, total_amount: net, vat_rate: rate, vat_amount: r2(net * rate / 100) };
+    }),
+  };
+}
+const PAY_KINDS = ['מזומן', 'העברה בנקאית', 'כרטיס אשראי', 'ביט', 'פייבוקס', 'צ׳ק'];
+const docSeries = (book) => (cloud && book.docMode === 'live' && book.docApproved) ? 'live' : 'test';
+const docNum = (d) => (d.series === 'test' ? 'T-' : '') + d.number;
+const isImported = (d) => d?.series === 'import';
+const docTitle = (d) => `${DOC_TYPES[d.type]?.label || 'מסמך'} ${docNum(d)}${isImported(d) ? ' (iCount)' : ''}`;
+
+/* Totals of a document from its lines. Prices typed with or without VAT. */
+function docTotals(lines, incl, rate) {
+  const sum = r2((lines || []).reduce((a, l) => a + (Number(l.qty) || 0) * (Number(l.price) || 0), 0));
+  if (!rate) return { net: sum, vat: 0, total: sum };
+  if (incl) { const net = r2(sum / (1 + rate / 100)); return { net, vat: r2(sum - net), total: sum }; }
+  const vat = r2(sum * rate / 100); return { net: sum, vat, total: r2(sum + vat) };
+}
+async function stampOf(d) {
+  const core = JSON.stringify([d.type, d.series, d.number, d.date, d.customer?.name, d.customer?.taxId, d.total, d.vat, d.lines, d.payments]);
+  try {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(core));
+    return [...new Uint8Array(h)].slice(0, 5).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  } catch { return ''; }
+}
+/* What is still owed on an invoice: its total, less receipts and credit notes
+   that point at it. */
+function openOf(inv, docs) {
+  const paid = docs.filter(d => d.refId === inv.id && d.type === '400').reduce((a, d) => a + d.total + (Number(d.withholding) || 0), 0);
+  const cred = docs.filter(d => d.refId === inv.id && d.type === '330').reduce((a, d) => a + d.total, 0);
+  return r2(inv.total - paid - cred);
+}
+
+/* ------------------------------------------------------------------ print */
+function docHTML(book, d, copy) {
+  const T = DOC_TYPES[d.type] || {};
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const m = (n) => '₪' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const c = d.customer || {};
+  const lines = (d.lines || []).map(l => `<tr><td>${esc(l.desc)}</td><td class="n">${esc(l.qty)}</td><td class="n">${m(l.price)}</td><td class="n">${m((Number(l.qty) || 0) * (Number(l.price) || 0))}</td></tr>`).join('');
+  const pays = (d.payments || []).map(p => `<tr><td>${esc(p.kind)}</td><td>${esc(heDate(p.date))}</td><td>${esc(p.details)}</td><td class="n">${m(p.amount)}</td></tr>`).join('');
+  return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${esc(docTitle(d))}</title>
+<style>
+@page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,'Segoe UI',sans-serif;color:#222;margin:0;font-size:13px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #a8783f;padding-bottom:12px}
+.biz b{font-size:20px;display:block;color:#6e4d22}.biz div{color:#555;line-height:1.6}
+.logo{max-height:80px;max-width:200px}
+h1{font-size:24px;margin:18px 0 4px;color:#222}.copy{display:inline-block;border:2px solid #a8783f;color:#a8783f;padding:2px 10px;border-radius:6px;font-weight:700;margin-inline-start:10px;font-size:14px}
+.meta{display:flex;justify-content:space-between;gap:20px;margin:14px 0;background:#faf6ee;padding:12px 14px;border-radius:8px}
+.meta div{line-height:1.7}.lb{color:#777;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:10px 0}th{background:#f1e8d6;text-align:right;padding:8px;font-size:12px}td{padding:8px;border-bottom:1px solid #eee}
+.n{text-align:left;white-space:nowrap}
+.tot{width:280px;margin-inline-start:auto}.tot div{display:flex;justify-content:space-between;padding:5px 0}.tot .g{font-size:17px;font-weight:800;border-top:2px solid #222;margin-top:4px;padding-top:8px}
+.ref,.notes{margin:10px 0;padding:8px 12px;background:#faf6ee;border-radius:6px}
+.foot{margin-top:28px;border-top:1px solid #ddd;padding-top:8px;color:#888;font-size:11px;display:flex;justify-content:space-between}
+.sign{margin-top:36px;width:220px;border-top:1px solid #444;padding-top:4px;text-align:center;color:#555}
+.wm{position:fixed;top:40%;left:0;right:0;text-align:center;transform:rotate(-24deg);font-size:54px;font-weight:800;color:rgba(200,40,40,.13);pointer-events:none}
+</style></head><body>
+${d.series === 'test' ? '<div class="wm">מסמך ניסיון · לא לצורכי מס</div>' : ''}
+<div class="top"><div class="biz"><b>${esc(book.legalName || book.name)}</b>
+<div>${esc(DEALERS[book.dealerType] || '')} ${esc(book.taxId || '')}</div>
+<div>${esc(book.address || '')}</div><div>${esc([book.phone, book.email].filter(Boolean).join(' · '))}</div></div>
+${book.logo ? `<img class="logo" src="${book.logo}">` : ''}</div>
+<h1>${esc(T.label)} מס׳ ${esc(docNum(d))}<span class="copy">${copy ? 'העתק נאמן למקור' : 'מקור'}</span></h1>
+<div class="meta"><div><span class="lb">לכבוד</span><br><b>${esc(c.name)}</b>${c.taxId ? `<br>ח.פ./ת.ז. ${esc(c.taxId)}` : ''}${c.address ? `<br>${esc(c.address)}` : ''}${c.phone ? `<br>${esc(c.phone)}` : ''}</div>
+<div><span class="lb">תאריך</span><br><b>${esc(heDate(d.date))}</b>${d.allocationNo ? `<br><span class="lb">מספר הקצאה</span><br><b>${esc(String(d.allocationNo).slice(-9))}</b>` : ''}</div></div>
+${d.refId ? `<div class="ref">${d.type === '330' ? 'זיכוי בגין' : 'תשלום עבור'} ${esc(d.refTitle || '')}</div>` : ''}
+${T.lines ? `<table><thead><tr><th>תיאור</th><th class="n">כמות</th><th class="n">מחיר ליחידה</th><th class="n">סה״כ</th></tr></thead><tbody>${lines}</tbody></table>
+<div class="tot">${d.vatRate ? `<div><span>${d.incl ? 'סה״כ לפני מע״מ' : 'סה״כ'}</span><span>${m(d.net)}</span></div><div><span>מע״מ ${d.vatRate}%</span><span>${m(d.vat)}</span></div>` : ''}
+<div class="g"><span>${d.type === '330' ? 'סה״כ זיכוי' : 'סה״כ לתשלום'}</span><span>${m(d.total)}</span></div></div>` : ''}
+${T.pay && pays ? `<h3 style="margin:18px 0 0;font-size:15px">פרטי התשלום</h3><table><thead><tr><th>אמצעי</th><th>תאריך</th><th>פרטים</th><th class="n">סכום</th></tr></thead><tbody>${pays}</tbody></table>
+${d.withholding ? `<div class="tot"><div><span>ניכוי במקור</span><span>${m(d.withholding)}</span></div></div>` : ''}
+${!T.lines ? `<div class="tot"><div class="g"><span>סה״כ התקבל</span><span>${m(d.total)}</span></div></div>` : ''}` : ''}
+${d.notes ? `<div class="notes">${esc(d.notes)}</div>` : ''}
+<div class="sign">חתימה</div>
+<div class="foot"><span>הופק ב-Tizon Books ${VERSION} · ${esc(new Date(d.createdAt).toLocaleString('he-IL'))}</span><span>קוד אימות ${esc(d.stamp || '')}</span></div>
+</body></html>`;
+}
+/* Printed from a hidden frame — no pop-up to be blocked. "Save as PDF" is
+   the same dialog. */
+function printHTML(html) {
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;width:0;height:0;border:0;left:-9999px';
+  document.body.appendChild(f);
+  f.contentDocument.open(); f.contentDocument.write(html); f.contentDocument.close();
+  setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch {} setTimeout(() => f.remove(), 60000); }, 450);
+}
+const waPhone = (p) => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('0')) d = '972' + d.slice(1); return d; };
+
+/* ------------------------------------------------------------ the list */
+function DocsTab({ book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
+                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh }) {
+  const [busyId, setBusyId] = useState('');
+  const [payForm, setPayForm] = useState(false);
+  const [form, setForm] = useState(null);
+  const [month, setMonth] = useState('');
+  const [type, setType] = useState('');
+  const [src, setSrc] = useState('');
+  const series = docSeries(book);
+  const hasImp = docs.some(isImported);
+  const list = docs.filter(d => (!month || d.date.startsWith(month)) && (!type || d.type === type)
+                              && (!src || (src === 'import' ? isImported(d) : !isImported(d))))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const openInv = docs.filter(d => d.type === '305' && d.series === series && openOf(d, docs) > 0.009);
+
+  const print = async (d) => { printHTML(docHTML(book, d, (d.printCount || 0) > 0)); onPrinted(d); };
+  const canSign = !!(cloud && server?.sign);
+  const canMail = !!(cloud && server?.sign && server?.mail);
+  /* A PDF: signed when the certificate is set up, plain otherwise. */
+  const pdf = async (d) => {
+    setBusyId(d.id);
+    try {
+      const raw = await docPDF(book, d, (d.printCount || 0) > 0);
+      if (canSign) {
+        const r = await fnCall({ action: 'doc', pdf: b64(raw), title: docTitle(d), business: book.legalName || book.name, businessEmail: book.email || '' });
+        saveBytes(pdfName(d), unb64(r.pdf), 'application/pdf');
+        onLog({ action: 'sign', docId: d.id, title: docTitle(d), series: d.series });
+      } else {
+        saveBytes(pdfName(d), new Uint8Array(raw), 'application/pdf');
+        onLog({ action: 'pdf', docId: d.id, title: docTitle(d), series: d.series });
+      }
+      onPrinted(d, true);
+    } catch (e) { flash('הפקת ה-PDF נכשלה · ' + (e.message || '')); }
+    setBusyId('');
+  };
+  const sendSigned = async (d) => {
+    const to = window.prompt('לאיזה אימייל לשלוח?', d.customer?.email || '');
+    if (!to) return;
+    setBusyId(d.id);
+    try {
+      const raw = await docPDF(book, d, (d.printCount || 0) > 0);
+      await fnCall({ action: 'doc', pdf: b64(raw), to, replyTo: book.email || '', filename: pdfName(d),
+        title: docTitle(d), business: book.legalName || book.name, businessEmail: book.email || '',
+        subject: `${docTitle(d)} · ${book.legalName || book.name}`,
+        text: `שלום ${d.customer?.name || ''},\n\nמצורפת ${docTitle(d)} על סך ${fmt(d.total)}, חתומה דיגיטלית.\n\nתודה,\n${book.legalName || book.name}` });
+      onSent(d, to);
+      flash(`${docTitle(d)} נשלחה חתומה ל-${to}`);
+    } catch (e) {
+      flash(e.message === 'no-cert' ? 'אין תעודת חתימה מוגדרת בשרת' : e.message === 'no-mail' ? 'שליחת מייל לא מוגדרת בשרת' : 'השליחה נכשלה · ' + (e.message || ''));
+    }
+    setBusyId('');
+  };
+  const send = (d, how) => {
+    const text = `שלום ${d.customer?.name || ''},\nמצורפת ${docTitle(d)} על סך ${fmt(d.total)}.\nתודה, ${book.legalName || book.name}`;
+    if (how === 'wa') window.open(`https://wa.me/${waPhone(d.customer?.phone)}?text=${encodeURIComponent(text)}`, '_blank');
+    else window.location.href = `mailto:${d.customer?.email || ''}?subject=${encodeURIComponent(docTitle(d))}&body=${encodeURIComponent(text + '\n\n(המסמך מצורף כ-PDF)')}`;
+  };
+
+  return (
+    <>
+      {series === 'test'
+        ? <div data-tour="docs-mode" className="mg-note warn" style={{ marginBottom: 12 }}>
+            <b>מצב ניסיון.</b> המסמכים מקבלים מספרי T-, עליהם מודפס "מסמך ניסיון · לא לצורכי מס", והם לא נספרים כהכנסה.
+            {!cloud ? ' מצב אמיתי אפשרי רק כשהמערכת מחוברת לענן.' : ' מעבר למצב אמיתי: הגדרות העסק ← מסמכים.'}</div>
+        : <div data-tour="docs-mode" className="mg-note" style={{ marginBottom: 12 }}><b>מצב אמיתי.</b> המסמכים הם מסמכי מס, נספרים כהכנסה ואי אפשר למחוק או לערוך אותם.</div>}
+      <div data-tour="docs-new" style={{ ...row, marginBottom: 12 }}>
+        {allowedTypes(book).map(t => (
+          <button key={t} className={'mg-btn' + (t === allowedTypes(book)[0] ? '' : ' ghost')} onClick={() => setForm({ type: t })}>＋ {DOC_TYPES[t].label}</button>
+        ))}
+        {payOk?.zcredit && !ro && <button data-tour="docs-paynew" className="mg-btn" style={{ background: '#1f4e79' }} onClick={() => setPayForm(true)}>💳 דף סליקה</button>}
+      </div>
+      <PayList book={book} list={payreqs} onCancel={onPayCancel} onRefresh={onPayRefresh} flash={flash} ro={ro} />
+      <div data-tour="docs-filters" style={{ ...row, marginBottom: 12 }}>
+        <Field label="חודש"><input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
+        <Field label="סוג"><select value={type} onChange={e => setType(e.target.value)}>
+          <option value="">הכול</option>{allowedTypes(book).map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>
+        {hasImp && <Field label="מקור"><select value={src} onChange={e => setSrc(e.target.value)}>
+          <option value="">הכול</option><option value="own">Tizon Books</option><option value="import">iCount</option></select></Field>}
+        {openInv.length > 0 && <div className="mg-note" style={{ alignSelf: 'center' }}>
+          {openInv.length} חשבוניות פתוחות בסך {fmt(openInv.reduce((a, d) => a + openOf(d, docs), 0))}</div>}
+      </div>
+      <div data-tour="docs-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>מסמך</th><th>תאריך</th><th>לקוח</th><th>סה״כ</th><th>מצב</th><th></th></tr></thead>
+        <tbody>
+          {list.map(d => {
+            const open = d.type === '305' ? openOf(d, docs) : 0;
+            const credited = docs.some(x => x.refId === d.id && x.type === '330');
+            return (
+              <tr key={d.id}>
+                <td><b>{DOC_TYPES[d.type]?.label}</b> <span dir="ltr">{docNum(d)}</span>{d.series === 'test' && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>ניסיון</span>}
+                  {isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 6 }}>iCount</span>}
+                  {d.cancelled && <span className="mg-chip bad" style={{ marginInlineStart: 6 }}>מבוטל</span>}
+                  {d.allocationNo && <span className="mg-chip ok" style={{ marginInlineStart: 6 }} title={d.allocationNo}>הקצאה {String(d.allocationNo).slice(-9)}</span>}
+                  {needsAlloc(book, d) && !d.allocationNo && <span className="mg-chip bad" style={{ marginInlineStart: 6 }}>חסר מספר הקצאה</span>}</td>
+                <td>{heDate(d.date)}</td>
+                <td>{d.customer?.name}</td>
+                <td><b>{d.type === '330' ? '‎-' : ''}{fmt(d.total)}</b></td>
+                <td>{isImported(d) ? <span className="mg-chip">היסטוריה</span>
+                  : credited ? <span className="mg-chip bad">זוכתה</span>
+                  : d.type === '305' ? (open > 0.009 ? <span className="mg-chip warn">פתוחה · {fmt(open)}</span> : <span className="mg-chip ok">שולמה</span>)
+                  : <span className="mg-chip ok">הופק</span>}
+                  {(d.printCount || 0) > 0 && !isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 4 }}>הודפס</span>}</td>
+                <td>{isImported(d) ? <span style={{ fontSize: 12, color: 'var(--muted)' }}>המקור נמצא ב-iCount</span> :
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <button className="mg-btn ghost sm keep" onClick={() => print(d)}>🖨 {(d.printCount || 0) > 0 ? 'העתק' : 'הדפס'}</button>
+                  <button className="mg-btn ghost sm keep" disabled={busyId === d.id} onClick={() => pdf(d)}>{busyId === d.id ? '…' : canSign ? 'PDF חתום' : 'PDF'}</button>
+                  {canMail && <button className="mg-btn ghost sm" disabled={busyId === d.id} onClick={() => sendSigned(d)}>✉ שלח חתום</button>}
+                  {d.sentTo && <span className="mg-chip ok" title={d.sentAt}>נשלח</span>}
+                  {needsAlloc(book, d) && !d.allocationNo && <>
+                    {ita?.connected && <button className="mg-btn sm" disabled={busyId === d.id}
+                      onClick={async () => { setBusyId(d.id); await onRequestAlloc(d); setBusyId(''); }}>בקש מספר הקצאה</button>}
+                    <button className="mg-btn ghost sm" onClick={() => { const n = window.prompt('מספר ההקצאה שהתקבל מרשות המסים:'); if (n && n.trim()) onManualAlloc(d, n.trim()); }}>הזן הקצאה</button></>}
+                  {d.customer?.phone && <button className="mg-btn ghost sm" onClick={() => send(d, 'wa')}>וואטסאפ</button>}
+                  {d.customer?.email && <button className="mg-btn ghost sm" onClick={() => send(d, 'mail')}>מייל</button>}
+                  {d.type === '305' && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setForm({ type: '400', ref: d })}>קבלה</button>}
+                  {['305', '320'].includes(d.type) && !credited && book.dealerType !== 'exempt' &&
+                    <button className="mg-btn ghost sm" onClick={() => setForm({ type: '330', ref: d })}>זיכוי</button>}
+                </div>}</td>
+              </tr>
+            );
+          })}
+          {!list.length && <tr><td colSpan={6}><div className="mg-empty">עוד לא הופקו מסמכים.</div></td></tr>}
+        </tbody>
+      </table></div>
+      <div className="mg-note" style={{ marginTop: 12 }}>
+        {canMail ? 'שליחה חתומה: "שלח חתום" מייצר PDF, חותם עליו בתעודה הדיגיטלית ושולח במייל.'
+          : canSign ? 'PDF חתום מוכן. לשליחה במייל ישירות מכאן, צריך להגדיר בשרת גם שליחת מייל.'
+          : 'חשבונית שנשלחת דיגיטלית צריכה חתימה אלקטרונית מאובטחת. עד שתוגדר תעודה: מדפיסים ומוסרים ביד, או שולחים PDF רק למטרות ניסיון.'}
+        {' '}מסמך שהופק לא נמחק ולא נערך; טעות מתקנים בחשבונית זיכוי.
+      </div>
+      {payForm && <PayForm book={book} docs={docs} customers={customers} items={items} flash={flash} onCreated={onPayCreated} onClose={() => setPayForm(false)} />}
+      {form && <DocForm book={book} docs={docs} customers={customers} items={items} preset={form} itaReady={!!ita?.connected} series={series} onClose={() => setForm(null)}
+                        onIssue={async (rec) => { const d = await onIssue(rec); if (d) { setForm(null); flash(`${docTitle(d)} הופקה`); } return d; }} />}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------ issuing */
+function DocForm({ book, docs, customers = [], items = [], preset, series, onIssue, onClose, itaReady = false }) {
+  const rate = rateOf(book);
+  const ref = preset.ref || null;
+  const [type, setType] = useState(preset.type);
+  const T = DOC_TYPES[type];
+  const vatRate = T.vat ? rate : 0;
+  const [date, setDate] = useState(todayIso());
+  const [cust, setCust] = useState(() => ref ? { ...ref.customer } : { name: '', taxId: '', address: '', phone: '', email: '' });
+  const [incl, setIncl] = useState(ref ? !!ref.incl : true);
+  const [lines, setLines] = useState(() => ref && type === '330' ? ref.lines.map(l => ({ ...l })) : [{ desc: '', qty: 1, price: '' }]);
+  const tot = T.lines ? docTotals(lines, incl, vatRate) : null;
+  const refOpen = ref && type === '400' ? openOf(ref, docs) : 0;
+  const [pays, setPays] = useState(() => [{ kind: 'העברה בנקאית', amount: ref && type === '400' ? refOpen : '', date: todayIso(), details: '' }]);
+  const paySum = r2(pays.reduce((a, p) => a + (Number(p.amount) || 0), 0));
+  const [alloc, setAlloc] = useState('');
+  const [wh, setWh] = useState('');
+  const whAmt = r2(Number(wh) || 0);
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  /* Customers issued to before, to pick instead of typing. */
+  const known = useMemo(() => {
+    const m = {}; docs.forEach(d => { if (d.customer?.name) m[d.customer.name] = d.customer; });
+    customers.forEach(c => { if (c.name) m[c.name] = { name: c.name, taxId: c.taxId || '', address: [c.address, c.city].filter(Boolean).join(', '), phone: c.phone || '', email: c.email || '' }; });
+    return m;
+  }, [docs, customers]);
+  /* Picking a known customer fills their details; typing past one clears
+     them, so one customer's tax id never ends up on another's document. */
+  const pickName = (name) => setCust(c => known[name] ? { ...known[name] }
+    : known[c.name] ? { name, taxId: '', address: '', phone: '', email: '' } : { ...c, name });
+
+  const total = T.lines ? tot.total : paySum;
+  const needAlloc = ['305', '320'].includes(type) && vatRate > 0 && digitsOf(cust.taxId).length === 9 && (tot?.net || 0) > ALLOC_THRESHOLD;
+  const lastDate = docs.filter(d => d.type === type && d.series === series).map(d => d.date).sort().pop() || '';
+
+  useEffect(() => { if (T.pay && T.lines && pays.length === 1) setPays(p => [{ ...p[0], amount: r2((tot.total || 0) - whAmt) || '' }]); }, [tot?.total, type, whAmt]);
+
+  const problems = [];
+  if (!String(cust.name).trim()) problems.push('חסר שם לקוח');
+  if (T.lines && !lines.some(l => String(l.desc).trim() && Number(l.qty) && Number(l.price))) problems.push('צריך לפחות שורה אחת עם תיאור, כמות ומחיר');
+  if (total <= 0) problems.push('הסכום צריך להיות גדול מאפס');
+  if (T.pay && T.lines && Math.abs(paySum + whAmt - tot.total) > 0.009) problems.push(`התשלומים${whAmt ? ' והניכוי במקור' : ''} (${fmt(paySum + whAmt)}) שונים מסה״כ המסמך (${fmt(tot.total)})`);
+  if (type === '400' && ref && paySum + whAmt - refOpen > 0.009) problems.push(`הקבלה גבוהה מהיתרה הפתוחה (${fmt(refOpen)})`);
+  if (type === '330' && ref && total - ref.total > 0.009) problems.push('הזיכוי גבוה מהחשבונית המקורית');
+  if (lastDate && date < lastDate) problems.push(`התאריך מוקדם מהמסמך האחרון מסוג זה (${heDate(lastDate)})`);
+  if (needAlloc && series === 'live' && !alloc.trim() && !itaReady) problems.push('חסר מספר הקצאה');
+  /* Cash: counted against the whole deal — the invoice a receipt pays, or
+     this document itself. */
+  const cash = r2(pays.filter(p => p.kind === 'מזומן').reduce((a, p) => a + (Number(p.amount) || 0), 0));
+  const dealValue = ref && type === '400' ? ref.total : total;
+  const cashMax = r2(cashAllowed(dealValue));
+  const cashOver = T.pay && cash > cashMax + 0.009;
+  if (cashOver && series === 'live') problems.push(`מזומן ${fmt(cash)} מעל המותר בעסקה של ${fmt(dealValue)} (עד ${fmt(cashMax)}, לפי החוק לצמצום השימוש במזומן)`);
+
+  const issue = async () => {
+    if (!window.confirm(`להפיק ${T.label} על סך ${fmt(total)} ל${cust.name}?\nאחרי ההפקה אי אפשר לערוך או למחוק את המסמך.`)) return;
+    setBusy(true); setErr('');
+    const cleanLines = T.lines ? lines.filter(l => String(l.desc).trim()).map(l => clean({ desc: String(l.desc).trim(), qty: Number(l.qty) || 0, price: r2(l.price),
+                                                                                        ...(l.itemId ? { itemId: l.itemId, sku: l.sku || '' } : {}) })) : [];
+    const rec = {
+      id: uid('doc'), type, series, date, customer: { ...cust, name: String(cust.name).trim() },
+      lines: cleanLines, incl: T.lines ? incl : false, vatRate: T.lines ? vatRate : 0,
+      net: T.lines ? tot.net : paySum, vat: T.lines ? tot.vat : 0, total: r2(total),
+      payments: T.pay ? pays.filter(p => Number(p.amount)).map(p => ({ ...p, amount: r2(p.amount) })) : [],
+      allocationNo: alloc.trim(), notes: notes.trim(), withholding: T.pay ? whAmt : 0,
+      createdBy: cloud?.auth?.currentUser?.email || '',
+      refId: ref?.id || '', refTitle: ref ? docTitle(ref) : '',
+      printCount: 0, createdAt: new Date().toISOString(),
+    };
+    try { await onIssue(rec); } catch (e) { setErr('ההפקה נכשלה · ' + (e?.code || e?.message || '')); }
+    setBusy(false);
+  };
+
+  const setLine = (i, k, v) => setLines(ls => ls.map((l, j) => j === i ? { ...l, [k]: v } : l));
+  /* Picking an item fills its price, converted to this document's VAT setting. */
+  const activeItems = items.filter(x => x.active !== false);
+  const pickItem = (i, v) => {
+    const it = activeItems.find(x => x.name === v);
+    setLines(ls => ls.map((l, j) => j !== i ? l : it ? { ...l, desc: it.name, price: itemPrice(it, incl, vatRate), itemId: it.id, sku: it.sku || '' }
+                                                     : { ...l, desc: v, itemId: l.desc === v ? l.itemId : '' }));
+  };
+  const setPay = (i, k, v) => setPays(ps => ps.map((p, j) => j === i ? { ...p, [k]: v } : p));
+
+  return (
+    <Box title={`${T.label}${series === 'test' ? ' · ניסיון' : ''}`} onClose={onClose} wide
+         footer={<><button className="mg-btn" disabled={busy || problems.length > 0} onClick={issue}>{busy ? 'מפיק…' : 'הפק מסמך'}</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      {ref && <div className="mg-note" style={{ marginBottom: 12 }}>{type === '330' ? 'זיכוי בגין' : 'תשלום עבור'} <b>{docTitle(ref)}</b> · {fmt(ref.total)}{type === '400' ? ` · יתרה ${fmt(refOpen)}` : ''}</div>}
+      <div style={grid}>
+        {!ref && <Field label="סוג מסמך"><select value={type} onChange={e => setType(e.target.value)}>
+          {allowedTypes(book).filter(t => t !== '330').map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>}
+        <Field label="תאריך"><input type="date" value={date} min={lastDate || undefined} onChange={e => setDate(e.target.value)} /></Field>
+        <Field label="שם הלקוח"><input list="tz-known" value={cust.name} onChange={e => pickName(e.target.value)} disabled={!!ref} />
+          <datalist id="tz-known">{Object.keys(known).map(n => <option key={n} value={n} />)}</datalist></Field>
+        <Field label="ח.פ. / ת.ז."><input dir="ltr" value={cust.taxId || ''} onChange={e => setCust(c => ({ ...c, taxId: e.target.value }))} disabled={!!ref} /></Field>
+        <Field label="כתובת"><input value={cust.address || ''} onChange={e => setCust(c => ({ ...c, address: e.target.value }))} disabled={!!ref} /></Field>
+        <Field label="טלפון"><input dir="ltr" value={cust.phone || ''} onChange={e => setCust(c => ({ ...c, phone: e.target.value }))} /></Field>
+        <Field label="אימייל"><input dir="ltr" value={cust.email || ''} onChange={e => setCust(c => ({ ...c, email: e.target.value }))} /></Field>
+      </div>
+
+      {T.lines && <>
+        <h4 style={{ margin: '16px 0 6px' }}>פריטים</h4>
+        <div className="mg-tblwrap"><table className="mg-tbl">
+          <thead><tr><th>תיאור</th><th style={{ width: 80 }}>כמות</th><th style={{ width: 120 }}>מחיר ליחידה</th><th style={{ width: 100 }}>סה״כ</th><th style={{ width: 40 }}></th></tr></thead>
+          <tbody>{lines.map((l, i) => (
+            <tr key={i}>
+              <td><input list={activeItems.length ? 'tz-items' : undefined} value={l.desc} onChange={e => pickItem(i, e.target.value)} placeholder={activeItems.length ? 'בחר פריט או הקלד' : 'טיפול דיקור'} /></td>
+              <td><input inputMode="decimal" value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} /></td>
+              <td><input inputMode="decimal" value={l.price} onChange={e => setLine(i, 'price', e.target.value)} /></td>
+              <td>{fmt((Number(l.qty) || 0) * (Number(l.price) || 0))}</td>
+              <td>{lines.length > 1 && <button className="mg-btn ghost sm" onClick={() => setLines(ls => ls.filter((_, j) => j !== i))}>×</button>}</td>
+            </tr>))}
+          </tbody></table></div>
+        {activeItems.length > 0 && <datalist id="tz-items">{activeItems.map(x => <option key={x.id} value={x.name}>{fmt(itemPrice(x, incl, vatRate))}</option>)}</datalist>}
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+          <button className="mg-btn ghost sm" onClick={() => setLines(ls => [...ls, { desc: '', qty: 1, price: '' }])}>＋ שורה</button>
+          {vatRate > 0 && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={incl} onChange={e => setIncl(e.target.checked)} />המחירים כוללים מע״מ</label>}
+        </div>
+        <div className="mg-note" style={{ marginTop: 10 }}>
+          {vatRate > 0 && <>לפני מע״מ <b>{fmt(tot.net)}</b> · מע״מ {vatRate}% <b>{fmt(tot.vat)}</b> · </>}סה״כ <b>{fmt(tot.total)}</b></div>
+      </>}
+
+      {T.pay && <>
+        <h4 style={{ margin: '16px 0 6px' }}>תשלומים</h4>
+        {pays.map((p, i) => (
+          <div key={i} style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', marginBottom: 8 }}>
+            <Field label="אמצעי"><select value={p.kind} onChange={e => setPay(i, 'kind', e.target.value)}>{PAY_KINDS.map(k => <option key={k}>{k}</option>)}</select></Field>
+            <Field label="סכום"><input inputMode="decimal" value={p.amount} onChange={e => setPay(i, 'amount', e.target.value)} /></Field>
+            <Field label="תאריך"><input type="date" value={p.date} onChange={e => setPay(i, 'date', e.target.value)} /></Field>
+            <Field label={p.kind === 'צ׳ק' ? 'בנק · סניף · חשבון · מס׳ צ׳ק' : p.kind === 'כרטיס אשראי' ? '4 ספרות · תשלומים' : 'אסמכתא'}>
+              <input value={p.details} onChange={e => setPay(i, 'details', e.target.value)} /></Field>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="mg-btn ghost sm" onClick={() => setPays(ps => [...ps, { kind: 'מזומן', amount: '', date: todayIso(), details: '' }])}>＋ אמצעי תשלום</button>
+          <span style={{ fontSize: 14 }}>סה״כ תשלומים: <b>{fmt(paySum)}</b></span>
+        </div>
+        <div style={{ marginTop: 10, maxWidth: 260 }}><Field label="ניכוי במקור (אם הלקוח ניכה)"><input inputMode="decimal" value={wh} onChange={e => setWh(e.target.value)} placeholder="0" /></Field></div>
+      </>}
+
+      {needAlloc && (
+        <div className="mg-note warn" style={{ marginTop: 14 }}>
+          חשבונית מעל {fmt(ALLOC_THRESHOLD)} לפני מע״מ ללקוח עם ח.פ. צריכה <b>מספר הקצאה</b> מרשות המסים.
+          {itaReady ? ' העסק מחובר: המספר יתבקש אוטומטית מיד אחרי ההפקה. אפשר גם להזין כאן מספר שכבר התקבל.' : ' מקבלים אותו באזור האישי ("חשבוניות ישראל") ומזינים כאן.'}
+          <div style={{ marginTop: 8 }}><Field label="מספר הקצאה"><input dir="ltr" value={alloc} onChange={e => setAlloc(e.target.value)} /></Field></div>
+        </div>
+      )}
+      <div style={{ marginTop: 12 }}><Field label="הערות שיודפסו במסמך"><input value={notes} onChange={e => setNotes(e.target.value)} /></Field></div>
+      {cashOver && series === 'test' && <div className="mg-note warn" style={{ marginTop: 12 }}>
+        מזומן {fmt(cash)} מעל המותר בעסקה של {fmt(dealValue)} (עד {fmt(cashMax)}). במצב אמיתי המסמך הזה ייחסם.</div>}
+      {problems.length > 0 && <div className="mg-note warn" style={{ marginTop: 12 }}>{problems.map((p, i) => <div key={i}>• {p}</div>)}</div>}
+      {err && <div className="mg-note bad" style={{ marginTop: 12 }}>{err}</div>}
+    </Box>
+  );
+}
+
+/* ================================================================ server */
+/* The signing and sending function (netlify/functions/books-mail.mjs). It
+   exists only when the site is deployed with its functions, so every screen
+   asks first and hides what is not there. */
+const FN = '/.netlify/functions/books-mail';
+async function fnStatus() {
+  try { const r = await withTimeout(fetch(FN + '?action=status'), 8000); if (!r.ok) return null;
+        const j = await r.json(); return j && j.ok ? j : null; } catch { return null; }
+}
+async function fnCall(body) {
+  if (!cloud?.auth?.currentUser) throw new Error('צריך להיות מחובר לענן');
+  const idToken = await cloud.auth.currentUser.getIdToken();
+  const r = await fetch(FN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, idToken }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+  return j;
+}
+const b64 = (buf) => { let s = ''; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
+function saveBytes(name, bytes, type) {
+  const blob = new Blob([bytes], { type });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+const unb64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+/* A real PDF of a document, drawn from the same page that is printed. The
+   libraries load only when a PDF is asked for. */
+async function docPDF(book, d, copy) {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')]);
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;background:#fff';
+  document.body.appendChild(f);
+  f.contentDocument.open(); f.contentDocument.write(docHTML(book, d, copy)); f.contentDocument.close();
+  await new Promise(r => setTimeout(r, 500));
+  const body = f.contentDocument.body;
+  body.style.cssText += ';padding:44px;width:794px;background:#fff';
+  const canvas = await html2canvas(body, { scale: 2, backgroundColor: '#ffffff', windowWidth: 794, useCORS: true });
+  f.remove();
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+  const W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight();
+  const per = Math.floor(canvas.width * H / W);
+  for (let off = 0, page = 0; off < canvas.height; off += per, page++) {
+    const c = document.createElement('canvas'); c.width = canvas.width; c.height = Math.min(per, canvas.height - off);
+    c.getContext('2d').drawImage(canvas, 0, off, c.width, c.height, 0, 0, c.width, c.height);
+    if (page) pdf.addPage();
+    pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, W, c.height * W / c.width);
+  }
+  pdf.setProperties({ title: docTitle(d), creator: 'Tizon Books ' + VERSION, author: book.legalName || book.name });
+  return pdf.output('arraybuffer');
+}
+const PDF_SLUG = { 320: 'tax-invoice-receipt', 305: 'tax-invoice', 400: 'receipt', 330: 'credit-note', 300: 'deal-invoice' };
+const pdfName = (d) => `${PDF_SLUG[d.type] || 'document'}-${docNum(d)}.pdf`;
+
+/* ============================================================ the log */
+/* What was done, by whom, when. Written once and never changed. */
+async function logAct(bookId, entry) {
+  const rec = clean({ id: uid('log'), at: new Date().toISOString(), user: cloud?.auth?.currentUser?.email || 'local', ...entry });
+  try { await DB.put(`books/${bookId}/log`, rec.id, rec); } catch {}
+  return rec;
+}
+
+/* ======================================================= unified format */
+/* The Tax Authority's unified file (הוראה 1.31): INI.TXT and BKMVDATA.TXT,
+   fixed-width records, ISO-8859-8, lines ending CR LF, in
+   OPENFRMT/<8 digits>.<yy>/<MMDDhhmm>/. Documents only (C100, D110, D120):
+   this software issues documents; it does not keep a double-entry ledger. */
+const OF_CONST = '&OF1.31&';
+const SOFT_KEY = 'tzbooks_software';
+/* Hebrew punctuation that ISO-8859-8 lacks, as its nearest ASCII. */
+const PUNCT = { 0x5F3: 39, 0x5F4: 34, 0x2013: 45, 0x2014: 45, 0x2018: 39, 0x2019: 39, 0x201C: 34, 0x201D: 34, 0x200E: null, 0x200F: null, 0xA0: 32, 0x20AA: 32 };
+const enc8859 = (s) => { const out = []; for (const ch of s) { const c = ch.codePointAt(0);
+  const v = c < 128 ? c : (c >= 0x5D0 && c <= 0x5EA) ? c - 0x5D0 + 0xE0 : (c in PUNCT ? PUNCT[c] : 63); if (v !== null) out.push(v); } return out; };
+const fX = (v, n) => { const s = [...String(v ?? '').replace(/[\u200E\u200F]/g, '').replace(/[\r\n]+/g, ' ')].slice(0, n).join(''); return s + ' '.repeat(n - [...s].length); };
+const fN = (v, n) => { const s = String(v ?? '').replace(/\D/g, '').slice(-n); return s.padStart(n, '0'); };
+const fS = (v, int, dec) => { const x = Math.round(Math.abs(Number(v) || 0) * 10 ** dec); return ((Number(v) || 0) < 0 ? '-' : '+') + String(x).padStart(int + dec, '0').slice(-(int + dec)); };
+const ymd = (d) => String(d || '').replace(/-/g, '').slice(0, 8);
+const PAY_CODE = { 'מזומן': 1, 'צ׳ק': 2, 'כרטיס אשראי': 3, 'העברה בנקאית': 4, 'ביט': 9, 'פייבוקס': 9 };
+
+/* ---------------------------------------------------- the journal (B100/B110)
+   A double-entry journal built from what the books already hold:
+     invoice      Dr customer            Cr income, Cr output VAT
+     credit note  the same, reversed
+     receipt      Dr cash/bank/cards…    (Dr withholding)   Cr customer
+     other income Dr bank                Cr income, Cr output VAT
+     expense      Dr expense, Dr input VAT                  Cr the account it was paid from
+   Every entry balances; the account list carries each account's totals. */
+const PAY_ACC = { 'מזומן': '1010', 'העברה בנקאית': '1020', 'הוראת קבע': '1020', 'כרטיס אשראי': '1030', 'צ׳ק': '1040', 'ביט': '1050', 'פייבוקס': '1050' };
+function buildJournal(book, ownDocs, ledger, from, to) {
+  const inRange = (d) => d && d >= from && d <= to;
+  const acc = {};
+  const A = (key, name, tb, tbName, extra = {}) => (acc[key] = acc[key] || { key, name, tb, tbName, dr: 0, cr: 0, ...extra });
+  A('1010', 'קופה - מזומן', '100', 'רכוש שוטף'); A('1020', 'בנק', '100', 'רכוש שוטף'); A('1030', 'חברות כרטיסי אשראי', '100', 'רכוש שוטף');
+  A('1040', 'שיקים לגבייה', '100', 'רכוש שוטף'); A('1050', 'ארנקים דיגיטליים', '100', 'רכוש שוטף'); A('1100', 'לקוחות', '100', 'רכוש שוטף');
+  A('1410', 'מע״מ תשומות', '100', 'רכוש שוטף'); A('1500', 'ניכוי במקור מלקוחות', '100', 'רכוש שוטף'); A('2210', 'מע״מ עסקאות', '200', 'התחייבויות שוטפות');
+  A('4000', 'הכנסות חייבות', '400', 'הכנסות'); A('4100', 'הכנסות פטורות', '400', 'הכנסות');
+  const custKey = (c) => { const t = digitsOf(c?.taxId); const k = t || normName(c?.name).replace(/\s/g, '').slice(0, 12) || 'X'; return ('C' + k).slice(0, 15); };
+  const cust = (c) => A(custKey(c), String(c?.name || 'לקוח').slice(0, 50), '100', 'רכוש שוטף',
+    { parent: '1100', street: c?.address || '', osek: digitsOf(c?.taxId).length === 9 ? digitsOf(c.taxId) : '' }).key;
+  const expCats = {};
+  const expAcc = (cat) => { const c = cat || 'אחר'; if (!expCats[c]) expCats[c] = '6' + String(100 + Object.keys(expCats).length).padStart(3, '0'); return A(expCats[c], c, '600', 'הוצאות').key; };
+  const tx = []; let n = 0;
+  const entry = (date, ref, refType, desc, lines) => {
+    n++; lines.filter(l => Math.abs(l.amt) > 0.004).forEach((l, i) => {
+      const side = l.amt >= 0 ? l.side : (l.side === 1 ? 2 : 1);
+      const amt = r2(Math.abs(l.amt));
+      if (side === 1) acc[l.acc].dr += amt; else acc[l.acc].cr += amt;
+      tx.push({ n, line: i + 1, date, ref: String(ref || ''), refType: refType || 0, desc: String(desc || '').slice(0, 50), acc: l.acc, side, amt });
+    });
+  };
+  const ownIds = new Set();
+  ownDocs.filter(d => d.series === 'live' && !d.cancelled && inRange(d.date)).forEach(d => {
+    ownIds.add(d.id);
+    const sign = d.type === '330' ? -1 : 1, num = docNum(d);
+    if (['305', '320', '330'].includes(d.type) || (d.type === '400' && book.dealerType === 'exempt' && !d.refId)) {
+      const c = cust(d.customer);
+      entry(d.date, num, Number(d.type), `${DOC_TYPES[d.type]?.label} ${num} ${d.customer?.name || ''}`, [
+        { acc: c, side: 1, amt: sign * d.total },
+        { acc: d.vat ? '4000' : '4100', side: 2, amt: sign * (d.total - d.vat) },
+        { acc: '2210', side: 2, amt: sign * d.vat },
+      ]);
+    }
+    if (['320', '400'].includes(d.type) && (d.payments || []).length) {
+      const c = cust(d.customer);
+      const got = d.payments.map(p => ({ acc: PAY_ACC[p.kind] || '1020', side: 1, amt: Number(p.amount) || 0 }));
+      const wh = Number(d.withholding) || 0;
+      entry(d.date, docNum(d), Number(d.type), `תקבול ${docNum(d)} ${d.customer?.name || ''}`,
+        [...got, { acc: '1500', side: 1, amt: wh }, { acc: c, side: 2, amt: got.reduce((a, x) => a + x.amt, 0) + wh }]);
+    }
+  });
+  ledger.income.filter(i => inRange(i.date) && !(i.src === 'doc' && ownIds.has(String(i.id).slice(2)))).forEach(i => {
+    entry(i.date, i.docNo || '', 0, i.desc, [
+      { acc: '1020', side: 1, amt: i.gross },
+      { acc: i.vat ? '4000' : '4100', side: 2, amt: i.gross - i.vat },
+      { acc: '2210', side: 2, amt: i.vat },
+    ]);
+  });
+  ledger.outgo.filter(e => inRange(e.date)).forEach(e => {
+    entry(e.date, e.docNo || '', 0, `${e.desc || ''} ${e.supplierName || ''}`.trim(), [
+      { acc: expAcc(e.cat), side: 1, amt: e.gross - e.vat },
+      { acc: '1410', side: 1, amt: e.vat },
+      { acc: PAY_ACC[e.pay] || '1020', side: 2, amt: e.gross },
+    ]);
+  });
+  return { tx, accounts: Object.values(acc).filter(a => a.dr || a.cr || !a.parent) };
+}
+
+function buildUnified(book, docs, soft, from, to, opts = {}) {
+  const osek = fN(book.taxId, 9);
+  const mainId = String(Math.floor(1e14 + Math.random() * 9e14)).slice(0, 15);
+  const now = new Date();
+  const recs = []; const counts = {};
+  const push = (code, body) => { recs.push(code + fN(recs.length + 1, 9) + body); counts[code] = (counts[code] || 0) + 1; };
+  push('A100', osek + mainId + OF_CONST + fX('', 50));
+  const journal = opts.ledger ? buildJournal(book, docs, opts.ledger, from, to) : null;
+  if (journal) {
+    const entered = ymd(now.toISOString());
+    journal.tx.forEach(t => push('B100', osek + fN(t.n, 10) + fN(t.line, 5) + fN(0, 8) + fX('', 15) + fX(t.ref, 20) + fN(t.refType, 3)
+      + fX('', 20) + fN(0, 3) + fX(t.desc, 50) + fN(ymd(t.date), 8) + fN(ymd(t.date), 8) + fX(t.acc, 15) + fX('', 15) + String(t.side)
+      + fX('', 3) + fS(t.amt, 12, 2) + fS(0, 12, 2) + fX('', 12) + fX('', 10) + fX('', 10) + fX('', 7) + fN(entered, 8) + fX('', 9) + fX('', 25)));
+    journal.accounts.forEach(a => push('B110', osek + fX(a.key, 15) + fX(a.name, 50) + fX(a.tb, 15) + fX(a.tbName, 30) + fX(a.street || '', 50)
+      + fX('', 10) + fX('', 30) + fX('', 8) + fX('', 30) + fX('', 2) + fX(a.parent || '', 15) + fS(0, 12, 2) + fS(a.dr, 12, 2) + fS(a.cr, 12, 2)
+      + fN(0, 4) + fN(a.osek || 0, 9) + fX('', 7) + fS(0, 12, 2) + fX('', 3) + fX('', 16)));
+  }
+  const sorted = [...docs].sort((a, b) => (a.date + a.type + String(a.number).padStart(9, '0')).localeCompare(b.date + b.type + String(b.number).padStart(9, '0')));
+  const byType = {};
+  sorted.forEach(d => {
+    const sign = d.type === '330' ? -1 : 1;
+    const num = docNum(d), c = d.customer || {};
+    const custOsek = String(c.taxId || '').replace(/\D/g, '').length === 9 ? c.taxId : '';
+    const custKey = (String(c.taxId || '').replace(/\D/g, '') || c.name || '').slice(0, 15);
+    const ct = new Date(d.createdAt || Date.now());
+    const time = pad(ct.getHours()) + pad(ct.getMinutes());
+    const head = recs.length + 1;
+    push('C100', osek + fN(d.type, 3) + fX(num, 20) + fN(ymd(d.date), 8) + fN(time, 4) + fX(c.name, 50) + fX(c.address, 50) + fX('', 10)
+      + fX('', 30) + fX('', 8) + fX('', 30) + fX('', 2) + fX(c.phone, 15) + fN(custOsek, 9) + fN(ymd(d.date), 8)
+      + fS(0, 12, 2) + fX('', 3) + fS(sign * d.net, 12, 2) + fS(0, 12, 2) + fS(sign * d.net, 12, 2) + fS(sign * d.vat, 12, 2)
+      + fS(sign * d.total, 12, 2) + fS(d.withholding || 0, 9, 2) + fX(custKey, 15) + fX('', 10) + fX('', 1) + fN(ymd(d.date), 8)
+      + fX('', 7) + fX((d.createdBy || '').split('@')[0], 9) + fN(0, 7) + fX('', 13));
+    const ref = d.refId ? docs.find(x => x.id === d.refId) : null;
+    (d.lines || []).forEach((l, i) => {
+      const unit = d.incl && d.vatRate ? (Number(l.price) || 0) / (1 + d.vatRate / 100) : (Number(l.price) || 0);
+      push('D110', osek + fN(d.type, 3) + fX(num, 20) + fN(i + 1, 4) + fN(ref ? ref.type : 0, 3) + fX(ref ? docNum(ref) : '', 20)
+        + '1' + fX('', 20) + fX(l.desc, 30) + fX('', 50) + fX('', 30) + fX('יחידה', 20) + fS(l.qty, 12, 4) + fS(unit, 12, 2)
+        + fS(0, 12, 2) + fS(sign * unit * (Number(l.qty) || 0), 12, 2) + fN(Math.round((d.vatRate || 0) * 100), 4) + fX('', 7)
+        + fN(ymd(d.date), 8) + fN(head, 7) + fX('', 7) + fX('', 21));
+    });
+    (d.payments || []).forEach((p, i) => {
+      const k = PAY_CODE[p.kind] || 9;
+      const parts = k === 2 ? String(p.details || '').split(/\D+/).filter(Boolean) : [];
+      push('D120', osek + fN(d.type, 3) + fX(num, 20) + fN(i + 1, 4) + String(k) + fN(parts[0], 10) + fN(parts[1], 10) + fN(parts[2], 15)
+        + fN(parts[3], 10) + fN(k === 2 || k === 3 ? ymd(p.date) : '', 8) + fS(p.amount, 12, 2) + fN(0, 1) + fX(k === 3 ? p.details : '', 20)
+        + fN(k === 3 ? 1 : 0, 1) + fX('', 7) + fN(ymd(d.date), 8) + fN(head, 7) + fX('', 60));
+    });
+    const t = byType[d.type] = byType[d.type] || { count: 0, total: 0 };
+    t.count++; t.total += sign * d.total;
+  });
+  const total = recs.length + 1;
+  push('Z900', osek + mainId + OF_CONST + fN(total, 15) + fX('', 50));
+
+  const yy = String(now.getFullYear()).slice(2);
+  const stamp = `${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const dir = `OPENFRMT/${osek.slice(0, 8)}.${yy}/${stamp}`;
+  const addr = String(book.address || '');
+  const street = addr.split(',')[0] || '', city = addr.split(',').slice(1).join(',').trim();
+  const ini = ['A000' + fX('', 5) + fN(total, 15) + osek + mainId + OF_CONST + fN(soft.regNo, 8) + fX('Tizon Books', 20) + fX(VERSION, 20)
+    + fN(soft.makerId, 9) + fX(soft.makerName || 'Tizon Health', 20) + '2' + fX(dir.replace(/\//g, '\\'), 50) + (journal ? '2' : '0') + (journal ? '1' : '0')
+    + fN(0, 9) + fN(0, 9) + fX('', 10) + fX(book.legalName || book.name, 50) + fX(street, 50) + fX('', 10) + fX(city, 30) + fX('', 8)
+    + fN(0, 4) + fN(ymd(from), 8) + fN(ymd(to), 8) + fN(ymd(now.toISOString()), 8) + stamp.slice(4) + '0' + '1' + fX('', 20)
+    + fX('ILS', 3) + '0' + fX('', 46)];
+  ['B100', 'B110', 'C100', 'D110', 'D120'].forEach(code => { if (counts[code]) ini.push(code + fN(counts[code], 15)); });
+  const bytes = (lines) => new Uint8Array(enc8859(lines.join('\r\n') + '\r\n'));
+  return { dir, ini: bytes(ini), data: bytes(recs), counts: { ...counts, total }, byType, journal, lengths: { A000: ini[0].length } , recs, iniLines: ini };
+}
+
+/* ---------------------------------------------------- monthly archive */
+/* Last month, kept apart from everything else: every business's unified
+   files (documents and journal) and a full backup, in one zip. Emailed to
+   the owner on the first visit of each month when the server can send mail;
+   otherwise offered for download. */
+const ARCH_KEY = 'tzbooks_archive';
+async function makeArchive(books, month, email) {
+  const { zipSync, strToU8 } = await import('fflate');
+  const soft = lsGet(SOFT_KEY, {});
+  const from = month + '-01', to = month + '-31';
+  const files = {}; const lines = [];
+  for (const b of books) {
+    const d = await loadBook(b);
+    const docs = (d.documents || []).filter(x => x.series === 'live' && x.date >= from && x.date <= to);
+    const safe = String(b.name || b.id).replace(/[\\/:*?"<>|]/g, '_');
+    if (digitsOf(b.taxId).length === 9) {
+      const u = buildUnified(b, docs, soft, from, to, { ledger: buildLedger(b, d) });
+      files[`${safe}/${u.dir}/INI.TXT`] = u.ini; files[`${safe}/${u.dir}/BKMVDATA.TXT`] = u.data;
+      lines.push(`${b.name}: ${docs.length} מסמכים, ${u.counts.total} רשומות`);
+    } else lines.push(`${b.name}: אין מספר עוסק, רק גיבוי`);
+  }
+  const backup = await exportAll(email);
+  backup.books = backup.books.filter(x => books.some(b => b.id === x.id));
+  files['backup.json'] = strToU8(JSON.stringify(backup));
+  files['README.txt'] = strToU8(`Tizon Books ${VERSION} · ארכיון ${month}\r\n\r\n${lines.join('\r\n')}\r\n`);
+  return { zip: zipSync(files), lines };
+}
+
+/* ------------------------------------------------------ the tax tab */
+function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
+  const [withJournal, setWithJournal] = useState(false);
+  const y = new Date().getFullYear();
+  const [from, setFrom] = useState(`${y}-01-01`);
+  const [to, setTo] = useState(todayIso());
+  const [withTest, setWithTest] = useState(false);
+  const [soft, setSoft] = useState(() => {
+    const mine = Object.fromEntries(Object.entries(lsGet(SOFT_KEY, {})).filter(([, v]) => v));
+    return { regNo: '', makerId: '', makerName: 'Tizon Health', ...(book.software || {}), ...mine };
+  });
+  const [last, setLast] = useState(null);
+  const osekOk = String(book.taxId || '').replace(/\D/g, '').length === 9;
+  /* Only what this software issued: never history imported from iCount. */
+  const pick = docs.filter(d => d.date >= from && d.date <= to && (d.series === 'live' || (withTest && d.series === 'test')));
+
+  const run = async () => {
+    const { zipSync } = await import('fflate');
+    const u = buildUnified(book, pick, soft, from, to, withJournal && ledger ? { ledger } : {});
+    const zip = zipSync({ [`${u.dir}/INI.TXT`]: u.ini, [`${u.dir}/BKMVDATA.TXT`]: u.data });
+    saveBytes(`OPENFRMT-${String(book.taxId).replace(/\D/g, '')}-${from}_${to}.zip`, zip, 'application/zip');
+    setLast(u);
+    await onLog({ action: 'export-unified', title: `${from} עד ${to} · ${pick.length} מסמכים${withTest ? ' (כולל ניסיון)' : ''}`, series: withTest ? 'test' : 'live' });
+    flash(`הקבצים ירדו · ${u.counts.total} רשומות`);
+  };
+  const printSummary = () => {
+    if (!last) return;
+    const rows = Object.entries(last.byType).map(([t, v]) => `<tr><td>${t}</td><td>${DOC_TYPES[t]?.label || ''}</td><td>${v.count}</td><td>${v.total.toFixed(2)}</td></tr>`).join('');
+    const recRows = ['A100', 'B100', 'B110', 'C100', 'D110', 'D120', 'Z900'].filter(k => last.counts[k]).map(k => `<tr><td>${k}</td><td>${last.counts[k]}</td></tr>`).join('');
+    printHTML(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>הפקת קבצים במבנה אחיד</title>
+<style>body{font-family:Arial;margin:30px;font-size:13px}table{border-collapse:collapse;margin:10px 0 20px}td,th{border:1px solid #999;padding:6px 10px;text-align:right}h2{margin:0 0 6px}</style></head><body>
+<h2>הפקת קבצים במבנה אחיד</h2>
+<div>מספר עוסק: <b>${esc(book.taxId)}</b> · שם העסק: <b>${esc(book.legalName || book.name)}</b></div>
+<div>טווח: ${heDate(from)} עד ${heDate(to)} · תאריך ושעת הפקה: ${new Date().toLocaleString('he-IL')}</div>
+<div>נתיב: ${esc(last.dir.replace(/\//g, '\\'))} · תוכנה: Tizon Books ${VERSION} · מספר רישום: ${esc(soft.regNo || 'טרם נרשמה')}</div>
+<h3>סיכום רשומות בקובץ BKMVDATA</h3><table><tr><th>סוג רשומה</th><th>כמות</th></tr>${recRows}<tr><td><b>סה״כ</b></td><td><b>${last.counts.total}</b></td></tr></table>
+<h3>סיכום מסמכים לפי סוג</h3><table><tr><th>קוד</th><th>סוג מסמך</th><th>כמות</th><th>סה״כ (ש״ח)</th></tr>${rows}</table>
+</body></html>`);
+  };
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const softT = useRef(null);
+  const saveSoft = (k, v) => {
+    const n = { ...soft, [k]: v }; setSoft(n); lsSet(SOFT_KEY, n);
+    // A copy on the business too, so an accountant with read access exports the same files.
+    if (!ro) { clearTimeout(softT.current); softT.current = setTimeout(() => DB.patch('books', book.id, { software: n }).catch(() => {}), 800); }
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 16 }}>
+      <div data-tour="tax-export" className="mg-card">
+        <h3 style={{ marginTop: 0 }}>ייצוא קבצים במבנה אחיד</h3>
+        <p style={{ marginTop: 0 }}>INI.TXT ו-BKMVDATA.TXT לפי הוראה 1.31, בתיקיית OPENFRMT. זה הקובץ שמבקר מס מבקש, והקובץ שנבדק בסימולטור לרישום התוכנה.</p>
+        {!osekOk && <div className="mg-note bad" style={{ marginBottom: 10 }}>בהגדרות העסק חסר מספר עוסק תקין בן 9 ספרות.</div>}
+        <div style={row}>
+          <Field label="מתאריך"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field>
+          <Field label="עד תאריך"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
+        </div>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', fontSize: 14 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={withTest} onChange={e => setWithTest(e.target.checked)} />
+          לכלול מסמכי ניסיון (לבדיקה בסימולטור בלבד)</label>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '0 0 10px', fontSize: 14 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={withJournal} onChange={e => setWithJournal(e.target.checked)} />
+          לכלול רשומות הנהלת חשבונות (B100 / B110): פקודות יומן כפולות וכרטסת חשבונות</label>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>{pick.length} מסמכים בטווח</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="mg-btn keep" disabled={!osekOk || !pick.length} onClick={run}>⬇ הפק קבצים</button>
+          <button className="mg-btn ghost keep" disabled={!last} onClick={printSummary}>🖨 פלט סיכום</button>
+        </div>
+        {last && <div className="mg-note" style={{ marginTop: 10 }}>
+          {Object.entries(last.counts).filter(([k]) => k !== 'total').map(([k, v]) => `${k}: ${v}`).join(' · ')} · סה״כ {last.counts.total}
+          {last.journal && (() => { const dr = last.journal.accounts.reduce((a, x) => a + x.dr, 0), cr = last.journal.accounts.reduce((a, x) => a + x.cr, 0);
+            return <div>מאזן בוחן: חובה {fmt(dr)} · זכות {fmt(cr)} {Math.abs(dr - cr) < 0.01 ? '✓ מאוזן' : '✗ לא מאוזן'}</div>; })()}</div>}
+      </div>
+
+      <div data-tour="tax-register" className="mg-card">
+        <h3 style={{ marginTop: 0 }}>רישום התוכנה ברשות המסים</h3>
+        <ol style={{ paddingInlineStart: 18, lineHeight: 1.9, marginTop: 0, fontSize: 14 }}>
+          <li>מפיקים כאן קבצים (אפשר עם מסמכי ניסיון).</li>
+          <li>מריצים אותם ב<b>סימולטור</b> של רשות המסים ושומרים את דוח התקינות.</li>
+          <li>מדפיסים את <b>פלט הסיכום</b>.</li>
+          <li>מגישים באזור האישי: "בקשה לרישום תוכנה המיועדת לניהול מערכת חשבונות ממוחשבת", עם שלושת הפלטים.</li>
+          <li>מספר הרישום שמתקבל נרשם כאן, ומופיע מאז בכל קובץ.</li>
+        </ol>
+        <div style={grid}>
+          <Field label="מספר רישום התוכנה"><input dir="ltr" value={soft.regNo} onChange={e => saveSoft('regNo', e.target.value.replace(/\D/g, ''))} placeholder="אחרי הרישום" /></Field>
+          <Field label="ע.מ. של יצרן התוכנה"><input dir="ltr" value={soft.makerId} onChange={e => saveSoft('makerId', e.target.value.replace(/\D/g, ''))} /></Field>
+          <Field label="שם יצרן התוכנה"><input value={soft.makerName} onChange={e => saveSoft('makerName', e.target.value)} /></Field>
+        </div>
+        <div className="mg-note warn" style={{ marginTop: 10 }}>
+          הקבצים נבנו לפי המפרט הרשמי, אבל רק הסימולטור של רשות המסים קובע אם הם תקינים. אם הוא מחזיר שגיאה, שלח לי את הדוח שלו.
+        </div>
+      </div>
+
+      <div data-tour="tax-log" className="mg-card" style={{ gridColumn: '1 / -1' }}>
+        <h3 style={{ marginTop: 0 }}>יומן פעולות</h3>
+        <div className="mg-tblwrap"><table className="mg-tbl">
+          <thead><tr><th>מתי</th><th>מי</th><th>פעולה</th><th>פרטים</th></tr></thead>
+          <tbody>
+            {[...log].sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, 80).map(l => (
+              <tr key={l.id}><td>{new Date(l.at).toLocaleString('he-IL')}</td><td dir="ltr" style={{ textAlign: 'right' }}>{l.user}</td>
+                <td>{LOG_ACTIONS[l.action] || l.action}</td><td>{l.title}</td></tr>
+            ))}
+            {!log.length && <tr><td colSpan={4}><div className="mg-empty">עוד אין פעולות ביומן.</div></td></tr>}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  );
+}
+const LOG_ACTIONS = { allocation: 'מספר הקצאה', archive: 'ארכיון חודשי', 'import-icount': 'ייבוא מ-iCount', issue: 'הפקה', print: 'הדפסה', pdf: 'הורדת PDF', send: 'שליחה חתומה', 'export-unified': 'ייצוא מבנה אחיד', sign: 'PDF חתום' };
+
+/* ======================================================= reading a unified file */
+/* The same format the tax tab writes, read the other way — so any registered
+   Israeli software's export can come in: iCount first. Documents only; the
+   journal (B100/B110) and stock (M100) records are passed over. */
+const IMPORT_TYPES = ['305', '320', '330', '400', '300'];
+const PURCHASE_TYPES = ['700', '710'];
+function dec8859(bytes, dos) {
+  let s = '';
+  for (const b of bytes) {
+    if (b < 128) s += String.fromCharCode(b);
+    else if (!dos && b >= 0xE0 && b <= 0xFA) s += String.fromCharCode(0x5D0 + b - 0xE0);
+    else if (dos && b >= 0x80 && b <= 0x9A) s += String.fromCharCode(0x5D0 + b - 0x80);
+    else s += ' ';
+  }
+  return s;
+}
+/* A signed amount as written in the file: "+00000001234" with the last two
+   (or four) digits after the point. Tolerant of spaces and a missing sign. */
+function amt(s, dec = 2) {
+  const t = String(s || '').replace(/\s/g, '');
+  if (!t) return 0;
+  const neg = t.startsWith('-'); const d = t.replace(/[^\d]/g, '');
+  if (!d) return 0;
+  return (neg ? -1 : 1) * Number(d) / 10 ** dec;
+}
+const fdate = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length === 8 && d !== '00000000' ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : ''; };
+
+async function readUnifiedFiles(files) {
+  let ini = null, data = null;
+  for (const f of files) {
+    const buf = new Uint8Array(await f.arrayBuffer());
+    if (/\.zip$/i.test(f.name) || (buf[0] === 0x50 && buf[1] === 0x4B)) {
+      const { unzipSync } = await import('fflate');
+      const all = unzipSync(buf);
+      for (const [name, bytes] of Object.entries(all)) {
+        const base = name.split('/').pop().toUpperCase();
+        if (base === 'INI.TXT') ini = bytes;
+        else if (base.startsWith('BKMVDATA')) data = bytes;
+      }
+    } else if (/^INI\.TXT$/i.test(f.name)) ini = buf;
+    else if (/^BKMVDATA/i.test(f.name)) data = buf;
+  }
+  if (!data) throw new Error('לא נמצא BKMVDATA.TXT בקבצים שנבחרו');
+  /* The character set is in the INI (1 = ISO-8859-8, 2 = CP-862, DOS). */
+  const iniText = ini ? dec8859(ini, false) : '';
+  const dos = iniText.startsWith('A000') && iniText.charAt(395) === '2';
+  return { iniText, dataText: dec8859(data, dos), dos };
+}
+
+function parseUnified(text, reverse) {
+  const fix = (s) => { const t = String(s || '').trim().replace(/\s+/g, ' '); return reverse ? [...t].reverse().join('') : t; };
+  const lines = text.split(/\r?\n/).filter(l => l.length > 4);
+  const heads = {}; const order = []; const counts = {}; let osek = '';
+  const g = (l, a, b) => l.slice(a - 1, b);
+  lines.forEach(l => {
+    const code = l.slice(0, 4); counts[code] = (counts[code] || 0) + 1;
+    if (code === 'A100') osek = g(l, 14, 22);
+    if (code === 'C100') {
+      const type = g(l, 23, 25), num = g(l, 26, 45).trim();
+      const key = type + '|' + num;
+      heads[key] = {
+        type, num, date: fdate(g(l, 401, 408)) || fdate(g(l, 46, 53)), time: g(l, 54, 57),
+        customer: { name: fix(g(l, 58, 107)), address: fix([g(l, 108, 157), g(l, 158, 167), g(l, 168, 197)].join(' ')),
+                    phone: g(l, 238, 252).trim(), taxId: (g(l, 253, 261).replace(/\D/g, '').replace(/^0+$/, '')) },
+        net: amt(g(l, 318, 332)), vat: amt(g(l, 333, 347)), total: amt(g(l, 348, 362)), withholding: amt(g(l, 363, 374)),
+        cancelled: g(l, 400, 400) === '1', lines: [], payments: [], base: null,
+      };
+      order.push(key);
+    }
+    if (code === 'D110') {
+      const h = heads[g(l, 23, 25) + '|' + g(l, 26, 45).trim()]; if (!h) return;
+      const qty = amt(g(l, 224, 240), 4) || 1, unit = amt(g(l, 241, 255)), total = amt(g(l, 271, 285));
+      h.lines.push({ desc: fix(g(l, 94, 123)) || 'שורה', qty: Math.abs(qty), price: Math.abs(unit || (qty ? total / qty : total)) });
+      h.lineVat = Number(g(l, 286, 289).replace(/\D/g, '') || 0) / 100;
+      const bt = g(l, 50, 52).replace(/\D/g, ''), bn = g(l, 53, 72).trim();
+      if (bn && Number(bt)) h.base = { type: String(Number(bt)), num: bn };
+    }
+    if (code === 'D120') {
+      const h = heads[g(l, 23, 25) + '|' + g(l, 26, 45).trim()]; if (!h) return;
+      const m = { 1: 'מזומן', 2: 'צ׳ק', 3: 'כרטיס אשראי', 4: 'העברה בנקאית' }[g(l, 50, 50)] || 'אחר';
+      const det = m === 'צ׳ק' ? [g(l, 51, 60), g(l, 61, 70), g(l, 71, 85), g(l, 86, 95)].map(x => String(Number(x.replace(/\D/g, '') || 0))).join(' ')
+                : m === 'כרטיס אשראי' ? fix(g(l, 120, 139)) : '';
+      h.payments.push({ kind: m, amount: Math.abs(amt(g(l, 104, 118))), date: fdate(g(l, 96, 103)) || h.date, details: det });
+    }
+  });
+  return { osek, counts, docs: order.map(k => heads[k]) };
+}
+
+/* A parsed document as one of ours, marked as history from elsewhere. */
+function importedDoc(h, source) {
+  const n = /^\d+$/.test(h.num) ? Number(h.num) : h.num;
+  const net = Math.abs(h.net), vat = Math.abs(h.vat), total = Math.abs(h.total);
+  return clean({
+    id: `ic_${h.type}_${String(h.num).replace(/[^\w-]/g, '_')}`, type: h.type, series: 'import', source, number: n,
+    date: h.date, customer: h.customer, lines: h.lines, incl: false,
+    vatRate: h.lineVat || (net ? Math.round(vat / net * 100) : 0),
+    net: net || (total - vat), vat, total, withholding: Math.abs(h.withholding) || 0, payments: h.payments,
+    cancelled: h.cancelled, baseRef: h.base ? `${h.base.type}|${h.base.num}` : '',
+    refTitle: h.base ? `${DOC_TYPES[h.base.type]?.label || h.base.type} ${h.base.num}` : '',
+    printCount: 1, createdAt: new Date().toISOString(), importedAt: new Date().toISOString(),
+  });
+}
+function importedExpense(h, source) {
+  const sign = h.type === '710' ? -1 : 1;
+  return clean({
+    id: `ic_exp_${h.type}_${String(h.num).replace(/[^\w-]/g, '_')}`, src: source, date: h.date,
+    supplierName: h.customer.name, desc: `${h.type === '710' ? 'זיכוי רכש' : 'חשבונית רכש'} ${h.num}`, cat: 'אחר',
+    gross: sign * Math.abs(h.total), vat: sign * Math.abs(h.vat), vatMode: 'manual', vatManual: Math.abs(h.vat),
+    docNo: h.num, hasDoc: true, pay: '',
+  });
+}
+
+function ICountImport({ book, data, cols, flash, onDone, onLog }) {
+  const [raw, setRaw] = useState(null);
+  const [reverse, setReverse] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState('');
+  const [err, setErr] = useState('');
+  const parsed = useMemo(() => raw ? parseUnified(raw.dataText, reverse) : null, [raw, reverse]);
+
+  const load = async (files) => {
+    setErr(''); setRaw(null);
+    try { setRaw(await readUnifiedFiles([...files])); } catch (e) { setErr(e.message || String(e)); }
+  };
+
+  const plan = useMemo(() => {
+    if (!parsed) return null;
+    const have = new Set([...(data.documents || []), ...(data.expenses || [])].map(x => x.id));
+    const sales = parsed.docs.filter(h => IMPORT_TYPES.includes(h.type)).map(h => importedDoc(h, 'icount'));
+    const buys = parsed.docs.filter(h => PURCHASE_TYPES.includes(h.type)).map(h => importedExpense(h, 'icount'));
+    const other = parsed.docs.filter(h => !IMPORT_TYPES.includes(h.type) && !PURCHASE_TYPES.includes(h.type));
+    const byType = {}; sales.forEach(d => { const t = byType[d.type] = byType[d.type] || { n: 0, total: 0 }; t.n++; t.total += d.total; });
+    const byYear = {}; sales.filter(d => ['305', '320', '330'].includes(d.type)).forEach(d => {
+      const y = (d.date || '').slice(0, 4); byYear[y] = (byYear[y] || 0) + (d.type === '330' ? -d.net : d.net); });
+    const custs = new Set(sales.map(d => d.customer?.name).filter(Boolean));
+    return { sales, buys, other, byType, byYear, custs,
+             fresh: sales.filter(d => !have.has(d.id)), freshBuys: buys.filter(e => !have.has(e.id)) };
+  }, [parsed, data]);
+
+  const fileOsek = (parsed?.osek || '').replace(/^0+/, '');
+  const mismatch = fileOsek && String(book.taxId || '').replace(/\D/g, '').replace(/^0+/, '') !== fileOsek;
+
+  const run = async () => {
+    setBusy(true);
+    let n = 0;
+    const put = (col, r) => withTimeout(col.put(r.id, r), 15000).then(() => { n++; }).catch(() => {});
+    const all = [...plan.fresh.map(d => [cols.documents, d]), ...plan.freshBuys.map(e => [cols.expenses, e])];
+    for (let i = 0; i < all.length; i += 20) {
+      await Promise.all(all.slice(i, i + 20).map(([c, r]) => put(c, r)));
+      setProg(`${Math.min(i + 20, all.length)} / ${all.length}`);
+    }
+    const cp = planCustomers(data.customers || [], plan.sales.map(d => d.customer || {}), 'icount');
+    await saveCustomers(cols.customers, [...cp.add, ...cp.upd]);
+    await onLog({ action: 'import-icount', title: `${plan.fresh.length} מסמכים, ${plan.freshBuys.length} הוצאות, ${cp.add.length} לקוחות חדשים`, series: 'test' });
+    setBusy(false); setProg('');
+    flash(`יובאו ${n} רשומות מ-iCount`);
+    setRaw(null); onDone();
+  };
+
+  return (
+    <div data-tour="imp-icount" className="mg-card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginTop: 0 }}>ייבוא מ-iCount</h3>
+      <p style={{ marginTop: 0 }}>
+        ב-iCount: <b>מערכת ← ייצוא במבנה אחיד ← יצירת קבצים במבנה אחיד</b>, מהיום הראשון ועד היום. את קובץ ה-ZIP מעלים כאן כמו שהוא.
+        עובד גם עם קובץ מבנה אחיד מכל תוכנה רשומה אחרת.
+      </p>
+      <label className="mg-btn" style={{ cursor: 'pointer' }}>⬆ בחר קובץ ZIP (או INI.TXT + BKMVDATA.TXT)
+        <input type="file" multiple accept=".zip,.txt,.TXT" hidden onChange={e => { load(e.target.files || []); e.target.value = ''; }} /></label>
+      {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
+
+      {plan && <>
+        {mismatch && <div className="mg-note warn" style={{ marginTop: 12 }}>
+          הקובץ שייך לעוסק <b dir="ltr">{parsed.osek}</b>, והעסק הזה רשום עם <b dir="ltr">{book.taxId || 'בלי מספר'}</b>. ודא שזה העסק הנכון.</div>}
+        <div className="mg-stats" style={{ margin: '12px 0' }}>
+          {Object.entries(plan.byType).map(([t, v]) => (
+            <div key={t} className="mg-stat"><div className="lb">{DOC_TYPES[t]?.label}</div><div className="vl">{v.n}</div><div className="dl">{fmt(v.total)}</div></div>
+          ))}
+          {plan.buys.length > 0 && <div className="mg-stat"><div className="lb">חשבוניות רכש</div><div className="vl">{plan.buys.length}</div><div className="dl">ייכנסו כהוצאות</div></div>}
+          <div className="mg-stat"><div className="lb">לקוחות</div><div className="vl">{plan.custs.size}</div></div>
+        </div>
+        <div style={{ fontSize: 14, marginBottom: 8 }}>
+          הכנסות לפני מע״מ לפי שנה: {Object.entries(plan.byYear).sort().map(([y, v]) => <span key={y} style={{ marginInlineEnd: 14 }}><b>{y}</b> {fmt(v)}</span>)}
+        </div>
+        <div className="mg-tblwrap" style={{ marginBottom: 10 }}><table className="mg-tbl">
+          <thead><tr><th>מסמך</th><th>תאריך</th><th>לקוח</th><th>סה״כ</th></tr></thead>
+          <tbody>{plan.sales.slice(0, 6).map(d => (
+            <tr key={d.id}><td>{DOC_TYPES[d.type]?.label} {d.number}</td><td>{heDate(d.date)}</td><td>{d.customer?.name}</td><td>{fmt(d.total)}</td></tr>))}
+          </tbody></table></div>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, marginBottom: 10 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={reverse} onChange={e => setReverse(e.target.checked)} />
+          השמות מופיעים הפוכים (סמן רק אם בטבלה למעלה העברית כתובה מהסוף להתחלה)</label>
+        {plan.other.length > 0 && <div className="mg-note" style={{ marginBottom: 10 }}>
+          {plan.other.length} מסמכים מסוגים אחרים (הזמנות, תעודות משלוח וכדומה) לא ייובאו.</div>}
+        <div className="mg-note" style={{ marginBottom: 10 }}>
+          ייכנסו <b>{plan.fresh.length}</b> מסמכים ו-<b>{plan.freshBuys.length}</b> הוצאות חדשים
+          {plan.sales.length - plan.fresh.length > 0 && ` · ${plan.sales.length - plan.fresh.length} כבר קיימים ולא ייובאו שוב`}.
+          המסמכים נשמרים כהיסטוריה לקריאה בלבד, עם המספרים של iCount, ונספרים בהכנסות ובמע״מ. הם לא משפיעים על המספור של Tizon Books.
+          {data.orders?.length > 0 && ' הזמנות מהחנות שהחשבונית שלהן הופקה ב-iCount ייספרו פעם אחת בלבד.'}
+        </div>
+        <button className="mg-btn" disabled={busy || !(plan.fresh.length + plan.freshBuys.length)} onClick={run}>
+          {busy ? `מייבא… ${prog}` : `ייבא ${plan.fresh.length + plan.freshBuys.length} רשומות`}</button>
+      </>}
+      {!plan && (data.documents || []).some(isImported) && (
+        <div style={{ marginTop: 12, fontSize: 14 }}>
+          כבר יובאו {(data.documents || []).filter(isImported).length} מסמכים מ-iCount.{' '}
+          <button className="mg-linkish" disabled={busy} onClick={async () => {
+            if (!window.confirm('למחוק את כל מה שיובא מ-iCount (מסמכים והוצאות)? אפשר לייבא שוב אחר כך.')) return;
+            setBusy(true);
+            const docs = (data.documents || []).filter(isImported), exps = (data.expenses || []).filter(e => e.src === 'icount');
+            for (const d of docs) await cols.documents.del(d.id).catch(() => {});
+            for (const e of exps) await cols.expenses.del(e.id).catch(() => {});
+            setBusy(false); flash('ההיסטוריה המיובאת נמחקה'); onDone();
+          }}>מחק ייבוא</button></div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================ customers */
+/* One list per business, fed from four places: typed in here, every document
+   issued, the iCount customer list (Excel/CSV) and its documents, and the
+   store's customers. The same person arriving from two of them is one
+   customer: matched by tax id, then email, then phone, and only by name
+   when neither side has any of those. A merge fills what is missing and
+   never overwrites what is already there. */
+const normPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.length >= 9 ? d.slice(-9) : ''; };
+const normTax = (t) => { const d = String(t || '').replace(/\D/g, '').replace(/^0+/, ''); return d.length >= 5 ? d : ''; };
+const normEmail = (e) => { const s = String(e || '').trim().toLowerCase(); return s.includes('@') ? s : ''; };
+const normName = (n) => String(n || '').replace(/[\s"״'׳.,-]+/g, ' ').trim().toLowerCase();
+const CUST_FIELDS = ['name', 'taxId', 'phone', 'email', 'address', 'city', 'zip', 'contact', 'notes'];
+const CUST_LABELS = { name: 'שם', taxId: 'ח.פ. / ת.ז.', phone: 'טלפון', email: 'אימייל', address: 'כתובת', city: 'עיר', zip: 'מיקוד', contact: 'איש קשר', notes: 'הערות' };
+const SRC_LABEL = { manual: 'ידני', doc: 'מסמך', icount: 'iCount', store: 'חנות' };
+
+function sameCustomer(a, b) {
+  if (!a || !b) return false;
+  const ta = normTax(a.taxId), tb = normTax(b.taxId);
+  if (ta && tb) return ta === tb;
+  /* A shared email or phone is the same customer only when the names agree:
+     a couple, or a parent paying for a child, share them and are not one
+     customer on a tax document. */
+  const na = normName(a.name), nb = normName(b.name);
+  const namesAgree = !na || !nb || na === nb || na.includes(nb) || nb.includes(na);
+  const ea = normEmail(a.email), eb = normEmail(b.email);
+  if (ea && eb && ea === eb && namesAgree) return true;
+  const pa = normPhone(a.phone), pb = normPhone(b.phone);
+  if (pa && pb && pa === pb && namesAgree) return true;
+  /* By name alone only when nothing on the two sides contradicts it. */
+  return !!na && na === nb && !(ea && eb && ea !== eb) && !(pa && pb && pa !== pb) && !(ta || tb);
+}
+function mergeCustomer(old, inc, source) {
+  const out = { ...old };
+  /* The store keeps street and city in one field; a record that went there
+     with a city only comes back with the city as its "address". */
+  if (inc.address && !inc.city && old.city && String(inc.address).trim() === String(old.city).trim()) inc = { ...inc, address: '' };
+  CUST_FIELDS.forEach(k => { const v = String(inc[k] ?? '').trim(); if (v && !String(out[k] ?? '').trim()) out[k] = v; });
+  out.sources = [...new Set([...(old.sources || []), source].filter(Boolean))];
+  if (inc.storeId && !out.storeId) out.storeId = inc.storeId;
+  return out;
+}
+/* A batch of incoming customers against the list: what is new, what adds
+   something to an existing one, and what is already known. */
+function planCustomers(list, incoming, source) {
+  const cur = [...list]; const add = [], upd = [], same = [];
+  incoming.filter(c => String(c.name || '').trim() || normEmail(c.email) || normPhone(c.phone)).forEach(c => {
+    const hit = cur.find(x => sameCustomer(x, c));
+    if (!hit) {
+      const n = clean({ id: uid('cust'), ...Object.fromEntries(CUST_FIELDS.map(k => [k, String(c[k] ?? '').trim()])),
+                        name: String(c.name || c.email || c.phone).trim(), sources: [source], storeId: c.storeId || '', createdAt: new Date().toISOString() });
+      cur.push(n); add.push(n);
+    } else {
+      const m = mergeCustomer(hit, c, source);
+      const changed = CUST_FIELDS.some(k => (m[k] || '') !== (hit[k] || '')) || (m.sources || []).length !== (hit.sources || []).length || m.storeId !== hit.storeId;
+      if (changed) { cur[cur.indexOf(hit)] = m; const i = add.indexOf(hit); if (i >= 0) add[i] = m; else { const j = upd.findIndex(x => x.id === m.id); if (j >= 0) upd[j] = m; else upd.push(m); } }
+      else same.push(hit);
+    }
+  });
+  return { add, upd, same, all: cur };
+}
+async function saveCustomers(col, recs, onProgress) {
+  let n = 0;
+  for (let i = 0; i < recs.length; i += 25) {
+    await Promise.all(recs.slice(i, i + 25).map(r => withTimeout(col.put(r.id, clean({ ...r, updatedAt: new Date().toISOString() })), 15000).then(() => n++).catch(() => {})));
+    onProgress?.(Math.min(i + 25, recs.length), recs.length);
+  }
+  return n;
+}
+
+/* ------------------------------------------------ reading a customer file */
+/* Column names as iCount and most Israeli systems write them, in Hebrew or
+   English. The first column that fits wins; the user can change any of it. */
+const COL_GUESS = [
+  ['name', /^(שם\s*(ה)?לקוח|שם( מלא)?|לקוח|שם חברה|שם העסק|company|customer|name|full ?name)$/i],
+  ['taxId', /(ח\.?\s?פ|ע\.?\s?מ|ת\.?\s?ז|עוסק|מספר זהות|ח"פ|ע"מ|ת"ז|vat|tax ?id|id ?number)/i],
+  ['email', /(מייל|דוא"?ל|דואל|e-?mail)/i],
+  ['phone', /(נייד|טלפון|סלולרי|phone|mobile|cell)/i],
+  ['address', /(כתובת|רחוב|address|street)/i],
+  ['city', /(^עיר|ישוב|יישוב|city)/i],
+  ['zip', /(מיקוד|zip|postal)/i],
+  ['contact', /(איש קשר|contact)/i],
+  ['notes', /(הערות|notes|comments)/i],
+];
+function guessMap(headers) {
+  const map = {};
+  COL_GUESS.forEach(([k, re]) => {
+    const i = headers.findIndex((h, j) => re.test(String(h || '').trim()) && !Object.values(map).includes(j));
+    if (i >= 0) map[k] = i;
+  });
+  if (map.name === undefined) { const i = headers.findIndex((h, j) => /שם|name/i.test(String(h || '')) && !Object.values(map).includes(j)); if (i >= 0) map.name = i; }
+  return map;
+}
+async function readTable(file) {
+  if (/\.xlsx$/i.test(file.name)) {
+    const { readSheet } = await import('read-excel-file/browser');
+    const rows = await readSheet(file);
+    return (rows || []).map(r => r.map(c => c instanceof Date ? c.toISOString().slice(0, 10) : c == null ? '' : String(c)));
+  }
+  if (/\.xls$/i.test(file.name)) throw new Error('קובץ XLS ישן: פתח אותו באקסל ושמור בשם כ-XLSX או CSV.');
+  const buf = new Uint8Array(await file.arrayBuffer());
+  /* UTF-8 first; a Windows-1255 export (common from Israeli software) shows
+     up as replacement characters, and is read again as such. */
+  let text = new TextDecoder('utf-8').decode(buf);
+  if (text.includes('�')) text = new TextDecoder('windows-1255').decode(buf);
+  const lines = text.replace(/^﻿/, '').replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (!lines.length) return [];
+  const sep = [',', ';', '\t'].map(s => [s, lines[0].split(s).length]).sort((a, b) => b[1] - a[1])[0][0];
+  return lines.map(l => splitLine(l, sep));
+}
+
+function CustomerImport({ list, col, flash, onDone, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [head, setHead] = useState(0);
+  const [map, setMap] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState('');
+  const [err, setErr] = useState('');
+
+  const load = async (file) => {
+    setErr(''); setRows(null);
+    try {
+      const r = await readTable(file);
+      if (!r.length) throw new Error('הקובץ ריק');
+      /* The header is the first row with at least two recognisable names. */
+      const h = Math.max(0, r.slice(0, 10).findIndex(x => Object.keys(guessMap(x)).length >= 2));
+      setRows(r); setHead(h); setMap(guessMap(r[h]));
+    } catch (e) { setErr(e.message || String(e)); }
+  };
+  const headers = rows ? rows[head] || [] : [];
+  /* A list often has two phone columns (טלפון, נייד): an empty one falls
+     back to the other. */
+  const phoneCols = rows ? (rows[head] || []).map((h, i) => /(נייד|טלפון|סלולרי|phone|mobile|cell)/i.test(String(h || '')) ? i : -1).filter(i => i >= 0) : [];
+  const incoming = useMemo(() => rows ? rows.slice(head + 1).map(r => {
+    const c = {}; Object.entries(map).forEach(([k, i]) => { if (i !== '' && i != null) c[k] = String(r[i] ?? '').trim(); });
+    if (map.phone !== undefined && !c.phone) c.phone = phoneCols.map(i => String(r[i] ?? '').trim()).find(Boolean) || '';
+    return c;
+  }).filter(c => Object.values(c).some(Boolean)) : [], [rows, head, map]);
+  const plan = useMemo(() => rows ? planCustomers(list, incoming, 'icount') : null, [rows, incoming, list]);
+
+  const run = async () => {
+    setBusy(true);
+    const n = await saveCustomers(col, [...plan.add, ...plan.upd], (a, b) => setProg(`${a} / ${b}`));
+    setBusy(false); flash(`נשמרו ${n} לקוחות`); onDone(); onClose();
+  };
+
+  return (
+    <Box title="ייבוא לקוחות מ-iCount (אקסל / CSV)" onClose={onClose} wide
+         footer={<>{plan && <button className="mg-btn" disabled={busy || map.name === undefined || !(plan.add.length + plan.upd.length)} onClick={run}>
+                   {busy ? `שומר… ${prog}` : `ייבא ${plan.add.length} חדשים${plan.upd.length ? ` ועדכן ${plan.upd.length}` : ''}`}</button>}
+                   <button className="mg-btn ghost" onClick={onClose}>סגור</button></>}>
+      <p style={{ marginTop: 0 }}>ב-iCount: <b>לקוחות ← ייצוא לאקסל</b>. אפשר גם CSV, מכל מערכת.</p>
+      <label className="mg-btn" style={{ cursor: 'pointer' }}>⬆ בחר קובץ (XLSX / CSV)
+        <input type="file" accept=".xlsx,.csv,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) load(f); }} /></label>
+      {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
+      {rows && <>
+        <h4 style={{ margin: '16px 0 6px' }}>איזו עמודה היא מה</h4>
+        <div style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
+          {CUST_FIELDS.map(k => (
+            <Field key={k} label={CUST_LABELS[k] + (k === 'name' ? ' *' : '')}>
+              <select value={map[k] ?? ''} onChange={e => setMap(m => ({ ...m, [k]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
+                <option value="">— לא לייבא —</option>
+                {headers.map((h, i) => <option key={i} value={i}>{h || `עמודה ${i + 1}`}</option>)}</select></Field>
+          ))}
+        </div>
+        <div className="mg-tblwrap" style={{ margin: '12px 0' }}><table className="mg-tbl">
+          <thead><tr>{CUST_FIELDS.filter(k => map[k] !== undefined).map(k => <th key={k}>{CUST_LABELS[k]}</th>)}</tr></thead>
+          <tbody>{incoming.slice(0, 5).map((c, i) => <tr key={i}>{CUST_FIELDS.filter(k => map[k] !== undefined).map(k => <td key={k}>{c[k]}</td>)}</tr>)}</tbody>
+        </table></div>
+        <div className="mg-note">
+          {incoming.length} שורות בקובץ · <b>{plan.add.length}</b> לקוחות חדשים · <b>{plan.upd.length}</b> קיימים שיקבלו פרטים חסרים · {plan.same.length} כבר קיימים כמו שהם.
+          פרטים קיימים לא נדרסים; רק שדות ריקים מתמלאים.
+        </div>
+      </>}
+    </Box>
+  );
+}
+
+/* ---------------------------------------------------------- the list */
+function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onReload, onStoreLogin }) {
+  const list = data.customers || [];
+  const [q, setQ] = useState('');
+  const [src, setSrc] = useState('');
+  const [edit, setEdit] = useState(null);
+  const [card, setCard] = useState(null);
+  const [imp, setImp] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [storeCust, setStoreCust] = useState(null);
+
+  /* What each customer did: documents issued or imported, and store orders. */
+  const activity = useMemo(() => {
+    const docs = data.documents || [], orders = data.orders || [];
+    return Object.fromEntries(list.map(c => {
+      const ds = docs.filter(d => sameCustomer(c, d.customer || {}));
+      const os = orders.filter(o => sameCustomer(c, { name: o.customerName, email: o.customerEmail || o.emailKey, phone: o.customerPhone }));
+      const total = ds.filter(d => ['305', '320', '330'].includes(d.type) && !d.cancelled).reduce((a, d) => a + (d.type === '330' ? -d.total : d.total), 0)
+                  + os.filter(isPaidOrder).reduce((a, o) => a + (Number(o.total) || 0), 0);
+      const last = [...ds.map(d => d.date), ...os.map(o => d10(o.paidAt) || d10(o.createdIso) || d10(o.createdAt))].filter(Boolean).sort().pop() || '';
+      return [c.id, { ds, os, total, last }];
+    }));
+  }, [list, data.documents, data.orders]);
+
+  /* The store's customers, read when this tab opens on a linked business. */
+  useEffect(() => {
+    if (!book.tenant) return;
+    (async () => {
+      try {
+        const u = await withTimeout(storeUser(), 10000);
+        if (!u) { setStoreCust({ login: true }); return; }
+        const rows = await withTimeout(storeRead(book.tenant, 'customers'), 25000);
+        setStoreCust({ rows: rows.map(r => {
+          const [street, ...rest] = String(r.address || '').split(',');
+          return { name: r.name, email: r.email, phone: r.phone, address: street?.trim() || '', city: rest.join(',').trim(), taxId: r.taxId || '', storeId: r.id, notes: '' };
+        }) });
+      } catch (e) { setStoreCust({ err: String(e?.code || e?.message || e) }); }
+    })();
+  }, [book.tenant, data.storeAt]);
+  const storePlan = useMemo(() => storeCust?.rows ? planCustomers(list, storeCust.rows, 'store') : null, [storeCust, list]);
+  /* The other way: customers here that the store does not have. Only ones
+     that can be reached (email or phone), and never one already linked. */
+  const toStore = useMemo(() => storeCust?.rows ? list.filter(c => !c.storeId && (normEmail(c.email) || normPhone(c.phone))
+    && !storeCust.rows.some(r => sameCustomer(r, c))) : [], [storeCust, list]);
+  const [push, setPush] = useState(null);
+
+  const syncStore = async () => {
+    setBusy('store');
+    const recs = [...storePlan.add, ...storePlan.upd];
+    const n = await saveCustomers(cols.customers, recs);
+    setBusy(''); flash(`סונכרנו ${n} לקוחות מהחנות`); onReload();
+  };
+  const saveOne = async (c) => {
+    const r = clean({ ...c, sources: c.sources?.length ? c.sources : ['manual'], updatedAt: new Date().toISOString() });
+    try { await withTimeout(cols.customers.put(r.id, r), 12000); } catch { flash('השמירה נכשלה'); return false; }
+    patch('customers', l => [...l.filter(x => x.id !== r.id), r]); flash('הלקוח נשמר'); return true;
+  };
+  const del = async (c) => {
+    if (!window.confirm(`למחוק את ${c.name} מרשימת הלקוחות? המסמכים שלו נשארים.`)) return;
+    try { await cols.customers.del(c.id); patch('customers', l => l.filter(x => x.id !== c.id)); setCard(null); } catch { flash('המחיקה נכשלה'); }
+  };
+
+  const nq = q.trim().toLowerCase();
+  const shown = list.filter(c => (!src || (c.sources || []).includes(src))
+    && (!nq || [c.name, c.email, c.phone, c.taxId, c.city].some(v => String(v || '').toLowerCase().includes(nq))))
+    .sort((a, b) => (activity[b.id]?.last || '').localeCompare(activity[a.id]?.last || '') || (a.name || '').localeCompare(b.name || '', 'he'));
+
+  return (
+    <>
+      <div data-tour="cust-stats" className="mg-stats" style={{ marginBottom: 14 }}>
+        <div className="mg-stat"><div className="lb">לקוחות</div><div className="vl">{list.length}</div></div>
+        <div className="mg-stat"><div className="lb">עם אימייל</div><div className="vl">{list.filter(c => normEmail(c.email)).length}</div></div>
+        <div className="mg-stat"><div className="lb">עם טלפון</div><div className="vl">{list.filter(c => normPhone(c.phone)).length}</div></div>
+        <div className="mg-stat"><div className="lb">פעילים השנה</div><div className="vl">{list.filter(c => (activity[c.id]?.last || '').startsWith(String(new Date().getFullYear()))).length}</div></div>
+      </div>
+
+      {book.tenant && storeCust && (
+        <div data-tour="cust-store" className={'mg-note' + (storeCust.err ? ' bad' : storePlan && storePlan.add.length + storePlan.upd.length ? ' warn' : '')} style={{ marginBottom: 12 }}>
+          {storeCust.login ? <>כדי לסנכרן לקוחות מהחנות צריך להתחבר אליה. <button className="mg-linkish" onClick={onStoreLogin}>התחבר לחנות</button></>
+            : storeCust.err ? <>לא הצלחתי לקרוא את לקוחות החנות ({storeCust.err}).</>
+            : storePlan && storePlan.add.length + storePlan.upd.length
+              ? <>בחנות יש <b>{storePlan.add.length}</b> לקוחות חדשים{storePlan.upd.length ? ` ו-${storePlan.upd.length} עם פרטים נוספים` : ''}. {' '}
+                  <button className="mg-btn sm" disabled={!!busy} onClick={syncStore}>{busy === 'store' ? 'מסנכרן…' : '↻ סנכרן מהחנות'}</button></>
+              : <>כל {storeCust.rows.length} לקוחות החנות כבר ברשימה.</>}
+          {!ro && toStore.length > 0 && <div style={{ marginTop: 6 }}>
+            ב-Tizon Books יש <b>{toStore.length}</b> לקוחות שלא קיימים בחנות.{' '}
+            <button className="mg-btn ghost sm" onClick={() => setPush(Object.fromEntries(toStore.map(c => [c.id, false])))}>שלח לחנות…</button></div>}
+        </div>
+      )}
+      {push && (
+        <PushToStore book={book} customers={toStore} picked={push} setPicked={setPush} flash={flash}
+                     onDone={async (done) => {
+                       /* Mark them linked here, so they are neither sent twice nor pulled back as new. */
+                       const recs = done.map(({ c, id }) => ({ ...c, storeId: id, sources: [...new Set([...(c.sources || []), 'store'])] }));
+                       await saveCustomers(cols.customers, recs);
+                       patch('customers', l => l.map(x => recs.find(r => r.id === x.id) || x));
+                       setPush(null); setStoreCust(null); onReload();
+                     }} onClose={() => setPush(null)} />
+      )}
+
+      <div data-tour="cust-tools" style={{ ...row, marginBottom: 12 }}>
+        <Field label="חיפוש"><input value={q} onChange={e => setQ(e.target.value)} placeholder="שם, טלפון, אימייל, ח.פ." /></Field>
+        <Field label="מקור"><select value={src} onChange={e => setSrc(e.target.value)}>
+          <option value="">הכול</option>{Object.entries(SRC_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+        <button className="mg-btn" onClick={() => setEdit({})}>＋ לקוח</button>
+        <button className="mg-btn ghost" onClick={() => setImp(true)}>⬆ ייבוא מ-iCount (אקסל / CSV)</button>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`customers-${book.name}.csv`, [
+          [...CUST_FIELDS.map(k => CUST_LABELS[k]), 'מקור', 'מחזור', 'פעילות אחרונה'],
+          ...shown.map(c => [...CUST_FIELDS.map(k => c[k] || ''), (c.sources || []).map(s => SRC_LABEL[s] || s).join(' '), r2(activity[c.id]?.total || 0), activity[c.id]?.last || ''])
+        ])}>⬇ ייצוא</button>
+      </div>
+
+      <div data-tour="cust-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>שם</th><th>ח.פ. / ת.ז.</th><th>טלפון</th><th>אימייל</th><th>עיר</th><th>מקור</th><th>מחזור</th><th>אחרון</th></tr></thead>
+        <tbody>
+          {shown.slice(0, 500).map(c => (
+            <tr key={c.id} onClick={() => setCard(c)} style={{ cursor: 'pointer' }}>
+              <td><b>{c.name}</b></td>
+              <td dir="ltr" style={{ textAlign: 'right' }}>{c.taxId || '—'}</td>
+              <td dir="ltr" style={{ textAlign: 'right' }}>{c.phone || '—'}</td>
+              <td>{c.email || '—'}</td><td>{c.city || '—'}</td>
+              <td>{(c.sources || []).map(s => <span key={s} className={'mg-chip' + (s === 'store' ? ' ok' : '')} style={{ marginInlineEnd: 3 }}>{SRC_LABEL[s] || s}</span>)}</td>
+              <td>{activity[c.id]?.total ? fmt(activity[c.id].total) : '—'}</td>
+              <td>{heDate(activity[c.id]?.last)}</td>
+            </tr>
+          ))}
+          {!shown.length && <tr><td colSpan={8}><div className="mg-empty">{list.length ? 'אין לקוחות בסינון הזה.' : 'עוד אין לקוחות. אפשר לייבא מ-iCount, לסנכרן מהחנות, או להוסיף ידנית.'}</div></td></tr>}
+        </tbody>
+      </table></div>
+      {shown.length > 500 && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>מוצגים 500 הראשונים. חיפוש מצמצם.</div>}
+
+      {imp && <CustomerImport list={list} col={cols.customers} flash={flash} onDone={onReload} onClose={() => setImp(false)} />}
+      {edit && <CustomerForm rec={edit} onClose={() => setEdit(null)} onSave={async (c) => { if (await saveOne(c)) { setEdit(null); } }} />}
+      {card && (
+        <Box title={card.name} onClose={() => setCard(null)} wide
+             footer={<><button className="mg-btn" onClick={() => { setEdit(card); setCard(null); }}>✎ עריכה</button>
+                       {role === 'owner' && <button className="mg-btn ghost" onClick={() => del(card)}>🗑 מחיקה</button>}
+                       <button className="mg-btn ghost keep" onClick={() => setCard(null)}>סגור</button></>}>
+          <div style={{ ...grid, fontSize: 14 }}>
+            {CUST_FIELDS.filter(k => k !== 'name' && card[k]).map(k => <div key={k}><div style={{ color: 'var(--muted)', fontSize: 12 }}>{CUST_LABELS[k]}</div><b>{card[k]}</b></div>)}
+          </div>
+          <div className="mg-stats" style={{ margin: '14px 0' }}>
+            <div className="mg-stat"><div className="lb">מחזור</div><div className="vl">{fmt(activity[card.id]?.total || 0)}</div></div>
+            <div className="mg-stat"><div className="lb">מסמכים</div><div className="vl">{activity[card.id]?.ds.length || 0}</div></div>
+            {book.tenant && <div className="mg-stat"><div className="lb">הזמנות בחנות</div><div className="vl">{activity[card.id]?.os.length || 0}</div></div>}
+          </div>
+          <div className="mg-tblwrap"><table className="mg-tbl">
+            <thead><tr><th>תאריך</th><th>מה</th><th>סה״כ</th></tr></thead>
+            <tbody>
+              {[...(activity[card.id]?.ds || []).map(d => ({ date: d.date, what: docTitle(d), total: d.type === '330' ? -d.total : d.total })),
+                ...(activity[card.id]?.os || []).map(o => ({ date: d10(o.paidAt) || d10(o.createdIso) || d10(o.createdAt), what: `הזמנה ${o.code || o.id} · ${isPaidOrder(o) ? 'שולמה' : 'לא שולמה'}`, total: Number(o.total) || 0 }))]
+                .sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((x, i) => (
+                  <tr key={i}><td>{heDate(x.date)}</td><td>{x.what}</td><td>{fmt(x.total)}</td></tr>))}
+              {!(activity[card.id]?.ds.length || activity[card.id]?.os.length) && <tr><td colSpan={3}><div className="mg-empty">אין עדיין פעילות.</div></td></tr>}
+            </tbody></table></div>
+        </Box>
+      )}
+    </>
+  );
+}
+
+/* Sending customers to the store: chosen one by one, with the reason spelled
+   out — the store's customer list is also its mailing list. */
+function PushToStore({ book, customers, picked, setPicked, flash, onDone, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState('');
+  const [ok, setOk] = useState(false);
+  const chosen = customers.filter(c => picked[c.id]);
+  const all = chosen.length === customers.length;
+  const run = async () => {
+    setBusy(true);
+    const done = []; let failed = 0;
+    for (let i = 0; i < chosen.length; i++) {
+      try { done.push({ c: chosen[i], id: await withTimeout(storeAddCustomer(book.tenant, chosen[i]), 15000) }); }
+      catch { failed++; }
+      setProg(`${i + 1} / ${chosen.length}`);
+    }
+    setBusy(false);
+    flash(`נוספו לחנות ${done.length} לקוחות${failed ? ` · ${failed} נכשלו` : ''}`);
+    await onDone(done);
+  };
+  return (
+    <Box title={`שליחת לקוחות לחנות ${book.tenant}`} onClose={onClose} wide
+         footer={<><button className="mg-btn" disabled={busy || !chosen.length || !ok} onClick={run}>{busy ? `שולח… ${prog}` : `שלח ${chosen.length} לחנות`}</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div className="mg-note warn" style={{ marginBottom: 12 }}>
+        <b>רשימת הלקוחות של החנות היא גם רשימת הדיוור שלה.</b> לקוח שנשלח לשם יכול לקבל קמפיינים בוואטסאפ או במייל.
+        שלח רק לקוחות שהסכימו לקבל דיוור. מי שביקש להסיר את עצמו נשאר מחוץ לקמפיינים גם אחרי השליחה.
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+        <button className="mg-btn ghost sm" onClick={() => setPicked(Object.fromEntries(customers.map(c => [c.id, !all])))}>{all ? 'נקה הכול' : 'סמן הכול'}</button>
+        <span style={{ fontSize: 14, alignSelf: 'center' }}>{chosen.length} מתוך {customers.length} מסומנים</span>
+      </div>
+      <div className="mg-tblwrap" style={{ maxHeight: 320, overflowY: 'auto' }}><table className="mg-tbl">
+        <thead><tr><th></th><th>שם</th><th>טלפון</th><th>אימייל</th><th>מקור</th></tr></thead>
+        <tbody>{customers.map(c => (
+          <tr key={c.id}><td><input type="checkbox" style={{ width: 'auto' }} checked={!!picked[c.id]} onChange={e => setPicked(p => ({ ...p, [c.id]: e.target.checked }))} /></td>
+            <td>{c.name}</td><td dir="ltr" style={{ textAlign: 'right' }}>{c.phone || '—'}</td><td>{c.email || '—'}</td>
+            <td>{(c.sources || []).map(s => SRC_LABEL[s] || s).join(', ')}</td></tr>))}
+        </tbody></table></div>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 12, fontSize: 14 }}>
+        <input type="checkbox" style={{ width: 'auto', marginTop: 3 }} checked={ok} onChange={e => setOk(e.target.checked)} />
+        <span>הלקוחות שסימנתי הסכימו לקבל ממני דיוור.</span></label>
+      <div className="mg-note" style={{ marginTop: 10 }}>נוצרים בחנות רק לקוחות חדשים. לקוח שכבר קיים שם לא משתנה. בחנות הם מסומנים "נוסף מ-Tizon Books".</div>
+    </Box>
+  );
+}
+
+function CustomerForm({ rec, onSave, onClose }) {
+  const [f, setF] = useState(() => ({ id: uid('cust'), ...Object.fromEntries(CUST_FIELDS.map(k => [k, ''])), sources: ['manual'], ...rec }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  return (
+    <Box title={rec.id ? 'עריכת לקוח' : 'לקוח חדש'} onClose={onClose} wide
+         footer={<><button className="mg-btn" disabled={!String(f.name).trim()} onClick={() => onSave({ ...f, name: String(f.name).trim() })}>שמור</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div style={grid}>
+        {CUST_FIELDS.map(k => (
+          <Field key={k} label={CUST_LABELS[k]}>
+            <input dir={['taxId', 'phone', 'email', 'zip'].includes(k) ? 'ltr' : undefined} value={f[k] || ''} onChange={e => set(k, e.target.value)} /></Field>
+        ))}
+      </div>
+    </Box>
+  );
+}
+
+/* ============================================================ payment pages */
+/* A link the customer pays by card (Z-Credit). The server makes the page,
+   and when the charge is confirmed it issues the tax invoice-receipt (or a
+   receipt, for an exempt dealer), signs it and e-mails it — see
+   netlify/lib/pay.mjs. Here: making the link, sending it, following it. */
+const PAY_STATUS = { open: ['ממתין לתשלום', 'warn'], paid: ['שולם', 'ok'], cancelled: ['בוטל', ''], mismatch: ['סכום שונה · לבדוק', 'bad'] };
+const payText = (book, p) => `שלום ${p.customer?.name || ''},\nקישור לתשלום ל-${book.legalName || book.name} על סך ${fmt(p.total)}:\n${p.link}\nהחשבונית תישלח אליך מיד אחרי התשלום.`;
+
+function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, flash }) {
+  const rate = rateOf(book);
+  const [cust, setCust] = useState({ name: '', taxId: '', phone: '', email: '', address: '' });
+  const [incl, setIncl] = useState(true);
+  const [lines, setLines] = useState([{ desc: '', qty: 1, price: '' }]);
+  const [maxPayments, setMax] = useState(1);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+  const known = useMemo(() => {
+    const m = {}; docs.forEach(d => { if (d.customer?.name) m[d.customer.name] = d.customer; });
+    customers.forEach(c => { if (c.name) m[c.name] = { name: c.name, taxId: c.taxId || '', address: [c.address, c.city].filter(Boolean).join(', '), phone: c.phone || '', email: c.email || '' }; });
+    return m;
+  }, [docs, customers]);
+  const pickName = (name) => setCust(c => known[name] ? { ...known[name] } : known[c.name] ? { name, taxId: '', address: '', phone: '', email: '' } : { ...c, name });
+  const active = items.filter(x => x.active !== false);
+  const pickItem = (i, v) => {
+    const it = active.find(x => x.name === v);
+    setLines(ls => ls.map((l, j) => j !== i ? l : it ? { ...l, desc: it.name, price: itemPrice(it, incl, rate), itemId: it.id, sku: it.sku || '' } : { ...l, desc: v, itemId: l.desc === v ? l.itemId : '' }));
+  };
+  const setLine = (i, k, v) => setLines(ls => ls.map((l, j) => j === i ? { ...l, [k]: v } : l));
+  const tot = docTotals(lines, incl, rate);
+  const ok = String(cust.name).trim() && lines.some(l => String(l.desc).trim() && Number(l.qty) > 0 && Number(l.price) > 0) && tot.total > 0;
+  const create = async () => {
+    setBusy(true);
+    try {
+      const r = await fnCall({ action: 'pay-create', book: book.id, customer: cust, incl, maxPayments, note,
+        lines: lines.filter(l => String(l.desc).trim() && Number(l.qty) > 0 && Number(l.price) > 0).map(l => ({ desc: String(l.desc).trim(), qty: Number(l.qty), price: r2(l.price), itemId: l.itemId || '', sku: l.sku || '' })) });
+      onCreated(r.payreq, cust); setDone(r.payreq);
+    } catch (e) { flash(e.message === 'no-zcredit' ? 'לעסק הזה עוד לא הוגדר מפתח זד קרדיט (גיבוי וענן ← דפי סליקה)' : 'יצירת הקישור נכשלה · ' + e.message); }
+    setBusy(false);
+  };
+  if (done) return (
+    <Box title="הקישור לתשלום מוכן" onClose={onClose}
+         footer={<button className="mg-btn ghost" onClick={onClose}>סגור</button>}>
+      <p style={{ marginTop: 0 }}><b>{done.customer.name}</b> · {fmt(done.total)}{done.maxPayments > 1 ? ` · עד ${done.maxPayments} תשלומים` : ''}</p>
+      <input dir="ltr" readOnly value={done.link} onFocus={e => e.target.select()} />
+      <div style={{ ...row, marginTop: 12 }}>
+        <button className="mg-btn" onClick={() => { navigator.clipboard?.writeText(done.link); flash('הקישור הועתק'); }}>העתק קישור</button>
+        <a className="mg-btn ghost" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone(done.customer.phone)}?text=${encodeURIComponent(payText(book, done))}`}>וואטסאפ</a>
+        <a className="mg-btn ghost" href={`mailto:${done.customer.email || ''}?subject=${encodeURIComponent('תשלום · ' + (book.legalName || book.name))}&body=${encodeURIComponent(payText(book, done))}`}>מייל</a>
+        <a className="mg-btn ghost" target="_blank" rel="noreferrer" href={done.link}>פתח</a>
+      </div>
+      <div className="mg-note" style={{ marginTop: 12 }}>
+        כשהלקוח משלם, תופק לבד {DOC_TYPES[done.docType]?.label || 'חשבונית'}{docSeries(book) === 'test' ? ' (מצב ניסיון: מספר T-)' : ''}, חתומה, ותישלח {done.customer.email ? `ל-${done.customer.email}` : 'ללקוח אם הזין אימייל בדף התשלום'}. תקבל על כך מייל.</div>
+    </Box>
+  );
+  return (
+    <Box title="דף סליקה חדש" onClose={onClose} wide
+         footer={<><button className="mg-btn" disabled={busy || !ok} onClick={create}>{busy ? 'יוצר…' : `צור קישור לתשלום · ${fmt(tot.total)}`}</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div style={grid}>
+        <Field label="שם הלקוח *"><input list="tz-pay-known" value={cust.name} onChange={e => pickName(e.target.value)} />
+          <datalist id="tz-pay-known">{Object.keys(known).map(n => <option key={n} value={n} />)}</datalist></Field>
+        <Field label="אימייל (לשם תישלח החשבונית)"><input dir="ltr" value={cust.email} onChange={e => setCust(c => ({ ...c, email: e.target.value }))} /></Field>
+        <Field label="טלפון (לוואטסאפ)"><input dir="ltr" value={cust.phone} onChange={e => setCust(c => ({ ...c, phone: e.target.value }))} /></Field>
+        <Field label="ח.פ. / ת.ז."><input dir="ltr" value={cust.taxId} onChange={e => setCust(c => ({ ...c, taxId: e.target.value }))} /></Field>
+      </div>
+      <h4 style={{ margin: '16px 0 6px' }}>על מה משלמים</h4>
+      <div className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>פריט</th><th style={{ width: 80 }}>כמות</th><th style={{ width: 120 }}>מחיר ליחידה</th><th style={{ width: 100 }}>סה״כ</th><th style={{ width: 40 }}></th></tr></thead>
+        <tbody>{lines.map((l, i) => (
+          <tr key={i}>
+            <td><input list={active.length ? 'tz-pay-items' : undefined} value={l.desc} onChange={e => pickItem(i, e.target.value)} placeholder={active.length ? 'בחר פריט או הקלד' : 'טיפול'} /></td>
+            <td><input inputMode="decimal" value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} /></td>
+            <td><input inputMode="decimal" value={l.price} onChange={e => setLine(i, 'price', e.target.value)} /></td>
+            <td>{fmt((Number(l.qty) || 0) * (Number(l.price) || 0))}</td>
+            <td>{lines.length > 1 && <button className="mg-btn ghost sm" onClick={() => setLines(ls => ls.filter((_, j) => j !== i))}>×</button>}</td>
+          </tr>))}</tbody></table></div>
+      {active.length > 0 && <datalist id="tz-pay-items">{active.map(x => <option key={x.id} value={x.name}>{fmt(itemPrice(x, incl, rate))}</option>)}</datalist>}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+        <button className="mg-btn ghost sm" onClick={() => setLines(ls => [...ls, { desc: '', qty: 1, price: '' }])}>＋ שורה</button>
+        {rate > 0 && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={incl} onChange={e => setIncl(e.target.checked)} />המחירים כוללים מע״מ</label>}
+      </div>
+      <div style={{ ...grid, marginTop: 12 }}>
+        <Field label="תשלומים בכרטיס"><select value={maxPayments} onChange={e => setMax(Number(e.target.value))}>
+          {[1, 2, 3, 4, 5, 6, 8, 10, 12].map(n => <option key={n} value={n}>{n === 1 ? 'תשלום אחד' : `עד ${n} תשלומים`}</option>)}</select></Field>
+        <Field label="הערה (תופיע בחשבונית)"><input value={note} onChange={e => setNote(e.target.value)} /></Field>
+      </div>
+      <div className="mg-note" style={{ marginTop: 12 }}>
+        {rate > 0 && <>לפני מע״מ <b>{fmt(tot.net)}</b> · מע״מ {rate}% <b>{fmt(tot.vat)}</b> · </>}לתשלום <b>{fmt(tot.total)}</b>.
+        {' '}אחרי התשלום תופק {rate > 0 ? 'חשבונית מס קבלה' : 'קבלה'} ותישלח ללקוח חתומה.</div>
+    </Box>
+  );
+}
+
+function PayList({ book, list, onCancel, onRefresh, flash, ro }) {
+  const [all, setAll] = useState(false);
+  const sorted = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const shown = all ? sorted : sorted.filter(p => p.status === 'open' || p.status === 'mismatch' || Date.now() - Date.parse(p.paidAt || p.createdAt) < 3 * 86400000).slice(0, 20);
+  const open = list.filter(p => p.status === 'open').length;
+  /* While something is waiting to be paid, look again now and then. */
+  useEffect(() => {
+    if (!open) return;
+    const t = setInterval(() => { if (document.visibilityState === 'visible') onRefresh(); }, 20000);
+    return () => clearInterval(t);
+  }, [open]);
+  if (!list.length) return null;
+  return (
+    <div data-tour="docs-pay" className="mg-card" style={{ marginBottom: 14, padding: '12px 14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0, flex: 1 }}>דפי סליקה {open ? <span className="mg-chip warn">{open} ממתינים</span> : null}</h3>
+        <button className="mg-btn ghost sm keep" onClick={onRefresh}>↻ רענון</button>
+        {sorted.length > shown.length || all ? <button className="mg-btn ghost sm keep" onClick={() => setAll(!all)}>{all ? 'רק אחרונים' : `הכול (${list.length})`}</button> : null}
+      </div>
+      <div className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>נוצר</th><th>לקוח</th><th>סכום</th><th>מצב</th><th></th></tr></thead>
+        <tbody>{shown.map(p => { const [lb, tone] = PAY_STATUS[p.status] || [p.status, '']; return (
+          <tr key={p.id}>
+            <td>{heDate((p.createdAt || '').slice(0, 10))}</td>
+            <td><b>{p.customer?.name}</b>{p.opens ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>נפתח {p.opens} פעמים</div> : null}</td>
+            <td>{fmt(p.total)}{p.maxPayments > 1 ? <span style={{ fontSize: 12, color: 'var(--muted)' }}> · עד {p.maxPayments} תש׳</span> : ''}</td>
+            <td><span className={'mg-chip ' + tone}>{lb}{p.status === 'paid' && p.docNo ? ` · ${DOC_TYPES[p.docType]?.short || ''} ${p.docNo}` : ''}</span>
+              {(p.extraPayments || []).length > 0 && <div className="mg-chip bad" style={{ marginTop: 4 }}>שולם פעמיים · לזכות</div>}</td>
+            <td style={{ whiteSpace: 'nowrap' }}>{p.status === 'open' && <>
+              <button className="mg-btn ghost sm keep" onClick={() => { navigator.clipboard?.writeText(p.link); flash('הקישור הועתק'); }}>קישור</button>{' '}
+              <a className="mg-btn ghost sm keep" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone(p.customer?.phone)}?text=${encodeURIComponent(payText(book, p))}`}>וואטסאפ</a>{' '}
+              {!ro && <button className="mg-btn ghost sm" onClick={() => onCancel(p)}>בטל</button>}</>}</td>
+          </tr>); })}</tbody></table></div>
+    </div>
+  );
+}
+
+/* Settings: the server's key to the database, and each business's Z-Credit key. */
+function PayCard({ server, books, user, flash, onServer }) {
+  const mine = books.filter(b => (b.owners || []).includes(String(user.email || '').toLowerCase()));
+  const [st, setSt] = useState({});
+  const [keys, setKeys] = useState({});
+  const [busy, setBusy] = useState('');
+  const admin = !!server?.pay?.admin;
+  const load = () => mine.forEach(b => fnCall({ action: 'pay-status', book: b.id }).then(r => setSt(x => ({ ...x, [b.id]: r }))).catch(() => {}));
+  useEffect(() => { if (cloud && admin) load(); }, [admin, books.length]);
+  const uploadSA = async (file) => {
+    setBusy('sa');
+    try { const r = await fnCall({ action: 'sa', json: await file.text() }); flash(`מפתח השירות נשמר בשרת (${r.project})`); onServer?.(); }
+    catch (e) { flash('ההעלאה נכשלה · ' + e.message); }
+    setBusy('');
+  };
+  const saveKey = async (b, clear) => {
+    setBusy(b.id);
+    try { await fnCall({ action: 'zc-key', book: b.id, key: clear ? '' : keys[b.id] || '' }); setKeys(k => ({ ...k, [b.id]: '' })); flash(clear ? 'המפתח הוסר' : 'מפתח זד קרדיט נשמר'); load(); }
+    catch (e) { flash('השמירה נכשלה · ' + e.message); }
+    setBusy('');
+  };
+  return (
+    <div data-tour="set-pay" className="mg-card">
+      <h3 style={{ marginTop: 0 }}>דפי סליקה · זד קרדיט</h3>
+      {!server ? <p style={{ marginTop: 0 }}>זמין רק בהתקנה מ-GitHub, עם שרת.</p> : !cloud ? <p style={{ marginTop: 0 }}>צריך להיות מחובר לענן.</p> : <>
+        <p style={{ marginTop: 0, fontSize: 14 }}>שולחים ללקוח קישור, הוא משלם בכרטיס, ומיד מופקת חשבונית מס קבלה חתומה ונשלחת אליו. שני דברים מגדירים פעם אחת:</p>
+        <div style={{ padding: '8px 0', borderBottom: '1px solid #f0ebe0' }}>
+          <b>1. מפתח שירות של Firebase</b> {admin ? <span className="mg-chip ok">מוגדר</span> : <span className="mg-chip warn">חסר</span>}
+          <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.7 }}>
+            כדי שהשרת יוכל להפיק את המסמך גם כשהמערכת סגורה. ב-Firebase: גלגל השיניים ← Project settings ← <span dir="ltr">Service accounts</span> ← <span dir="ltr">Generate new private key</span>, ומעלים כאן את הקובץ שירד. הוא נשמר רק בשרת שלך. אחרי ההעלאה כדאי למחוק אותו מהמחשב.</div>
+          <label className="mg-btn ghost sm" style={{ cursor: 'pointer' }}>{busy === 'sa' ? 'מעלה…' : admin ? 'החלף קובץ' : '⬆ העלה קובץ JSON'}
+            <input type="file" accept=".json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadSA(f); }} /></label>
+        </div>
+        <div style={{ padding: '8px 0' }}>
+          <b>2. מפתח זד קרדיט לכל עסק</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.7 }}>המפתח של המסוף לעמוד סליקה (WebCheckout). אם לא מוצאים אותו בממשק של זד קרדיט, מבקשים מהתמיכה שלהם "מפתח WebCheckout" למסוף.</div>
+          {!admin ? <div className="mg-empty">קודם מעלים את מפתח השירות.</div> : mine.map(b => (
+            <div key={b.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', flexWrap: 'wrap' }}>
+              <b style={{ minWidth: 110 }}>{b.name}</b>
+              {st[b.id]?.zcredit ? <span className="mg-chip ok">מוגדר</span> : <span className="mg-chip">לא מוגדר</span>}
+              <input dir="ltr" type="password" style={{ flex: 1, minWidth: 160 }} placeholder={st[b.id]?.zcredit ? 'מפתח חדש להחלפה' : 'מפתח WebCheckout'} value={keys[b.id] || ''} onChange={e => setKeys(k => ({ ...k, [b.id]: e.target.value }))} />
+              <button className="mg-btn sm" disabled={busy === b.id || (keys[b.id] || '').trim().length < 8} onClick={() => saveKey(b)}>שמור</button>
+              {st[b.id]?.zcredit && <button className="mg-btn ghost sm" disabled={busy === b.id} onClick={() => saveKey(b, true)}>הסר</button>}
+            </div>))}
+          {admin && Object.values(st).some(x => x && (!x.mail || !x.sign)) && <div className="mg-note warn" style={{ marginTop: 8 }}>
+            כדי שהחשבונית תישלח ללקוח לבד צריך בשרת גם תעודת חתימה וגם הגדרות מייל (SMTP). בלעדיהן המסמך מופק, אבל שולחים אותו ידנית.</div>}
+        </div>
+      </>}
+    </div>
+  );
+}
+
+/* ==================================================================== items */
+/* Products and services of a business, to pick in a document or a payment
+   page instead of typing. A price is kept as typed, with a flag saying
+   whether it includes VAT; a document with the other setting converts it. */
+const ITEM_FIELDS = ['name', 'sku', 'price', 'unit', 'category', 'desc'];
+const ITEM_LABELS = { name: 'שם הפריט', sku: 'מק״ט', price: 'מחיר', unit: 'יחידה', category: 'קטגוריה', desc: 'תיאור נוסף' };
+const ITEM_GUESS = [
+  ['name', /^(שם\s*(ה)?(פריט|מוצר|שירות)|תיאור\s*(ה)?(פריט|מוצר)|פריט|מוצר|שירות|שם|תיאור|item( name)?|product( name)?|name|description)$/i],
+  ['sku', /(מק"?״?ט|מקט|קוד( ה)?פריט|ברקוד|sku|catalog|item ?code|code)/i],
+  ['price', /(מחיר|price|תעריף|סכום)/i],
+  ['unit', /(יחידה|יח['׳]? ?מידה|unit)/i],
+  ['category', /(קטגוריה|סיווג|קבוצה|category|group)/i],
+  ['desc', /(הערות|פירוט|תיאור מורחב|notes|details)/i],
+];
+function guessItemMap(headers) {
+  const map = {};
+  ITEM_GUESS.forEach(([k, re]) => {
+    const i = headers.findIndex((h, j) => re.test(String(h || '').trim()) && !Object.values(map).includes(j));
+    if (i >= 0) map[k] = i;
+  });
+  if (map.name === undefined) { const i = headers.findIndex((h, j) => /שם|פריט|name|item/i.test(String(h || '')) && !Object.values(map).includes(j)); if (i >= 0) map.name = i; }
+  return map;
+}
+const normItem = (s) => String(s || '').replace(/[\s"״'׳.,-]+/g, ' ').trim().toLowerCase();
+const numOf = (v) => { const n = Number(String(v ?? "").replace(/[₪,\s]/g, "")); return Number.isFinite(n) ? n : 0; };
+/* The price of an item in a document whose prices are (or are not) with VAT. */
+const itemPrice = (it, incl, rate) => {
+  const p = Number(it?.price) || 0;
+  if (!rate || !!it.incl === !!incl) return r2(p);
+  return r2(incl ? p * (1 + rate / 100) : p / (1 + rate / 100));
+};
+function planItems(list, incoming, updatePrices) {
+  const cur = [...list]; const add = [], upd = [], same = [];
+  incoming.filter(x => String(x.name || '').trim()).forEach(x => {
+    const hit = cur.find(y => (x.sku && y.sku && String(x.sku).trim() === String(y.sku).trim()) || (!(x.sku && y.sku) && normItem(x.name) === normItem(y.name)));
+    if (!hit) {
+      const n = clean({ id: uid('item'), name: String(x.name).trim(), sku: String(x.sku || '').trim(), price: r2(numOf(x.price)), incl: !!x.incl,
+                        unit: String(x.unit || '').trim(), category: String(x.category || '').trim(), desc: String(x.desc || '').trim(),
+                        active: true, sources: ['icount'], createdAt: new Date().toISOString() });
+      cur.push(n); add.push(n);
+    } else {
+      const m = { ...hit };
+      ['sku', 'unit', 'category', 'desc'].forEach(k => { const v = String(x[k] ?? '').trim(); if (v && !String(m[k] ?? '').trim()) m[k] = v; });
+      if ((updatePrices || !Number(m.price)) && numOf(x.price) && (r2(numOf(x.price)) !== r2(m.price) || !!m.incl !== !!x.incl)) { m.price = r2(numOf(x.price)); m.incl = !!x.incl; }
+      const changed = JSON.stringify(m) !== JSON.stringify(hit);
+      if (changed) { cur[cur.indexOf(hit)] = m; upd.push(m); } else same.push(hit);
+    }
+  });
+  return { add, upd, same, all: cur };
+}
+
+function ItemImport({ list, col, rate, flash, onDone, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [head, setHead] = useState(0);
+  const [map, setMap] = useState({});
+  const [incl, setIncl] = useState(true);
+  const [updPrices, setUpdPrices] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = async (file) => {
+    setErr(''); setRows(null);
+    try {
+      const r = await readTable(file);
+      if (!r.length) throw new Error('הקובץ ריק');
+      const h = Math.max(0, r.slice(0, 10).findIndex(x => Object.keys(guessItemMap(x)).length >= 2));
+      const m = guessItemMap(r[h]);
+      setRows(r); setHead(h); setMap(m);
+      const ph = m.price !== undefined ? String(r[h][m.price] || '') : '';
+      setIncl(/(לפני|ללא|בלי|without|excl|net)/i.test(ph) ? false : /(כולל|incl|gross)/i.test(ph) ? true : rate > 0 ? false : true);
+    } catch (e) { setErr(e.message || String(e)); }
+  };
+  const headers = rows ? rows[head] || [] : [];
+  const incoming = useMemo(() => rows ? rows.slice(head + 1).map(r => {
+    const x = { incl }; Object.entries(map).forEach(([k, i]) => { if (i !== '' && i != null) x[k] = String(r[i] ?? '').trim(); });
+    return x;
+  }).filter(x => x.name) : [], [rows, head, map, incl]);
+  const plan = useMemo(() => rows ? planItems(list, incoming, updPrices) : null, [rows, incoming, list, updPrices]);
+  const run = async () => {
+    setBusy(true);
+    const n = await saveCustomers(col, [...plan.add, ...plan.upd]);
+    setBusy(false); flash(`נשמרו ${n} פריטים`); onDone(); onClose();
+  };
+  return (
+    <Box title="ייבוא פריטים מ-iCount (אקסל / CSV)" onClose={onClose} wide
+         footer={<>{plan && <button className="mg-btn" disabled={busy || map.name === undefined || !(plan.add.length + plan.upd.length)} onClick={run}>
+                   {busy ? 'שומר…' : `ייבא ${plan.add.length} חדשים${plan.upd.length ? ` ועדכן ${plan.upd.length}` : ''}`}</button>}
+                   <button className="mg-btn ghost" onClick={onClose}>סגור</button></>}>
+      <p style={{ marginTop: 0 }}>ב-iCount: <b>פריטים ← ייצוא לאקסל</b>. אפשר גם CSV מכל מערכת.</p>
+      <label className="mg-btn" style={{ cursor: 'pointer' }}>⬆ בחר קובץ (XLSX / CSV)
+        <input type="file" accept=".xlsx,.csv,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) load(f); }} /></label>
+      {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
+      {rows && <>
+        <h4 style={{ margin: '16px 0 6px' }}>איזו עמודה היא מה</h4>
+        <div style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
+          {ITEM_FIELDS.map(k => (
+            <Field key={k} label={ITEM_LABELS[k] + (k === 'name' ? ' *' : '')}>
+              <select value={map[k] ?? ''} onChange={e => setMap(m => ({ ...m, [k]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
+                <option value="">— לא לייבא —</option>
+                {headers.map((h, i) => <option key={i} value={i}>{h || `עמודה ${i + 1}`}</option>)}</select></Field>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', margin: '12px 0' }}>
+          {rate > 0 && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={incl} onChange={e => setIncl(e.target.checked)} />המחירים בקובץ כוללים מע״מ</label>}
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={updPrices} onChange={e => setUpdPrices(e.target.checked)} />לעדכן מחיר של פריטים שכבר קיימים</label>
+        </div>
+        <div className="mg-tblwrap" style={{ margin: '12px 0' }}><table className="mg-tbl">
+          <thead><tr>{ITEM_FIELDS.filter(k => map[k] !== undefined).map(k => <th key={k}>{ITEM_LABELS[k]}</th>)}</tr></thead>
+          <tbody>{incoming.slice(0, 5).map((x, i) => <tr key={i}>{ITEM_FIELDS.filter(k => map[k] !== undefined).map(k => <td key={k}>{k === 'price' ? fmt(numOf(x[k])) : x[k]}</td>)}</tr>)}</tbody>
+        </table></div>
+        <div className="mg-note">{incoming.length} שורות · <b>{plan.add.length}</b> פריטים חדשים · <b>{plan.upd.length}</b> קיימים שיתעדכנו · {plan.same.length} בלי שינוי. פריט מזוהה לפי מק״ט, ובלעדיו לפי השם.</div>
+      </>}
+    </Box>
+  );
+}
+
+function ItemForm({ rec, rate, onSave, onClose }) {
+  const [f, setF] = useState(() => ({ id: uid('item'), name: '', sku: '', price: '', incl: rate > 0, unit: '', category: '', desc: '', active: true, sources: ['manual'], ...rec }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const ok = String(f.name).trim() && numOf(f.price) >= 0;
+  return (
+    <Box title={rec.id ? 'עריכת פריט' : 'פריט חדש'} onClose={onClose}
+         footer={<><button className="mg-btn" disabled={!ok} onClick={() => onSave({ ...f, name: String(f.name).trim(), price: r2(numOf(f.price)) })}>שמור</button>
+                   <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      <div style={grid}>
+        <Field label="שם הפריט *"><input value={f.name} onChange={e => set('name', e.target.value)} placeholder="טיפול דיקור · 60 דקות" /></Field>
+        <Field label="מחיר"><input inputMode="decimal" value={f.price} onChange={e => set('price', e.target.value)} /></Field>
+        {rate > 0 && <Field label="המחיר"><select value={f.incl ? '1' : ''} onChange={e => set('incl', !!e.target.value)}>
+          <option value="1">כולל מע״מ</option><option value="">לפני מע״מ</option></select></Field>}
+        <Field label="מק״ט"><input dir="ltr" value={f.sku} onChange={e => set('sku', e.target.value)} /></Field>
+        <Field label="יחידה"><input value={f.unit} onChange={e => set('unit', e.target.value)} placeholder="טיפול / יח׳ / שעה" /></Field>
+        <Field label="קטגוריה"><input value={f.category} onChange={e => set('category', e.target.value)} /></Field>
+      </div>
+      <div style={{ marginTop: 12 }}><Field label="תיאור נוסף"><input value={f.desc} onChange={e => set('desc', e.target.value)} /></Field></div>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14, marginTop: 12 }}>
+        <input type="checkbox" style={{ width: 'auto' }} checked={f.active !== false} onChange={e => set('active', e.target.checked)} />פעיל (מופיע בבחירה במסמכים)</label>
+    </Box>
+  );
+}
+
+function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
+  const list = data.items || [];
+  const rate = rateOf(book);
+  const [q, setQ] = useState('');
+  const [edit, setEdit] = useState(null);
+  const [imp, setImp] = useState(false);
+  /* How often each item was sold, by its name on documents. */
+  const used = useMemo(() => {
+    const m = {};
+    (data.documents || []).filter(d => d.series !== 'test').forEach(d => (d.lines || []).forEach(l => {
+      const k = normItem(l.desc); m[k] = m[k] || { n: 0, sum: 0 }; m[k].n += Number(l.qty) || 0; m[k].sum += (Number(l.qty) || 0) * (Number(l.price) || 0);
+    }));
+    return m;
+  }, [data.documents]);
+  const shown = list.filter(x => !q || [x.name, x.sku, x.category].some(v => String(v || '').toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'he'));
+  const save = async (rec) => {
+    const r = clean({ ...rec, updatedAt: new Date().toISOString() });
+    try { await withTimeout(cols.items.put(r.id, r), 12000); } catch { flash('השמירה נכשלה'); return; }
+    patch('items', l => [...l.filter(x => x.id !== r.id), r]); setEdit(null); flash('הפריט נשמר');
+  };
+  const del = async (x) => {
+    if (!window.confirm(`למחוק את "${x.name}"? מסמכים שכבר הופקו לא משתנים.`)) return;
+    try { await cols.items.del(x.id); patch('items', l => l.filter(y => y.id !== x.id)); flash('נמחק'); } catch { flash('המחיקה נכשלה'); }
+  };
+  const reload = async () => { const l = await cols.items.list().catch(() => null); if (l) patch('items', () => l); };
+  return (
+    <>
+      <div data-tour="items-tools" style={{ ...row, marginBottom: 12 }}>
+        <Field label="חיפוש"><input value={q} onChange={e => setQ(e.target.value)} placeholder="שם, מק״ט, קטגוריה" /></Field>
+        <button className="mg-btn" onClick={() => setEdit({})}>＋ פריט</button>
+        <button className="mg-btn ghost" onClick={() => setImp(true)}>⬆ ייבוא מ-iCount (אקסל / CSV)</button>
+        <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`items-${book.name}.csv`, [
+          ['שם הפריט', 'מק״ט', 'מחיר', 'כולל מע״מ', 'יחידה', 'קטגוריה', 'תיאור נוסף', 'פעיל'],
+          ...shown.map(x => [x.name, x.sku || '', x.price, x.incl ? 'כן' : 'לא', x.unit || '', x.category || '', x.desc || '', x.active === false ? 'לא' : 'כן'])])}>⬇ ייצוא</button>
+      </div>
+      <div data-tour="items-table" className="mg-tblwrap"><table className="mg-tbl">
+        <thead><tr><th>פריט</th><th>מק״ט</th><th>מחיר</th><th>קטגוריה</th><th>נמכר</th><th></th></tr></thead>
+        <tbody>
+          {shown.map(x => { const u = used[normItem(x.name)]; return (
+            <tr key={x.id} style={x.active === false ? { opacity: .5 } : null}>
+              <td><b>{x.name}</b>{x.unit ? <span style={{ color: 'var(--muted)', fontSize: 13 }}> · {x.unit}</span> : ''}{x.desc ? <div style={{ color: 'var(--muted)', fontSize: 13 }}>{x.desc}</div> : ''}</td>
+              <td dir="ltr" style={{ textAlign: 'right' }}>{x.sku}</td>
+              <td>{fmt(x.price)}{rate > 0 && <span style={{ color: 'var(--muted)', fontSize: 12 }}> {x.incl ? 'כולל מע״מ' : '+ מע״מ'}</span>}</td>
+              <td>{x.category}</td>
+              <td>{u ? `${r2(u.n)} · ${fmt(u.sum)}` : '—'}</td>
+              <td style={{ whiteSpace: 'nowrap' }}>
+                <button className="mg-btn ghost sm" onClick={() => setEdit(x)}>עריכה</button>{' '}
+                {role === 'owner' && <button className="mg-btn ghost sm" onClick={() => del(x)}>מחק</button>}</td>
+            </tr>); })}
+          {!shown.length && <tr><td colSpan={6}><div className="mg-empty">{list.length ? 'אין פריטים שמתאימים לחיפוש.' : 'עוד אין פריטים. מוסיפים כאן, או מייבאים את רשימת הפריטים מ-iCount.'}</div></td></tr>}
+        </tbody></table></div>
+      {edit && <ItemForm rec={edit} rate={rate} onSave={save} onClose={() => setEdit(null)} />}
+      {imp && <ItemImport list={list} col={cols.items} rate={rate} flash={flash} onDone={reload} onClose={() => setImp(false)} />}
+    </>
+  );
+}
+
+/* ================================================================== mount */
+const style = document.createElement('style');
+style.textContent = CSS;
+document.head.appendChild(style);
+const fonts = document.createElement('link');
+fonts.rel = 'stylesheet';
+fonts.href = 'https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&family=Frank+Ruhl+Libre:wght@500;700&display=swap';
+document.head.appendChild(fonts);
+createRoot(document.getElementById('root')).render(<App />);

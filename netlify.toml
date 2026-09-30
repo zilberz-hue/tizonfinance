@@ -1,0 +1,23 @@
+# Tizon Books · Netlify
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  # Loaded as a package, not bundled: it has native and dynamic parts.
+  external_node_modules = ["firebase-admin"]
+
+# A payment page's short link: /p/<business>/<page>/<key>
+[[redirects]]
+  from = "/p/:b/:p/:k"
+  to = "/.netlify/functions/books-mail?action=pay&b=:b&p=:p&k=:k"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "same-origin"

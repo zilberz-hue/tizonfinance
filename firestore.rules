@@ -1,0 +1,154 @@
+rules_version = '2';
+
+// =============================================================================
+//  Tizon Books · Firestore rules
+//  For the accounting app's OWN Firebase project — not the store's.
+//
+//    books/{book}                 a business: name, dealer type, VAT, owners
+//    books/{book}/{col}/{id}      its incomes, expenses, suppliers, bank lines
+//    books/{book}/documents/{id}  documents it issued — never edited or deleted
+//
+//    books/{book}/items/{id}      products and services, to pick in documents
+//    books/{book}/payreqs/{id}    payment pages; written only by the server
+//    prefs/{uid}                  one user's own settings, readable only by them
+//
+//  A book is open to the emails in its owners (full access), clerks (issue
+//  documents, keep customers) and viewers (read-only). Nothing else in the
+//  project is readable or writable.
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+    function me() {
+      return request.auth.token.email.lower();
+    }
+    function ownsBook(book) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/books/$(book))
+        && me() in get(/databases/$(database)/documents/books/$(book)).data.owners;
+    }
+    // Roles in a book: owners (everything), clerks (issue documents, keep
+    // customers) and viewers (read only — an accountant).
+    function bookData(book) {
+      return get(/databases/$(database)/documents/books/$(book)).data;
+    }
+    function issuesBook(book) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/books/$(book))
+        && (me() in bookData(book).owners || me() in bookData(book).get('clerks', []));
+    }
+    function readsBook(book) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/books/$(book))
+        && (me() in bookData(book).owners
+            || me() in bookData(book).get('clerks', [])
+            || me() in bookData(book).get('viewers', []));
+    }
+    function sane() {
+      return request.resource.size() < 900 * 1024;
+    }
+
+    // Each user's own settings, which follow them to every device: the
+    // software registration, tours, and when the backup and archive were sent.
+    match /prefs/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && sane();
+    }
+
+    match /books/{book} {
+      allow get, list: if signedIn() && (me() in resource.data.owners
+                                          || me() in resource.data.get('clerks', [])
+                                          || me() in resource.data.get('viewers', []));
+      // A new book names its creator as an owner; a book always keeps one.
+      allow create: if signedIn() && sane()
+                    && request.resource.data.owners is list
+                    && me() in request.resource.data.owners;
+      allow update: if signedIn() && me() in resource.data.owners && sane()
+                    && request.resource.data.owners is list
+                    && request.resource.data.owners.size() > 0;
+      allow delete: if signedIn() && me() in resource.data.owners;
+    }
+
+    // Issued documents. Created once, never edited: only the print counter may
+    // change. Test documents and imported history may be deleted; real ones
+    // never — a mistake is corrected by a credit note, as the bookkeeping
+    // rules require.
+    match /books/{book}/documents/{id} {
+      allow read: if readsBook(book);
+      // Issued here (test or live): a whole number. Imported history from
+      // another system (iCount) keeps that system's number as it was.
+      // Issued by owners and clerks; imported history only by owners.
+      allow create: if sane()
+                    && ((issuesBook(book) && request.resource.data.series in ['test', 'live'] && request.resource.data.number is int)
+                        || (ownsBook(book) && request.resource.data.series == 'import'));
+      // Printing and sending are recorded; an allocation number is added once,
+      // to a document that has none, and never changed.
+      allow update: if issuesBook(book)
+                    && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['printCount', 'printedAt', 'sentAt', 'sentTo'])
+                        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['allocationNo', 'allocationAt'])
+                            && resource.data.get('allocationNo', '') == ''));
+      allow delete: if ownsBook(book) && resource.data.series in ['test', 'import'];
+    }
+
+    // Running numbers, one per series and type. A real series is never
+    // deleted, so a number can never be handed out twice.
+    match /books/{book}/counters/{key} {
+      allow read: if readsBook(book);
+      allow create: if issuesBook(book) && request.resource.data.next is int;
+      // Only forward: a counter can never be wound back to reuse a number.
+      allow update: if issuesBook(book) && request.resource.data.next is int
+                    && request.resource.data.next > resource.data.next;
+      allow delete: if ownsBook(book) && key.matches('^test_.*');
+    }
+
+    // The action log: added to, never changed. Entries of test work may go
+    // with the book; entries of real work stay.
+    match /books/{book}/log/{id} {
+      allow read: if readsBook(book);
+      allow create: if issuesBook(book) && sane();
+      allow delete: if ownsBook(book) && resource.data.get('series', 'test') == 'test';
+    }
+
+    // Customers: kept by owners and clerks, removed only by owners.
+    match /books/{book}/customers/{id} {
+      allow read: if readsBook(book);
+      allow create, update: if issuesBook(book) && sane();
+      allow delete: if ownsBook(book);
+    }
+
+    // Items (products and services): kept by owners and clerks, removed only by owners.
+    match /books/{book}/items/{id} {
+      allow read: if readsBook(book);
+      allow create, update: if issuesBook(book) && sane();
+      allow delete: if ownsBook(book);
+    }
+
+    // Payment pages (Z-Credit). Created and marked paid only by the server,
+    // which checks with the clearing company; here they can only be read, and
+    // an open one cancelled.
+    match /books/{book}/payreqs/{id} {
+      allow read: if readsBook(book);
+      allow update: if issuesBook(book) && resource.data.status == 'open'
+                    && request.resource.data.status == 'cancelled'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy']);
+    }
+
+    // Everything else in a book: incomes, expenses, suppliers, bank lines.
+    // Firestore allows a request when ANY matching rule allows it, and this
+    // pattern matches documents, counters and the log as well — so they are
+    // excluded here by name, or this rule would undo the ones above.
+    match /books/{book}/{col}/{id} {
+      allow read: if readsBook(book);
+      allow delete: if ownsBook(book) && !(col in ['documents', 'counters', 'log', 'customers', 'items', 'payreqs']);
+      allow create, update: if ownsBook(book) && sane() && !(col in ['documents', 'counters', 'log', 'customers', 'items', 'payreqs']);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
