@@ -1,4 +1,4 @@
-/* Tizon Books 1.15.3 · server function, in one file. Built from
+/* Tizon Books 1.15.4 · server function, in one file. Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -1002,23 +1002,24 @@ async function booksAs(idToken, email) {
 var lastRole = null;
 async function roleOfBook(email, bookId, idToken) {
   lastRole = { email, book: bookId };
+  const rank = { owner: 3, clerk: 2, viewer: 1, "": 0 };
+  let best = "";
   if (dbOverride || await saJson()) {
     try {
-      const b2 = /^[\w-]{1,80}$/.test(bookId) ? await (await adminDb()).get(`books/${bookId}`) : null;
-      if (b2) {
-        lastRole.via = "key";
-        return roleIn(b2, email);
-      }
-      lastRole.key = "no-book";
+      const b = /^[\w-]{1,80}$/.test(bookId) ? await (await adminDb()).get(`books/${bookId}`) : null;
+      lastRole.key = b ? roleIn(b, email) || "none" : "no-book";
+      if (b) best = roleIn(b, email);
     } catch (e) {
       lastRole.key = String(e.message || e).slice(0, 80);
     }
   }
-  const b = await bookAs(idToken, bookId);
-  lastRole.via = "login";
-  lastRole.found = !!b;
-  if (b) lastRole.owners = b.owners;
-  return b ? roleIn(b, email) : "";
+  if (best !== "owner" && idToken) {
+    const b = await bookAs(idToken, bookId);
+    lastRole.login = b ? roleIn(b, email) || "none" : "no-book";
+    if (b) lastRole.owners = b.owners;
+    if (b && rank[roleIn(b, email)] > rank[best]) best = roleIn(b, email);
+  }
+  return best;
 }
 async function ownsAny(email, idToken) {
   if (env("ALLOWED_EMAILS")) return true;
@@ -1269,7 +1270,7 @@ var books_mail_default = async (req) => {
     if (["icount-link", "icount-docs", "icount-status"].includes(body.action)) {
       const bookId = String(body.book || "");
       const role = await roleOfBook(email, bookId, String(body.idToken || ""));
-      if (role !== "owner") return json(403, { error: "owners only", detail: lastRole });
+      if (body.action === "icount-link" ? role !== "owner" : !role) return json(403, { error: "owners only", detail: lastRole });
       const key = "icount:" + bookId;
       if (body.action === "icount-status") {
         const t2 = await secrets().get(key, { type: "json" }).catch(() => null);

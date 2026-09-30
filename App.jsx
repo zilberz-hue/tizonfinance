@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.15.3';
+const VERSION = '1.15.4';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.15.4', date: '30.09.26', items: ['חיבור ל-iCount: בדיקת הבעלות משלבת את מפתח השירות ואת הכניסה שלך.'] },
   { v: '1.15.3', date: '30.09.26', items: ['מסמכים ממוינים מהחדש לישן לפי תאריך המסמך.', 'חיבור ל-iCount: זיהוי בעלות גם כשמפתח השירות שהועלה שייך לפרויקט אחר.'] },
   { v: '1.15.2', date: '30.09.26', items: ['השרת עובד בלי הגדרות נוספות ב-Netlify: מזהה הפרויקט מובנה, והרשאות נבדקות לפי הכניסה שלך.', 'עסק כפול ריק נמחק בלחיצה אחת ממסך כל העסקים.'] },
   { v: '1.15.1', date: '30.09.26', items: ['חיבור ל-iCount: הודעת שגיאה מפורטת, כדי לדעת בדיוק מה חסר.'] },
@@ -4455,7 +4456,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
       const have = new Set((data.documents || []).map(d => d.id));
       const byType = {}; r.docs.forEach(d => { const t = byType[d.type] = byType[d.type] || { n: 0, total: 0 }; t.n++; t.total += d.total; });
       setRes({ ...r, byType, fresh: r.docs.filter(d => !have.has(d.id)) });
-    } catch (e) { setErr('המשיכה מ-iCount נכשלה: ' + e.message); }
+    } catch (e) { setErr('המשיכה מ-iCount נכשלה: ' + e.message + (e.body?.detail ? ' · פרטים לבדיקה: ' + JSON.stringify(e.body.detail) : '')); }
     setBusy('');
   };
   const save = async () => {
