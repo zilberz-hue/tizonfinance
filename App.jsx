@@ -894,7 +894,7 @@ input:focus,select:focus{border-color:var(--gold)}
 }
 
 /* The quick button: bottom-left, above everything but dialogs. */
-.fab{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.fab{position:fixed;left:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:48;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 /* The help button moves to the other corner, so the two never cover each other. */
 .help-btn{left:auto !important;right:20px}
 @media (max-width:820px){.help-btn{right:14px}}
@@ -905,7 +905,7 @@ input:focus,select:focus{border-color:var(--gold)}
 .fab-item{border:0;background:#fff;color:#121110;font-weight:700;font-size:16px;padding:12px 18px;border-radius:999px;cursor:pointer;white-space:nowrap;
   box-shadow:0 4px 16px rgba(0,0,0,.18);font-family:inherit}
 .fab-item.main{background:var(--green);color:#fff}
-.fab-back{position:fixed;inset:0;background:rgba(20,20,15,.25);z-index:44}
+.fab-back{position:fixed;inset:0;background:rgba(20,20,15,.25);z-index:47}
 @keyframes fabIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media (max-width:820px){
   .hdr-act{display:none !important}
@@ -2407,6 +2407,7 @@ function QuickFab({ book, canPay, canExpense, onDoc, onPay, onExpense }) {
   const types = allowedTypes(book).filter(t => t !== '330');
   if (!types.length) return null;
   const go = (f) => { setOpen(false); f(); };
+  useEffect(() => { if (!open) return; const k = (e) => { if (e.key === 'Escape') setOpen(false); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [open]);
   return (
     <>
       {open && <div className="fab-back" onClick={() => setOpen(false)} />}
