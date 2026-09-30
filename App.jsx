@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.16.0';
+const VERSION = '1.16.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -259,6 +259,10 @@ async function archiveWrite(bookId, docs, oldChunks = []) {
 }
 /* Adds imported documents to the packed history, without doubling. */
 async function archiveAdd(bookId, data, docs) {
+  /* The pack as stored now, not as loaded: the history may still be arriving in the background. */
+  const fresh = await withTimeout(bookCol(bookId, 'archive').list(), 30000).catch(() => null);
+  if (fresh) data = { ...data, archive: fresh };
+  else if (data.histPending) throw new Error('archive not loaded');
   const have = archiveDocs(data.archive);
   const ids = new Set(have.map(d => d.id));
   const all = [...have, ...docs.filter(d => !ids.has(d.id))];
@@ -527,32 +531,53 @@ function alertsOf(data, ledger) {
 }
 
 
-async function loadBook(book) {
-  const res = await Promise.all(COLS.map(c => withTimeout(bookCol(book.id, c).list()).catch(() => null)));
-  const out = { errors: [], orders: [], docs: [], storeErr: '', storeLogin: false };
-  COLS.forEach((c, i) => { out[c] = res[i] || []; if (!res[i]) out.errors.push(c); });
-  const packed = archiveDocs(out.archive);
-  if (packed.length) { const ids = new Set(out.documents.map(d => d.id)); out.documents = [...out.documents, ...packed.filter(d => !ids.has(d.id))]; }
+/* A business opens in two steps: its own records first (a few reads, shown at
+   once), then in the background the packed history and the store's orders,
+   which are merged in as they arrive. loadBook does both, for callers that
+   need everything before they go on. */
+const CORE = COLS.filter(c => c !== 'archive');
+async function loadCore(book) {
+  const res = await Promise.all(CORE.map(c => withTimeout(bookCol(book.id, c).list()).catch(() => null)));
+  const out = { errors: [], orders: [], docs: [], storeErr: '', storeLogin: false, archive: [], histPending: true, storePending: !!tenantId(book.tenant) };
+  CORE.forEach((c, i) => { out[c] = res[i] || []; if (!res[i]) out.errors.push(c); });
+  return out;
+}
+async function loadHistory(book) {
+  const archive = await withTimeout(bookCol(book.id, 'archive').list()).catch(() => null);
+  return { archive: archive || [], packed: archiveDocs(archive || []), failed: !archive };
+}
+function withHistory(d, h) {
+  const ids = new Set((d.documents || []).map(x => x.id));
+  return { ...d, archive: h.archive, histPending: false, histErr: h.failed,
+           documents: [...(d.documents || []).filter(x => !x._arch), ...h.packed.filter(x => !ids.has(x.id))],
+           errors: h.failed ? [...new Set([...(d.errors || []), 'archive'])] : (d.errors || []).filter(e => e !== 'archive') };
+}
+async function loadStore(book) {
+  const out = { orders: [], docs: [], storeErr: '', storeLogin: false, storePending: false };
   const t = tenantId(book.tenant);
-  if (t) {
-    try {
-      if (!(await storeViaServer())) {
-        const u = await withTimeout(storeUser(), 10000);
-        if (!u) { out.storeLogin = true; return out; }
-      }
-      out.orders = await withTimeout(storeRead(t, 'orders'), 25000);
-      /* Documents are a nicety (the VAT figure of each invoice); without them
-         VAT is worked out from the order total. */
-      out.docs = await withTimeout(storeRead(t, 'documents'), 25000).catch(() => []);
-      out.storeAt = new Date().toISOString();
-    } catch (e) {
-      const c = String(e?.code || e?.message || e);
-      out.storeErr = c.includes('permission')
-        ? `המשתמש שמחובר לחנות לא מנהל את החנות "${t}". בדוק את מזהה החנות, או התחבר עם משתמש אחר.`
-        : `לא הצלחתי לקרוא את ההזמנות של החנות "${t}" (${c}).`;
+  if (!t) return out;
+  try {
+    if (!(await storeViaServer())) {
+      const u = await withTimeout(storeUser(), 10000);
+      if (!u) { out.storeLogin = true; return out; }
     }
+    /* Documents are a nicety (the VAT figure of each invoice); without them
+       VAT is worked out from the order total. */
+    const [orders, docs] = await Promise.all([withTimeout(storeRead(t, 'orders'), 25000),
+                                              withTimeout(storeRead(t, 'documents'), 25000).catch(() => [])]);
+    out.orders = orders; out.docs = docs;
+    out.storeAt = new Date().toISOString();
+  } catch (e) {
+    const c = String(e?.code || e?.message || e);
+    out.storeErr = c.includes('permission')
+      ? `המשתמש שמחובר לחנות לא מנהל את החנות "${t}". בדוק את מזהה החנות, או התחבר עם משתמש אחר.`
+      : `לא הצלחתי לקרוא את ההזמנות של החנות "${t}" (${c}).`;
   }
   return out;
+}
+async function loadBook(book) {
+  const [core, hist, store] = await Promise.all([loadCore(book), loadHistory(book), loadStore(book)]);
+  return { ...withHistory(core, hist), ...store };
 }
 
 /* ================================================================== styles */
@@ -918,6 +943,8 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.16.1', date: '30.09.26', items: [
+    'פתיחה מהירה: העסק מוצג מיד, וההיסטוריה המיובאת והזמנות החנות נטענות ברקע ומתווספות כשהן מגיעות (עם חיווי קטן בזמן הטעינה).'] },
   { v: '1.16.0', date: '30.09.26', items: [
     'היסטוריה מ-iCount נשמרת ארוזה: אלפי מסמכים ישנים נקראים בכמה קריאות בלבד, כך שהמכסה החינמית היומית של Firebase לא נגמרת.',
     'שדות המפתח (iCount, זד קרדיט) לא מתמלאים יותר אוטומטית מסיסמאות שמורות בדפדפן.'] },
@@ -1382,9 +1409,15 @@ function App() {
   const ensure = async (book, force) => {
     if (!force && (datas[book.id] || loading[book.id])) return;
     setLoading(l => ({ ...l, [book.id]: true }));
-    const d = await loadBook(book);
-    setDatas(x => ({ ...x, [book.id]: d }));
+    const histP = loadHistory(book), storeP = loadStore(book);
+    const d = await loadCore(book);
+    setDatas(x => ({ ...x, [book.id]: force && x[book.id] ? { ...x[book.id], ...d, histPending: false,
+      documents: [...d.documents, ...(x[book.id].documents || []).filter(z => z._arch && !d.documents.some(y => y.id === z.id))],
+      archive: x[book.id].archive || [], orders: x[book.id].orders || [], docs: x[book.id].docs || [], storePending: d.storePending && !x[book.id].storeAt,
+      storeAt: x[book.id].storeAt, storeErr: x[book.id].storeErr, storeLogin: x[book.id].storeLogin } : d }));
     setLoading(l => ({ ...l, [book.id]: false }));
+    histP.then(h => setDatas(x => x[book.id] ? { ...x, [book.id]: withHistory(x[book.id], h) } : x));
+    storeP.then(st => setDatas(x => x[book.id] ? { ...x, [book.id]: { ...x[book.id], ...st } } : x));
     /* Once: imported history kept one record per document moves into the pack. */
     const loose = (d.documents || []).filter(z => z.series === 'import' && !z._arch).length;
     if (loose >= 20 && !migrating.current.has(book.id) && (!cloud || roleOf(book, user?.email || '') === 'owner')) {
@@ -2351,6 +2384,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         {role !== 'owner' && <span className="mg-chip" style={{ background: 'rgba(255,255,255,.2)', color: '#fff' }}>{ROLES[role]}</span>}
       </div>
 
+      {(data.histPending || data.storePending) && <div className="mg-note" style={{ marginBottom: 12, fontSize: '.92em' }}>
+        ⏳ טוען ברקע {[data.histPending && 'היסטוריית מסמכים', data.storePending && 'הזמנות מהחנות'].filter(Boolean).join(' ו')}… אפשר לעבוד בינתיים.</div>}
       {data.storeLogin && <div className="mg-note warn" style={{ marginBottom: 12 }}>
         העסק מקושר לחנות <b dir="ltr">{book.tenant}</b>. כדי למשוך ממנה את ההזמנות צריך להתחבר אליה במכשיר הזה, או פעם אחת לכל המכשירים (גיבוי וענן ← חיבור לחנות ← חיבור קבוע).{' '}
         <button className="mg-btn sm" onClick={onStoreLogin}>התחבר לחנות</button></div>}
