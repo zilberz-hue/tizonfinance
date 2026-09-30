@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.13.1';
+const VERSION = '1.14.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.14.0', date: '30.09.26', items: [
+    'עסקים כפולים: זיהוי ומיזוג לעסק אחד, בלי לאבד נתונים. העברה מהמכשיר לענן כבר לא יוצרת כפילויות.',
+    'מסמכים שיובאו מ-iCount: הדפסת העתק נאמן למקור.'] },
   { v: '1.13.1', date: '30.09.26', items: ['ייבוא פריטים מ-iCount: קובץ XLS ישן נקרא ישירות, המע״מ לפי העמודה בקובץ, קטגוריה ויחידה מתוך הגיליונות, ופריטים מחוקים מדולגים.'] },
   { v: '1.13.0', date: '30.09.26', items: [
     'פריטים: ייבוא מוצרים ישירות מהחנות, עם בחירה אילו לייבא.',
@@ -1461,7 +1464,8 @@ function App() {
              issues documents sees their businesses, not the totals. */
           const seen = books.filter(b => roleOf(b, user.email) !== 'clerk');
           return seen.length
-            ? <AllView books={seen} datas={datas} loading={loading} onOpen={setCur} onStoreLogin={() => setStoreLogin(true)} />
+            ? <><DupCard books={books} user={user} flash={flash} onDone={() => { setDatas({}); refreshBooks(); }} />
+                <AllView books={seen} datas={datas} loading={loading} onOpen={setCur} onStoreLogin={() => setStoreLogin(true)} /></>
             : <div className="mg-card" style={{ maxWidth: 560 }}><h3 style={{ marginTop: 0 }}>שלום {user.email}</h3>
                 <p>יש לך הרשאה להפיק מסמכים בעסקים שבתפריט. בחר עסק כדי להתחיל.</p></div>;
         })()}
@@ -1855,7 +1859,11 @@ function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreCha
     setBusy(true);
     try {
       const data = await exportAll('', local);
+      /* A business that is already in the cloud under the same name is filled in, not made twice. */
+      const there = await DB.books(user.email).catch(() => []);
+      data.books = data.books.map(b => { const t = there.find(x => bookKey(x) === bookKey(b)); return t ? { ...t, data: b.data } : b; });
       const r = await importAll(data, user.email);
+      try { localStorage.removeItem(LOCAL_KEY); } catch { /* ignore */ }
       flash(`הועברו ${r.books} עסקים ו-${r.records} רשומות לענן`); onRestored();
     } catch (e) { flash('ההעברה נכשלה · ' + (e?.code || e?.message || '')); }
     setBusy(false);
@@ -3058,7 +3066,8 @@ ${d.withholding ? `<div class="tot"><div><span>ניכוי במקור</span><span
 ${!T.lines ? `<div class="tot"><div class="g"><span>סה״כ התקבל</span><span>${m(d.total)}</span></div></div>` : ''}` : ''}
 ${d.notes ? `<div class="notes">${esc(d.notes)}</div>` : ''}
 <div class="sign">חתימה</div>
-<div class="foot"><span>הופק ב-Tizon Books ${VERSION} · ${esc(new Date(d.createdAt).toLocaleString('he-IL'))}</span><span>קוד אימות ${esc(d.stamp || '')}</span></div>
+<div class="foot">${isImported(d) ? `<span>העתק של מסמך שהופק במקור ב-iCount · הודפס מ-Tizon Books ${VERSION} · ${esc(new Date().toLocaleString('he-IL'))}</span><span></span>`
+  : `<span>הופק ב-Tizon Books ${VERSION} · ${esc(new Date(d.createdAt).toLocaleString('he-IL'))}</span><span>קוד אימות ${esc(d.stamp || '')}</span>`}</div>
 </body></html>`;
 }
 /* Printed from a hidden frame — no pop-up to be blocked. "Save as PDF" is
@@ -3175,7 +3184,8 @@ function DocsTab({ book, docs, customers = [], items = [], onIssue, onPrinted, o
                   : d.type === '305' ? (open > 0.009 ? <span className="mg-chip warn">פתוחה · {fmt(open)}</span> : <span className="mg-chip ok">שולמה</span>)
                   : <span className="mg-chip ok">הופק</span>}
                   {(d.printCount || 0) > 0 && !isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 4 }}>הודפס</span>}</td>
-                <td>{isImported(d) ? <span style={{ fontSize: 12, color: 'var(--muted)' }}>המקור נמצא ב-iCount</span> :
+                <td>{isImported(d) ? <><button className="mg-btn ghost sm keep" onClick={() => printHTML(docHTML(book, d, true))}>🖨 העתק</button>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>המקור הופק ב-iCount</div></> :
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   <button className="mg-btn ghost sm keep" onClick={() => print(d)}>🖨 {(d.printCount || 0) > 0 ? 'העתק' : 'הדפס'}</button>
                   <button className="mg-btn ghost sm keep" disabled={busyId === d.id} onClick={() => pdf(d)}>{busyId === d.id ? '…' : canSign ? 'PDF חתום' : 'PDF'}</button>
@@ -4349,6 +4359,77 @@ function CustomerForm({ rec, onSave, onClose }) {
         ))}
       </div>
     </Box>
+  );
+}
+
+
+/* ============================================================ duplicates */
+/* The same business twice (typically: made on a device before the cloud, and
+   again in the cloud, then moved up). Merging keeps one: everything of the
+   other is copied into it — incomes, expenses, suppliers, bank lines,
+   customers and items (without doubling), documents imported from iCount —
+   and the other is removed. Real documents are never moved or deleted: the
+   business that has them is the one that stays; two with real documents are
+   left for the user to decide. */
+const bookKey = (b) => normName(b.name) + '|' + digitsOf(b.taxId);
+function dupGroups(books, email) {
+  const mine = books.filter(b => roleOf(b, email) === 'owner');
+  const g = {};
+  mine.forEach(b => { (g[bookKey(b)] = g[bookKey(b)] || []).push(b); });
+  return Object.values(g).filter(x => x.length > 1);
+}
+async function mergeBooks(keep, drop, onStep) {
+  const dataK = await loadBook(keep), dataD = await loadBook(drop);
+  let n = 0;
+  const put = async (c, r) => { const { id, ...rest } = r; try { await withTimeout(bookCol(keep.id, c).put(id, clean(rest)), 15000); n++; } catch { /* skip */ } };
+  for (const c of ['incomes', 'expenses', 'suppliers', 'banktx']) {
+    const have = new Set((dataK[c] || []).map(x => x.id));
+    for (const r of dataD[c] || []) if (!have.has(r.id)) await put(c, r);
+    onStep?.(c);
+  }
+  const cp = planCustomers(dataK.customers || [], dataD.customers || [], 'manual');
+  for (const r of [...cp.add, ...cp.upd]) await put('customers', r);
+  const ip = planItems(dataK.items || [], dataD.items || [], false);
+  for (const r of [...ip.add, ...ip.upd]) await put('items', r);
+  const haveImp = new Set((dataK.documents || []).filter(d => d.series === 'import').map(d => d.type + ':' + d.number));
+  for (const d of (dataD.documents || []).filter(d => d.series === 'import' && !haveImp.has(d.type + ':' + d.number))) await put('documents', d);
+  /* The duplicate goes: whatever the rules let go (test and imported documents, test counters and log), then the business itself. */
+  for (const c of COLS) for (const r of dataD[c] || []) await bookCol(drop.id, c).del(r.id).catch(() => {});
+  await delBook(drop.id);
+  return n;
+}
+function DupCard({ books, user, flash, onDone }) {
+  const groups = dupGroups(books, user.email);
+  const [info, setInfo] = useState({});
+  const [busy, setBusy] = useState('');
+  useEffect(() => {
+    groups.flat().forEach(b => loadBook(b).then(d => setInfo(x => ({ ...x, [b.id]: {
+      live: (d.documents || []).filter(z => z.series === 'live').length, docs: (d.documents || []).length,
+      recs: ['incomes', 'expenses', 'suppliers', 'banktx', 'customers', 'items'].reduce((a, c) => a + (d[c] || []).length, 0) } }))).catch(() => {}));
+  }, [groups.flat().map(b => b.id).join()]);
+  if (!groups.length) return null;
+  const merge = async (g) => {
+    const st = g.map(b => ({ b, i: info[b.id] || { live: 0, docs: 0, recs: 0 } }));
+    const withLive = st.filter(x => x.i.live > 0);
+    if (withLive.length > 1) { flash('בשני העסקים יש מסמכים אמיתיים. אי אפשר למזג אותם אוטומטית; כדאי לשנות לאחד מהם את השם.'); return; }
+    const keep = (withLive[0] || [...st].sort((a, z) => (z.i.docs + z.i.recs) - (a.i.docs + a.i.recs))[0]).b;
+    const drops = g.filter(b => b.id !== keep.id);
+    if (!window.confirm(`למזג ${g.length} עסקים בשם "${keep.name}" לעסק אחד? הנתונים של ${drops.length === 1 ? 'הכפול' : 'הכפולים'} יועתקו אליו, ${drops.length === 1 ? 'והכפול יימחק' : 'והכפולים יימחקו'}.`)) return;
+    setBusy(keep.id);
+    try { let n = 0; for (const d of drops) n += await mergeBooks(keep, d); flash(`המיזוג הושלם: ${n} רשומות הועתקו ל"${keep.name}"`); onDone(keep.id); }
+    catch (e) { flash('המיזוג נכשל · ' + (e?.code || e?.message || '')); }
+    setBusy('');
+  };
+  return (
+    <div className="mg-note warn" style={{ marginBottom: 14 }}>
+      <b>נמצאו עסקים כפולים.</b> כנראה נוצרו פעם במכשיר ופעם בענן. מיזוג משאיר עסק אחד עם כל הנתונים.
+      {groups.map(g => (
+        <div key={g[0].id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+          <b>{g[0].name}</b> ×{g.length}
+          <span style={{ fontSize: 13, color: 'var(--muted)' }}>{g.map(b => info[b.id] ? `${info[b.id].docs} מסמכים · ${info[b.id].recs} רשומות` : '…').join(' | ')}</span>
+          <button className="mg-btn sm" disabled={!!busy || g.some(b => !info[b.id])} onClick={() => merge(g)}>{busy ? 'ממזג…' : 'מזג לעסק אחד'}</button>
+        </div>))}
+    </div>
   );
 }
 
