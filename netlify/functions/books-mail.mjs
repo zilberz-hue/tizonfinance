@@ -1,6 +1,6 @@
-/* Tizon Books 1.9.1 · server function, in one file (signing, mail, Tax Authority,
-   payment pages and the receipt PDF). Built from netlify/functions/books-mail.mjs
-   and netlify/lib/*.mjs, so the repository needs only this one file. */
+/* Tizon Books 1.11.0 · server function, in one file (signing, mail, Tax Authority,
+   payment pages, the receipt PDF and the store link). Built from
+   netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import nodemailer from "nodemailer";
@@ -664,8 +664,112 @@ async function docPdf(book, d, opts = {}) {
   return Buffer.from(await pdf.save({ useObjectStreams: false }));
 }
 
+// netlify/lib/store.mjs
+var STORE_KEY = "AIzaSyDiXMoYgZfMKV5vL58Viyxuztl3RI3DsB0";
+var STORE_PROJECT = "tizonshoponline";
+var FS = (p) => `https://firestore.googleapis.com/v1/projects/${STORE_PROJECT}/databases/(default)/documents/${p}`;
+var tenantId = (v) => {
+  const t = String(v || "").trim();
+  return !t ? "" : /[/:.]/.test(t) ? "main" : t;
+};
+var READABLE = ["orders", "documents", "customers"];
+async function storeSignIn(email, password, fetchImpl = fetch, key = STORE_KEY) {
+  const r = await fetchImpl(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${key}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password, returnSecureToken: true })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.refreshToken) throw Object.assign(new Error("store-login: " + (j.error?.message || r.status)), { status: 400 });
+  return { refreshToken: j.refreshToken, email: j.email || email, uid: j.localId };
+}
+async function storeToken(link, fetchImpl = fetch, key = STORE_KEY) {
+  const r = await fetchImpl(`https://securetoken.googleapis.com/v1/token?key=${key}`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: link.refreshToken }).toString()
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.id_token) throw Object.assign(new Error("store-token: " + (j.error?.message || r.status)), { status: 401 });
+  return { idToken: j.id_token, refreshToken: j.refresh_token || link.refreshToken, exp: Date.now() + (Number(j.expires_in) || 3600) * 1e3 - 6e4 };
+}
+function fromValue(v) {
+  if (!v || typeof v !== "object") return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return Number(v.integerValue);
+  if ("doubleValue" in v) return Number(v.doubleValue);
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("nullValue" in v) return null;
+  if ("timestampValue" in v) {
+    const d = new Date(v.timestampValue);
+    if (isNaN(d)) return v.timestampValue;
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(d).map((x) => [x.type, x.value]));
+    return `${p.year}-${p.month}-${p.day}T${p.hour === "24" ? "00" : p.hour}:${p.minute}:${p.second}`;
+  }
+  if ("referenceValue" in v) return v.referenceValue;
+  if ("geoPointValue" in v) return v.geoPointValue;
+  if ("bytesValue" in v) return v.bytesValue;
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(fromValue);
+  if ("mapValue" in v) return fromFields(v.mapValue.fields || {});
+  return null;
+}
+var fromFields = (f) => Object.fromEntries(Object.entries(f || {}).map(([k, v]) => [k, fromValue(v)]));
+function toValue(x) {
+  if (x === null || x === void 0) return { nullValue: null };
+  if (typeof x === "boolean") return { booleanValue: x };
+  if (typeof x === "number") return Number.isInteger(x) ? { integerValue: String(x) } : { doubleValue: x };
+  if (Array.isArray(x)) return { arrayValue: { values: x.map(toValue) } };
+  if (typeof x === "object") return { mapValue: { fields: Object.fromEntries(Object.entries(x).map(([k, v]) => [k, toValue(v)])) } };
+  return { stringValue: String(x) };
+}
+async function storeList(idToken, tenant, name, fetchImpl = fetch) {
+  const t = tenantId(tenant);
+  if (!/^[\w-]{1,80}$/.test(t) || !READABLE.includes(name)) throw Object.assign(new Error("bad path"), { status: 400 });
+  const out = [];
+  let page = "";
+  for (let i = 0; i < 60; i++) {
+    const r = await fetchImpl(
+      FS(`tenants/${t}/${name}`) + `?pageSize=300${page ? "&pageToken=" + encodeURIComponent(page) : ""}`,
+      { headers: { authorization: "Bearer " + idToken } }
+    );
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(String(j.error?.status || j.error?.message || r.status).toLowerCase().replace(/_/g, "-")), { status: r.status === 403 ? 403 : 502 });
+    (j.documents || []).forEach((d) => out.push({ ...fromFields(d.fields), id: d.name.split("/").pop() }));
+    if (!j.nextPageToken) break;
+    page = j.nextPageToken;
+  }
+  return out;
+}
+var storeDocId = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_").slice(0, 90);
+async function storeCreateCustomer(idToken, tenant, c, fetchImpl = fetch) {
+  const t = tenantId(tenant);
+  if (!/^[\w-]{1,80}$/.test(t)) throw Object.assign(new Error("bad tenant"), { status: 400 });
+  const rec = Object.fromEntries(Object.entries({
+    name: String(c.name || "").slice(0, 120),
+    email: String(c.email || "").slice(0, 120),
+    phone: String(c.phone || "").slice(0, 30),
+    address: [c.address, c.city].filter(Boolean).join(", ").slice(0, 200),
+    notes: "\u05E0\u05D5\u05E1\u05E3 \u05DE-Tizon Books",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+    source: "tizon-books"
+  }).filter(([, v]) => v !== ""));
+  const base = storeDocId(c.email) || "c_" + Date.now().toString(36);
+  for (let i = 0; i < 4; i++) {
+    const id = i === 0 ? base : base + "_" + Math.random().toString(36).slice(2, 7);
+    const r = await fetchImpl(FS(`tenants/${t}/customers`) + `?documentId=${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { authorization: "Bearer " + idToken, "content-type": "application/json" },
+      body: JSON.stringify({ fields: Object.fromEntries(Object.entries(rec).map(([k, v]) => [k, toValue(v)])) })
+    });
+    if (r.ok) return id;
+    const j = await r.json().catch(() => ({}));
+    if (r.status !== 409) throw Object.assign(new Error(String(j.error?.status || r.status).toLowerCase()), { status: r.status === 403 ? 403 : 502 });
+  }
+  throw Object.assign(new Error("id taken"), { status: 409 });
+}
+
 // netlify/functions/books-mail.mjs
-var VERSION = "1.9.1";
+var VERSION = "1.11.0";
 var JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
 var env = (k) => (process.env[k] || "").trim();
 var json = (status, body) => new Response(JSON.stringify(body), {
@@ -750,6 +854,25 @@ var sendMail = async (m) => {
   if (!mailReady()) throw new Error("no-mail");
   return mailer().sendMail({ from: env("MAIL_FROM") || env("SMTP_USER"), ...m });
 };
+var storeCache = null;
+var storeLink = async () => secrets().get("store-link", { type: "json" }).catch(() => null);
+async function storeId() {
+  if (storeCache && storeCache.exp > Date.now()) return storeCache.idToken;
+  const link = await storeLink();
+  if (!link?.refreshToken) throw Object.assign(new Error("store-not-linked"), { status: 400 });
+  const t = await storeToken(link, fetchOverride || fetch);
+  if (t.refreshToken !== link.refreshToken) await secrets().setJSON("store-link", { ...link, refreshToken: t.refreshToken });
+  storeCache = t;
+  return t.idToken;
+}
+async function mayUseStore(email, tenant) {
+  if (dbOverride || await saJson()) {
+    const db = await adminDb();
+    const books = await db.list("books");
+    return books.some((b) => tenantId(b.tenant) === tenantId(tenant) && roleIn(b, email));
+  }
+  return !!env("ALLOWED_EMAILS");
+}
 var zcKeyOf = async (book) => (await secrets().get("zc:" + book, { type: "json" }).catch(() => null))?.key || "";
 var baseOf = (url) => env("URL") || url.origin;
 var html = (status, body) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
@@ -911,6 +1034,7 @@ var books_mail_default = async (req) => {
       mail: mailReady(),
       project: !!env("BOOKS_PROJECT_ID"),
       pay: { admin: !!(dbOverride || await saJson()) },
+      store: await storeLink().then((l) => l?.refreshToken ? { linked: true, email: l.email } : { linked: false }),
       password: !!env("SIGN_P12_PASSWORD"),
       guarded: !!env("ALLOWED_EMAILS"),
       ita: { configured: itaReady(), env: itaEnv() === "production" ? "production" : "sandbox" }
@@ -986,6 +1110,26 @@ var books_mail_default = async (req) => {
       });
       const j = await r.json().catch(() => ({}));
       return json(200, { approved: !!j.approved, confirmation_number: j.confirmation_number || "0", message: j.message, status: j.status || r.status });
+    }
+    if (body.action === "store-link") {
+      if (!env("ALLOWED_EMAILS")) return json(403, { error: "set ALLOWED_EMAILS first" });
+      if (body.unlink) {
+        await secrets().delete("store-link");
+        storeCache = null;
+        return json(200, { ok: true, linked: false });
+      }
+      const r = await storeSignIn(String(body.email || "").trim(), String(body.password || ""), fetchOverride || fetch);
+      await secrets().setJSON("store-link", { refreshToken: r.refreshToken, email: r.email, by: email, at: (/* @__PURE__ */ new Date()).toISOString() });
+      storeCache = null;
+      return json(200, { ok: true, linked: true, email: r.email });
+    }
+    if (body.action === "store-read" || body.action === "store-add-customer") {
+      const tenant = tenantId(body.tenant);
+      if (!tenant) return json(400, { error: "tenant" });
+      if (!await mayUseStore(email, tenant)) return json(403, { error: "role" });
+      const tok = await storeId();
+      if (body.action === "store-read") return json(200, { ok: true, rows: await storeList(tok, tenant, String(body.name || ""), fetchOverride || fetch) });
+      return json(200, { ok: true, id: await storeCreateCustomer(tok, tenant, body.customer || {}, fetchOverride || fetch) });
     }
     if (body.action === "sa") {
       if (!env("ALLOWED_EMAILS")) return json(403, { error: "set ALLOWED_EMAILS first" });

@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -47,9 +47,11 @@ const lsSet = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED
    cloud: the software registration, the tours and what's new, and when the
    weekly backup and monthly archive were last sent (so two devices do not
    send them twice). They are also kept in this browser, so everything keeps
-   working offline. Not synced on purpose: the device lock (it locks one
-   device) and the store login (a password is never stored). */
-const SYNCED = ['tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version'];
+   working offline. The device lock (PIN) follows too, so every device asks
+   for the same code. The store is linked for every device on the server. */
+const SYNCED = ['tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin'];
+/* Removed on one device, removed on all: kept in the cloud as false. */
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } if (SYNCED.includes(k)) prefPush(k, false); };
 let prefUid = null, prefQueue = {}, prefTimer = null, prefErr = '';
 function prefPush(k, v) {
   if (!prefUid || !cloud) return;
@@ -70,7 +72,8 @@ async function prefPull(user) {
     const remote = snap.exists() ? snap.data() : {};
     const up = {};
     for (const k of SYNCED) {
-      if (remote[k] !== undefined && remote[k] !== null) localStorage.setItem(k, JSON.stringify(remote[k]));
+      if (remote[k] === false) localStorage.removeItem(k);
+      else if (remote[k] !== undefined && remote[k] !== null) localStorage.setItem(k, JSON.stringify(remote[k]));
       else { const v = lsGet(k, undefined); if (v !== undefined) up[k] = v; }
     }
     if (Object.keys(up).length) { await setDoc(doc(cloud.db, 'prefs', prefUid), clean({ ...up, updatedAt: new Date().toISOString() }), { merge: true }); }
@@ -189,8 +192,14 @@ const storeDocId = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9
 /* The store's id of a shop is a short word ("main"). A web address typed in
    its place (https://www.drzilber.com/) means the one shop, "main". */
 const tenantId = (v) => { const t = String(v || '').trim(); return !t ? '' : /[/:.]/.test(t) ? 'main' : t; };
+/* When the store is linked on the server, every device reads it through there
+   and needs no store login of its own. */
+let statusP = null;
+const serverStatus = (fresh) => (fresh || !statusP) ? (statusP = fnStatus()) : statusP;
+const storeViaServer = async () => !!(cloud && (await serverStatus())?.store?.linked);
 async function storeAddCustomer(tenant, c) {
   tenant = tenantId(tenant);
+  if (await storeViaServer()) return (await fnCall({ action: 'store-add-customer', tenant, customer: c })).id;
   let id = storeDocId(c.email) || ('c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
   /* Only ever a new record: if the id is taken, a new one, never an update. */
   for (let i = 0; i < 3; i++) {
@@ -208,6 +217,7 @@ async function storeAddCustomer(tenant, c) {
 }
 async function storeRead(tenant, name) {
   tenant = tenantId(tenant);
+  if (await storeViaServer()) return (await fnCall({ action: 'store-read', tenant, name })).rows || [];
   const s = await getDocs(collection(store().db, 'tenants', tenant, name));
   return s.docs.map(d => ({ ...d.data(), id: d.id }));
 }
@@ -470,8 +480,10 @@ async function loadBook(book) {
   const t = tenantId(book.tenant);
   if (t) {
     try {
-      const u = await withTimeout(storeUser(), 10000);
-      if (!u) { out.storeLogin = true; return out; }
+      if (!(await storeViaServer())) {
+        const u = await withTimeout(storeUser(), 10000);
+        if (!u) { out.storeLogin = true; return out; }
+      }
       out.orders = await withTimeout(storeRead(t, 'orders'), 25000);
       /* Documents are a nicety (the VAT figure of each invoice); without them
          VAT is worked out from the order total. */
@@ -714,7 +726,7 @@ function Login() {
 /* An optional PIN for this device: a clinic computer others can reach. The
    PIN never leaves the device; only a salted hash of it is kept. The lock
    closes again after 15 minutes without activity. */
-const PIN_KEY = 'tzbooks_pin', UNLOCK_KEY = 'tzbooks_unlocked';
+const PIN_KEY = 'tzbooks_pin', UNLOCK_KEY = 'tzbooks_unlocked', PIN_RESET_KEY = 'tzbooks_pin_reset';
 async function pinHash(pin, salt) {
   const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin));
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -739,6 +751,9 @@ function LockScreen({ onUnlock, who }) {
           onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))} style={{ textAlign: 'center', fontSize: 22, letterSpacing: 8 }} /></Field>
         {err && <div className="mg-note bad">{err}{tries >= 5 ? '. יותר מדי ניסיונות: סגור את הדפדפן ונסה שוב.' : ''}</div>}
         <button className="mg-btn" disabled={pin.length < 4 || tries >= 5} style={{ justifyContent: 'center' }}>פתח</button>
+        {cloud && <button type="button" className="mg-linkish" style={{ fontSize: 13 }} onClick={async () => {
+          if (!window.confirm('לצאת ולהיכנס שוב עם האימייל והסיסמה? אחרי הכניסה הנעילה תתבטל בכל המכשירים, ואפשר לקבוע קוד חדש.')) return;
+          sessionStorage.setItem(PIN_RESET_KEY, '1'); await signOut(cloud.auth); location.reload(); }}>שכחתי את הקוד</button>}
       </div>
     </form>
   );
@@ -766,6 +781,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.11.0', date: '30.09.26', items: [
+    'חיבור קבוע לחנות לכל המכשירים: מתחברים פעם אחת בגיבוי וענן, וכל מכשיר קורא את החנות דרך השרת בלי להתחבר בעצמו.',
+    'גם קוד הנעילה עובר עכשיו בין המכשירים.'] },
   { v: '1.10.0', date: '30.09.26', items: [
     'כרטסת: לקוח, ספק וכל חשבון בהנהלת החשבונות, עם יתרת פתיחה ויתרה מצטברת. הדפסה, אקסל ושליחה ללקוח.',
     'מאזן בוחן לכל תקופה.'] },
@@ -905,9 +923,10 @@ const TOURS = {
     { t: 'set-cloud', title: 'ענן', text: 'עם הענן הנתונים מאחורי כניסה, בכל מכשיר, ומסמכים אמיתיים אפשריים.', since: '1.0.0' },
     { t: 'set-sign', title: 'חתימה דיגיטלית', text: 'מעלים את תעודת החתימה פעם אחת. מאז כל PDF נחתם, ואפשר לשלוח אותו במייל ישירות.', since: '1.3.0' },
     { t: 'set-store', title: 'החנות', text: 'חיבור לקריאה בלבד: הזמנות ששולמו ומספרי חשבוניות.', since: '1.1.0' },
+    { t: 'set-store', title: 'חיבור קבוע', text: 'מתחברים לחנות פעם אחת, והחיבור עובד בכל המכשירים דרך השרת. הסיסמה לא נשמרת.', since: '1.11.0' },
     { t: 'set-ita', title: 'רשות המסים', text: 'מתחברים פעם בשלושה חודשים, ומספרי ההקצאה מתבקשים אוטומטית.', since: '1.7.0' },
     { t: 'set-pay', title: 'דפי סליקה', text: 'מפתח השירות של Firebase ומפתח זד קרדיט לכל עסק. מגדירים פעם אחת, ומאז החשבונית יוצאת לבד אחרי כל תשלום.', since: '1.9.0' },
-    { t: 'set-pin', title: 'נעילה במכשיר', text: 'קוד לפתיחת המערכת במחשב משותף. ננעל לבד אחרי 15 דקות בלי פעילות.', since: '1.7.0' },
+    { t: 'set-pin', title: 'נעילה בקוד', text: 'קוד לפתיחת המערכת, אותו קוד בכל המכשירים. ננעל לבד אחרי 15 דקות בלי פעילות.', since: '1.7.0' },
     { t: 'set-archive', title: 'ארכיון חודשי', text: 'קבצי מבנה אחיד וגיבוי לכל חודש, במקום אחד.', since: '1.7.0' },
   ],
   users: [
@@ -1107,7 +1126,7 @@ function App() {
     reset();
     return () => { clearTimeout(t); ['mousemove', 'keydown', 'click', 'touchstart'].forEach(ev => window.removeEventListener(ev, reset)); };
   }, [locked]);
-  useEffect(() => { fnStatus().then(setServer); }, []);
+  useEffect(() => { serverStatus().then(setServer); }, []);
   /* Back from the Tax Authority's consent page. */
   useEffect(() => {
     const q = new URLSearchParams(window.location.search); const r = q.get('ita');
@@ -1144,6 +1163,9 @@ function App() {
     prefPull(user).finally(() => {
       const seen = lsGet(SEEN_KEY, null);
       if (seen) setNews(verCmp(VERSION, seen) > 0 ? seen : null);
+      /* Signed in again with the password after "forgot the code": the lock goes. */
+      if (sessionStorage.getItem(PIN_RESET_KEY) === '1') { sessionStorage.removeItem(PIN_RESET_KEY); lsDel(PIN_KEY); sessionStorage.setItem(UNLOCK_KEY, '1'); setLocked(false); setTimeout(() => flash('הנעילה בוטלה. אפשר לקבוע קוד חדש בגיבוי וענן'), 500); }
+      else if (lsGet(PIN_KEY, null) && sessionStorage.getItem(UNLOCK_KEY) !== '1') setLocked(true);
       setPrefsReady(true);
     });
   }, [user?.uid]);
@@ -1329,7 +1351,7 @@ function App() {
 
         {cur === 'settings' && (
           <SettingsView key={storeTick} user={user} flash={flash} books={books || []} server={server}
-                        onServer={() => fnStatus().then(setServer)}
+                        onServer={() => serverStatus(true).then(setServer)}
                         onRestored={() => { setDatas({}); refreshBooks(); }}
                         onStoreLogin={() => setStoreLogin(true)} onStoreChanged={reloadLinked} />
         )}
@@ -1458,13 +1480,14 @@ function PinCard({ flash }) {
   };
   return (
     <div data-tour="set-pin" className="mg-card">
-      <h3 style={{ marginTop: 0 }}>נעילה במכשיר הזה</h3>
-      <p style={{ marginTop: 0, fontSize: 14 }}>קוד שנדרש כדי לפתוח את המערכת במחשב הזה, למשל במחשב של הקליניקה. אחרי 15 דקות בלי פעילות, המערכת ננעלת שוב.</p>
+      <h3 style={{ marginTop: 0 }}>נעילה בקוד</h3>
+      <p style={{ marginTop: 0, fontSize: 14 }}>קוד שנדרש כדי לפתוח את המערכת{cloud ? ', אותו קוד בכל המכשירים שלך' : ' במחשב הזה'}. אחרי 15 דקות בלי פעילות, המערכת ננעלת שוב.</p>
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="mg-btn" onClick={set}>{has ? 'החלף קוד' : 'הפעל נעילה'}</button>
-        {has && <button className="mg-btn ghost" onClick={() => { if (window.confirm('לבטל את הנעילה במכשיר הזה?')) { localStorage.removeItem(PIN_KEY); setHas(false); flash('הנעילה בוטלה'); } }}>בטל נעילה</button>}
+        {has && <button className="mg-btn ghost" onClick={() => { if (window.confirm('לבטל את הנעילה בכל המכשירים?')) { lsDel(PIN_KEY); setHas(false); flash('הנעילה בוטלה'); } }}>בטל נעילה</button>}
       </div>
-      <div className="mg-note" style={{ marginTop: 10 }}>הקוד נשמר רק במכשיר הזה. אם שכחת אותו: מוחקים את נתוני האתר בדפדפן. בענן הנתונים לא נפגעים; בעבודה בלי ענן, קודם גיבוי.</div>
+      <div className="mg-note" style={{ marginTop: 10 }}>{cloud ? 'שכחת את הקוד? במסך הנעילה: "שכחתי את הקוד", ונכנסים שוב עם האימייל והסיסמה. הנעילה מתבטלת, ואפשר לקבוע קוד חדש.'
+        : 'הקוד נשמר רק במכשיר הזה. אם שכחת אותו: מוחקים את נתוני האתר בדפדפן (בעבודה בלי ענן, קודם גיבוי).'}</div>
     </div>
   );
 }
@@ -1530,6 +1553,35 @@ function ItaCard({ server, books, user, flash }) {
           <div className="mg-note" style={{ marginTop: 10 }}>החיבור נעשה בכניסה שלך לאתר רשות המסים, ותקף שלושה חודשים. אחר כך מתחברים מחדש.</div>
         </>
       )}
+    </div>
+  );
+}
+
+/* Linking the store once for every device: the server signs in with these
+   details a single time and keeps only the token it gets back. */
+function StoreLinkForm({ flash, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!open) return <div style={{ marginTop: 12 }}><button className="mg-btn ghost sm" onClick={() => setOpen(true)}>🔗 חיבור קבוע לכל המכשירים</button></div>;
+  const go = async () => {
+    setBusy(true);
+    try { const r = await fnCall({ action: 'store-link', email, password: pw }); flash(`החנות מחוברת בכל המכשירים (${r.email})`); setPw(''); setOpen(false); onDone(); }
+    catch (e) { flash(/INVALID|EMAIL|PASSWORD|login/i.test(e.message) ? 'אימייל או סיסמה של החנות שגויים' : e.message === 'set ALLOWED_EMAILS first' ? 'צריך קודם להגדיר ALLOWED_EMAILS ב-Netlify' : 'החיבור נכשל · ' + e.message); }
+    setBusy(false);
+  };
+  return (
+    <div className="mg-note" style={{ marginTop: 12 }}>
+      <b>חיבור קבוע:</b> המשתמש של קונסולת החנות. הסיסמה משמשת פעם אחת לכניסה ולא נשמרת; השרת שומר רק אישור כניסה, וכל מכשיר קורא את החנות דרכו.
+      <div style={{ ...grid, marginTop: 8 }}>
+        <Field label="אימייל בחנות"><input dir="ltr" value={email} onChange={e => setEmail(e.target.value)} /></Field>
+        <Field label="סיסמה בחנות"><input dir="ltr" type="password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && email && pw && go()} /></Field>
+      </div>
+      <div style={{ ...row, marginTop: 8 }}>
+        <button className="mg-btn sm" disabled={busy || !email || !pw} onClick={go}>{busy ? 'מתחבר…' : 'חבר לכל המכשירים'}</button>
+        <button className="mg-btn ghost sm" onClick={() => setOpen(false)}>ביטול</button>
+      </div>
     </div>
   );
 }
@@ -1774,11 +1826,18 @@ function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreCha
           ) : (
             <>
               <p style={{ marginTop: 0 }}>מקושרים: {linked.map(b => <b key={b.id}>{b.name} (<span dir="ltr">{b.tenant}</span>) </b>)}</p>
-              <p>{storeEmail === undefined ? 'בודק…' : storeEmail ? <>מחובר לחנות כ-<b dir="ltr">{storeEmail}</b></> : 'לא מחובר לחנות במכשיר הזה.'}</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button className="mg-btn" onClick={onStoreLogin}>{storeEmail ? 'החלף משתמש' : 'התחבר לחנות'}</button>
-                {storeEmail && <button className="mg-btn ghost" onClick={async () => { await signOut(store().auth); setStoreEmail(null); onStoreChanged(); flash('התנתקת מהחנות'); }}>התנתק מהחנות</button>}
-              </div>
+              {server?.store?.linked ? <>
+                <p><span className="mg-chip ok">מחובר בכל המכשירים</span> דרך השרת, כ-<b dir="ltr">{server.store.email}</b>. אין צורך להתחבר לחנות בכל מכשיר.</p>
+                <button className="mg-btn ghost" onClick={async () => { if (!window.confirm('לנתק את החיבור הקבוע לחנות? כל מכשיר יצטרך להתחבר בעצמו.')) return;
+                  try { await fnCall({ action: 'store-link', unlink: true }); onServer?.(); onStoreChanged(); flash('החיבור הקבוע נותק'); } catch (e) { flash('הניתוק נכשל · ' + e.message); } }}>נתק חיבור קבוע</button>
+              </> : <>
+                <p>{storeEmail === undefined ? 'בודק…' : storeEmail ? <>מחובר לחנות כ-<b dir="ltr">{storeEmail}</b>, במכשיר הזה בלבד.</> : 'לא מחובר לחנות במכשיר הזה.'}</p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="mg-btn" onClick={onStoreLogin}>{storeEmail ? 'החלף משתמש' : 'התחבר לחנות'}</button>
+                  {storeEmail && <button className="mg-btn ghost" onClick={async () => { await signOut(store().auth); setStoreEmail(null); onStoreChanged(); flash('התנתקת מהחנות'); }}>התנתק מהחנות</button>}
+                </div>
+                {server && cloud && <StoreLinkForm flash={flash} onDone={() => { onServer?.(); setTimeout(onStoreChanged, 400); }} />}
+              </>}
             </>
           )}
           <div className="mg-note" style={{ marginTop: 12 }}>קריאה בלבד: הזמנות ששולמו ומספרי חשבוניות. המערכת לא כותבת לחנות דבר.</div>
@@ -2097,7 +2156,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       </div>
 
       {data.storeLogin && <div className="mg-note warn" style={{ marginBottom: 12 }}>
-        העסק מקושר לחנות <b dir="ltr">{book.tenant}</b>. כדי למשוך ממנה את ההזמנות צריך להתחבר אליה פעם אחת במכשיר הזה.{' '}
+        העסק מקושר לחנות <b dir="ltr">{book.tenant}</b>. כדי למשוך ממנה את ההזמנות צריך להתחבר אליה במכשיר הזה, או פעם אחת לכל המכשירים (גיבוי וענן ← חיבור לחנות ← חיבור קבוע).{' '}
         <button className="mg-btn sm" onClick={onStoreLogin}>התחבר לחנות</button></div>}
       {data.storeErr && <div className="mg-note bad" style={{ marginBottom: 12 }}>{data.storeErr}{' '}
         <button className="mg-linkish" onClick={onStoreLogin}>התחבר עם משתמש אחר</button></div>}
@@ -3989,8 +4048,10 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
     if (!book.tenant) return;
     (async () => {
       try {
-        const u = await withTimeout(storeUser(), 10000);
-        if (!u) { setStoreCust({ login: true }); return; }
+        if (!(await storeViaServer())) {
+          const u = await withTimeout(storeUser(), 10000);
+          if (!u) { setStoreCust({ login: true }); return; }
+        }
         const rows = await withTimeout(storeRead(book.tenant, 'customers'), 25000);
         setStoreCust({ rows: rows.map(r => {
           const [street, ...rest] = String(r.address || '').split(',');
