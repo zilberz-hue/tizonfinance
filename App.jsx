@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.19.1';
+const VERSION = '1.19.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -990,6 +990,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.19.2', date: '30.09.26', items: ['מהירות: רשימות ארוכות (מסמכים, הכנסות, הוצאות, לקוחות) מציגות את 100 החדשים ו"הצג עוד". המסכים נפתחים מיד גם עם אלפי מסמכים היסטוריים. הסכומים, החיפוש והייצוא ממשיכים לכלול הכול.'] },
   { v: '1.19.1', date: '30.09.26', items: ['נייד: תיקון מסך שזז הצידה (כפתור ארוך בלשונית הייבוא). מעכשיו שום רכיב לא יכול לדחוף את הדף הצידה.'] },
   { v: '1.19.0', date: '30.09.26', items: [
     'חשבוניות ספקים מ-Gmail: סקריפט קטן בחשבון Google שלך שולח לכאן כל שעה חשבוניות וקבלות שמגיעות במייל. הן ממתינות בלשונית ההוצאות.',
@@ -2602,6 +2603,20 @@ function Dash({ totals, rate, alerts, onSub, linked }) {
 }
 
 /* ------------------------------------------------------------------ הכנסות */
+/* Long lists show the first rows and more on request: drawing thousands of
+   table rows at once is what makes a screen slow. Totals, filters and
+   exports always use the whole list. */
+function useLimit(deps, step = 100) {
+  const [n, setN] = useState(step);
+  useEffect(() => setN(step), deps);
+  return [n, () => setN(x => x + step * 2)];
+}
+function ShowMore({ n, total, onMore, cols = 9 }) {
+  if (total <= n) return null;
+  return <tr className="showmore"><td colSpan={cols} style={{ textAlign: 'center', padding: 10 }}>
+    <button className="mg-btn ghost sm" onClick={onMore}>הצג עוד · מוצגות {n} מתוך {total}</button></td></tr>;
+}
+
 function IncomeList({ income, linked, onEdit, onDel }) {
   const [month, setMonth] = useState('');
   const [src, setSrc] = useState('all');
@@ -2610,6 +2625,7 @@ function IncomeList({ income, linked, onEdit, onDel }) {
     && (src === 'all' || (src === 'shop' ? i.src === 'shop' : i.src !== 'shop'))
     && (!q || (i.desc + ' ' + (i.docNo || '') + ' ' + (i.customer || '')).includes(q.trim())));
   const sum = list.reduce((a, i) => a + i.gross, 0), vat = list.reduce((a, i) => a + i.vat, 0);
+  const [lim, more] = useLimit([month, src, q]);
   return (
     <>
       <div data-tour="inc-filters" style={{ ...row, marginBottom: 12 }}>
@@ -2628,7 +2644,7 @@ function IncomeList({ income, linked, onEdit, onDel }) {
       <div data-tour="inc-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>תאריך</th><th>תיאור</th><th>קטגוריה</th><th>תשלום</th><th>מסמך</th><th>לפני מע״מ</th><th>מע״מ</th><th>סה״כ</th><th></th></tr></thead>
         <tbody>
-          {list.map(i => (
+          {list.slice(0, lim).map(i => (
             <tr key={i.id}>
               <td>{heDate(i.date)}</td>
               <td>{i.desc}{i.customer ? <span style={{ color: 'var(--muted)' }}> · {i.customer}</span> : null}
@@ -2643,6 +2659,7 @@ function IncomeList({ income, linked, onEdit, onDel }) {
             </tr>
           ))}
           {!list.length && <tr><td colSpan={9}><div className="mg-empty">אין הכנסות בסינון הזה.</div></td></tr>}
+          <ShowMore n={lim} total={list.length} onMore={more} cols={9} />
         </tbody>
       </table></div>
       <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 10, gap: 18, fontSize: 14 }}>
@@ -2896,6 +2913,7 @@ function ExpenseList({ outgo, supName, onEdit, onDel, onFile }) {
   const [cat, setCat] = useState('');
   const list = outgo.filter(e => (!month || (e.date || '').startsWith(month)) && (!cat || e.cat === cat));
   const sum = list.reduce((a, e) => a + e.gross, 0), vat = list.reduce((a, e) => a + e.vat, 0);
+  const [lim, more] = useLimit([month, cat]);
   return (
     <>
       <div data-tour="exp-filters" style={{ ...row, marginBottom: 12 }}>
@@ -2910,7 +2928,7 @@ function ExpenseList({ outgo, supName, onEdit, onDel, onFile }) {
       <div data-tour="exp-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>תאריך</th><th>ספק</th><th>תיאור</th><th>קטגוריה</th><th>מסמך</th><th>לפני מע״מ</th><th>מע״מ</th><th>סה״כ</th><th></th></tr></thead>
         <tbody>
-          {list.map(e => (
+          {list.slice(0, lim).map(e => (
             <tr key={e.id}>
               <td>{heDate(e.date)}</td>
               <td>{supName(e.supplierId) || e.supplierName || '—'}</td>
@@ -2925,6 +2943,7 @@ function ExpenseList({ outgo, supName, onEdit, onDel, onFile }) {
             </tr>
           ))}
           {!list.length && <tr><td colSpan={9}><div className="mg-empty">אין הוצאות בסינון הזה.</div></td></tr>}
+          <ShowMore n={lim} total={list.length} onMore={more} cols={9} />
         </tbody>
       </table></div>
       <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 10, gap: 18, fontSize: 14 }}>
@@ -3572,6 +3591,7 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
     else window.location.href = `mailto:${d.customer?.email || ''}?subject=${encodeURIComponent(docTitle(d))}&body=${encodeURIComponent(text + '\n\n(המסמך מצורף כ-PDF)')}`;
   };
 
+  const [lim, more] = useLimit([month, type, src]);
   return (
     <>
       {series === 'test'
@@ -3598,7 +3618,7 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
       <div data-tour="docs-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>מסמך</th><th>תאריך</th><th>לקוח</th><th>סה״כ</th><th>מצב</th><th></th></tr></thead>
         <tbody>
-          {list.map(d => {
+          {list.slice(0, lim).map(d => {
             const open = d.type === '305' ? openOf(d, docs) : 0;
             const credited = docs.some(x => x.refId === d.id && x.type === '330');
             return (
@@ -3637,6 +3657,7 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
             );
           })}
           {!list.length && <tr><td colSpan={6}><div className="mg-empty">עוד לא הופקו מסמכים.</div></td></tr>}
+          <ShowMore n={lim} total={list.length} onMore={more} cols={9} />
         </tbody>
       </table></div>
       <div className="mg-note" style={{ marginTop: 12 }}>
@@ -4979,6 +5000,7 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
     && (!nq || [c.name, c.email, c.phone, c.taxId, c.city].some(v => String(v || '').toLowerCase().includes(nq))))
     .sort((a, b) => (activity[b.id]?.last || '').localeCompare(activity[a.id]?.last || '') || (a.name || '').localeCompare(b.name || '', 'he'));
 
+  const [lim, more] = useLimit([q, src]);
   return (
     <>
       <div data-tour="cust-stats" className="mg-stats" style={{ marginBottom: 14 }}>
@@ -5031,7 +5053,7 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
       <div data-tour="cust-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>שם</th><th>ח.פ. / ת.ז.</th><th>טלפון</th><th>אימייל</th><th>עיר</th><th>מקור</th><th>מחזור</th><th>אחרון</th></tr></thead>
         <tbody>
-          {shown.slice(0, 500).map(c => (
+          {shown.slice(0, lim).map(c => (
             <tr key={c.id} onClick={() => setCard(c)} style={{ cursor: 'pointer' }}>
               <td><b>{c.name}</b></td>
               <td dir="ltr" style={{ textAlign: 'right' }}>{c.taxId || '—'}</td>
@@ -5043,6 +5065,7 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
             </tr>
           ))}
           {!shown.length && <tr><td colSpan={8}><div className="mg-empty">{list.length ? 'אין לקוחות בסינון הזה.' : 'עוד אין לקוחות. אפשר לייבא מ-iCount, לסנכרן מהחנות, או להוסיף ידנית.'}</div></td></tr>}
+          <ShowMore n={lim} total={shown.length} onMore={more} cols={8} />
         </tbody>
       </table></div>
       {shown.length > 500 && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>מוצגים 500 הראשונים. חיפוש מצמצם.</div>}
