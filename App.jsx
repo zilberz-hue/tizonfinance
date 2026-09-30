@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.17.0';
+const VERSION = '1.18.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -582,6 +582,16 @@ async function loadBook(book) {
 
 /* ================================================================== styles */
 const CSS = `
+.tz-pick input{padding-inline-end:34px}
+.tz-pick-x{position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);border:0;background:transparent;font-size:20px;line-height:1;color:var(--muted);cursor:pointer;padding:4px 6px}
+.tz-pick-list{position:absolute;z-index:60;inset-inline:0;top:calc(100% + 4px);background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.14);max-height:320px;overflow:auto}
+.tz-pick-row{padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line)}
+.tz-pick-row:last-child{border-bottom:0}
+.tz-pick-row.on{background:rgba(79,143,53,.10)}
+.tz-pick-row .t{font-weight:600}
+.tz-pick-row .s{font-size:.85em;color:var(--muted);direction:rtl;unicode-bidi:plaintext}
+.tz-pick-row.empty{color:var(--muted);cursor:default;font-size:.92em}
+@media (max-width:820px){.tz-pick-row{padding:13px 14px}.tz-pick-list{max-height:46vh}}
 :root{--bg:#f7f3ea;--card:#fff;--ink:#2b2a26;--muted:#6b6557;--line:#e8dfcc;--green:#2f5d27;--green2:#4f8f35;
   --gold:#a8783f;--bronze1:#8a6331;--bronze2:#c4a36e;--warn:#a2680f;--bad:#b3261e;--soft:#f1ece2}
 *{box-sizing:border-box}
@@ -943,6 +953,11 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.18.0', date: '30.09.26', items: [
+    'כפתור 🧾 בראש כל עסק: הפקת חשבונית מס קבלה בלחיצה אחת.',
+    'בחירת לקוח בחיפוש: לפי שם, טלפון, אימייל או ח.פ. (גם שמות קודמים של לקוח ממוזג). הלקוחות האחרונים מופיעים ראשונים, והפרטים מתמלאים לבד.',
+    'הוספת פריטים בחיפוש: מקלידים חלק מהשם או הקוד ולוחצים. לחיצה נוספת מוסיפה כמות. הנמכרים ביותר ראשונים.',
+    'בטופס "הכנסה חדשה" יש מעבר ישיר להפקת מסמך ללקוח.'] },
   { v: '1.17.0', date: '30.09.26', items: [
     'איתור כפילויות בלקוחות: מוצא את אותו אדם גם בשם בסדר הפוך, בשם מקוצר, עם שגיאת כתיב או בשם פרטי בלבד, ומציע קבוצות למיזוג. אתה בוחר מי נשאר ומי נכלל.',
     'לקוח ממוזג שומר את השמות האחרים, כך שכל המסמכים וההזמנות שלהם נספרים אליו בכרטסת ובמחזור.',
@@ -1059,6 +1074,7 @@ const TOURS = {
   ],
   customers: [
     { t: 'cust-stats', title: 'הלקוחות', text: 'כמה לקוחות, כמה עם אימייל וטלפון, וכמה פעילים השנה.', since: '1.5.0' },
+    { t: 'quick-doc', title: 'הפקה מהירה', text: 'מכל מקום בעסק: לחיצה כאן פותחת מסמך חדש (חשבונית מס קבלה, או קבלה לעוסק פטור).', since: '1.18.0' },
     { t: 'cust-dups', title: 'איתור כפילויות', text: 'מוצא את אותו לקוח שנרשם כמה פעמים: שם בסדר הפוך, שם מקוצר, שגיאת כתיב, שם פרטי בלבד, או אותו טלפון / אימייל. אתה בוחר מי נשאר ומי נכלל, והמסמכים של כולם נספרים אליו.', since: '1.17.0' },
     { t: 'cust-store', title: 'סנכרון עם החנות', text: 'לקוחות החנות נקראים לכאן ומתמזגים בלחיצה, אחרי שרואים מה יקרה: חדשים מתווספים, ולקיימים נוספים רק פרטים חסרים. לחנות נוספים רק לקוחות חדשים, בלחיצה, ואף פרט קיים שם לא משתנה.', since: '1.6.0' },
     { t: 'cust-tools', title: 'חיפוש, הוספה וייבוא', text: 'מחפשים לפי שם, טלפון, אימייל או ח.פ. אפשר להוסיף לקוח, לייבא מ-iCount ולייצא לאקסל.', since: '1.5.0', roles: WRITERS },
@@ -2256,6 +2272,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
+  const [quickDoc, setQuickDoc] = useState(0);
   useEffect(() => { onTab?.(sub); }, [sub]);
   /* On a narrow screen the tabs scroll sideways: keep the chosen one in view. */
   useEffect(() => { document.querySelector('.book-tabs .mg-tab.on')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }, [sub]);
@@ -2386,6 +2403,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         <div><h2>{book.name}</h2>
           <div className="sub">{DEALERS[book.dealerType]}{book.taxId ? ' · ' + book.taxId : ''}{rate > 0 ? ` · מע״מ ${rate}%` : ''}
             {book.tenant ? ` · מקושר לחנות ${book.tenant}` : ''}</div></div>
+        {!ro && allowedTypes(book).length > 0 && <button data-tour="quick-doc" className="mg-btn" style={{ background: '#fff', color: 'var(--green)', fontWeight: 700 }}
+          onClick={() => { setSub('docs'); setQuickDoc(Date.now()); }}>🧾 {DOC_TYPES[allowedTypes(book)[0]].label}</button>}
         {role === 'owner' && <>
           <button className="mg-btn ghost" onClick={() => setEdit({ kind: 'expense', rec: null })}>＋ הוצאה</button>
           <button className="mg-btn ghost" onClick={() => setEdit({ kind: 'income', rec: null })}>＋ הכנסה</button>
@@ -2425,7 +2444,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         onBulk={async (recs) => { let ok = 0; for (const r of recs) if (await save('banktx', r)) ok++; return ok; }} />}
       {sub === 'vat' && <VatTab totals={tot} rate={rate} book={book} />}
       {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} />}
-      {sub === 'docs' && <DocsTab book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
+      {sub === 'docs' && <DocsTab quick={quickDoc} book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
                                   onLog={log} server={server} ro={ro} flash={flash}
                                   payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh} />}
@@ -2438,6 +2457,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       {sub === 'import' && <ImportTab book={book} data={data} cols={cols} flash={flash} onDone={onReload} onDeleteBook={onDeleteBook} onLog={log} server={server} />}
 
       {edit?.kind === 'income' && <IncomeForm rec={edit.rec} rate={rate} onClose={() => setEdit(null)}
+        docLabel={!ro && allowedTypes(book).length ? DOC_TYPES[allowedTypes(book)[0]].label : ''}
+        onDoc={() => { setEdit(null); setSub('docs'); setQuickDoc(Date.now()); }}
         onSave={async (r) => { if (await save('incomes', r)) { flash('ההכנסה נשמרה'); setEdit(null); } }} />}
       {edit?.kind === 'expense' && <ExpenseForm rec={edit.rec} rate={rate} suppliers={suppliers} onClose={() => setEdit(null)}
         onNewSupplier={(s) => save('suppliers', s)}
@@ -2572,7 +2593,7 @@ function IncomeList({ income, linked, onEdit, onDel }) {
   );
 }
 
-function IncomeForm({ rec, rate, onSave, onClose }) {
+function IncomeForm({ rec, rate, onSave, onClose, docLabel = '', onDoc }) {
   const [f, setF] = useState(() => ({
     id: uid('inc'), date: todayIso(), desc: '', cat: INC_CATS[0], pay: PAY_METHODS[0],
     gross: '', noVat: false, docNo: '', customer: '', ...(rec || {})
@@ -2586,6 +2607,9 @@ function IncomeForm({ rec, rate, onSave, onClose }) {
          footer={<><button className="mg-btn" disabled={!ok}
                            onClick={() => onSave({ ...f, src: f.src === 'erp' ? 'erp' : 'manual', gross: g, vat, desc: String(f.desc).trim(), review: false })}>שמור</button>
                    <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      {!rec && docLabel && onDoc && <div className="mg-note" style={{ marginBottom: 12 }}>
+        כאן רושמים הכנסה שכבר יש לה מסמך ממקום אחר. ללקוח שצריך לקבל מסמך עכשיו:{' '}
+        <button className="mg-btn sm" onClick={onDoc}>🧾 הפק {docLabel}</button></div>}
       <div style={grid}>
         <Field label="תאריך"><input type="date" value={f.date} onChange={e => set('date', e.target.value)} /></Field>
         <Field label="תיאור"><input value={f.desc} onChange={e => set('desc', e.target.value)} placeholder="טיפול דיקור" /></Field>
@@ -3217,7 +3241,7 @@ function printHTML(html) {
 const waPhone = (p) => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('0')) d = '972' + d.slice(1); return d; };
 
 /* ------------------------------------------------------------ the list */
-function DocsTab({ book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
+function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
                   payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh }) {
   const [busyId, setBusyId] = useState('');
   const [payForm, setPayForm] = useState(false);
@@ -3226,6 +3250,8 @@ function DocsTab({ book, docs, customers = [], items = [], onIssue, onPrinted, o
   const [type, setType] = useState('');
   const [src, setSrc] = useState('');
   const series = docSeries(book);
+  /* The quick button at the top of the business opens a new document here at once. */
+  useEffect(() => { if (quick && !ro && allowedTypes(book).length) setForm({ type: allowedTypes(book)[0] }); }, [quick]);
   const hasImp = docs.some(isImported);
   const list = docs.filter(d => (!month || d.date.startsWith(month)) && (!type || d.type === type)
                               && (!src || (src === 'import' ? isImported(d) : !isImported(d))))
@@ -3357,6 +3383,69 @@ function DocsTab({ book, docs, customers = [], items = [], onIssue, onPrinted, o
 }
 
 /* ------------------------------------------------------------ issuing */
+/* A search box with its own list, for choosing a customer or an item by any
+   part of the name, a phone, an email, an id or a code. Works the same on a
+   phone (big rows, no browser datalist) and with thousands of entries: only
+   the best few are shown. Typing freely is always allowed. */
+const searchNorm = (v) => normName(v).replace(/[םןץףך]/g, ch => HEB_FINAL[ch]);
+function searchRank(hay, q) {
+  if (!q) return 0;
+  const words = q.split(' ').filter(Boolean); let score = 0;
+  for (const w of words) {
+    const d = w.replace(/\D/g, '');
+    let best = 0;
+    for (const h of hay) {
+      if (!h) continue;
+      if (h === w) best = Math.max(best, 5);
+      else if (h.startsWith(w)) best = Math.max(best, 4);
+      else if (h.includes(' ' + w)) best = Math.max(best, 3);
+      else if (h.includes(w)) best = Math.max(best, 2);
+      else if (d.length >= 3 && h.replace(/\D/g, '').includes(d)) best = Math.max(best, 2);
+    }
+    if (!best) return -1;
+    score += best;
+  }
+  return score;
+}
+function SearchPick({ value, onType, options, onPick, placeholder, disabled, renderSub, max = 8, autoFocus, emptyHint, inputProps = {} }) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const q = searchNorm(value);
+  const shown = useMemo(() => {
+    if (!open) return [];
+    if (!q) return options.slice(0, max);
+    const r = [];
+    for (const o of options) { const sc = searchRank(o.hay, q); if (sc >= 0) r.push([sc, o]); }
+    return r.sort((a, b) => b[0] - a[0] || (b[1].rank || 0) - (a[1].rank || 0)).slice(0, max).map(x => x[1]);
+  }, [open, q, options, max]);
+  useEffect(() => setHi(0), [q]);
+  const pick = (o) => { onPick(o); setOpen(false); };
+  return (
+    <div className="tz-pick" style={{ position: 'relative' }}>
+      <input value={value} disabled={disabled} placeholder={placeholder} autoFocus={autoFocus} autoComplete="off" {...inputProps}
+             onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 180)}
+             onChange={e => { onType(e.target.value); setOpen(true); }}
+             onKeyDown={e => {
+               if (!shown.length) return;
+               if (e.key === 'ArrowDown') { e.preventDefault(); setHi(h => Math.min(h + 1, shown.length - 1)); }
+               else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(h - 1, 0)); }
+               else if (e.key === 'Enter') { e.preventDefault(); pick(shown[hi]); }
+               else if (e.key === 'Escape') setOpen(false);
+             }} />
+      {value && !disabled && <button type="button" className="tz-pick-x" aria-label="נקה" onMouseDown={e => e.preventDefault()} onClick={() => { onType(''); setOpen(true); }}>×</button>}
+      {open && (shown.length > 0 || (q && emptyHint)) && (
+        <div className="tz-pick-list" role="listbox">
+          {shown.map((o, i) => (
+            <div key={o.key} role="option" aria-selected={i === hi} className={'tz-pick-row' + (i === hi ? ' on' : '')}
+                 onMouseDown={e => e.preventDefault()} onClick={() => pick(o)} onMouseEnter={() => setHi(i)}>
+              <div className="t">{o.label}</div>{renderSub && <div className="s">{renderSub(o)}</div>}
+            </div>))}
+          {!shown.length && <div className="tz-pick-row empty">{emptyHint}</div>}
+        </div>)}
+    </div>
+  );
+}
+
 function DocForm({ book, docs, customers = [], items = [], preset, series, onIssue, onClose, itaReady = false }) {
   const rate = rateOf(book);
   const ref = preset.ref || null;
@@ -3378,16 +3467,31 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  /* Customers issued to before, to pick instead of typing. */
-  const known = useMemo(() => {
-    const m = {}; docs.forEach(d => { if (d.customer?.name) m[d.customer.name] = d.customer; });
-    customers.forEach(c => { if (c.name) m[c.name] = { name: c.name, taxId: c.taxId || '', address: [c.address, c.city].filter(Boolean).join(', '), phone: c.phone || '', email: c.email || '' }; });
-    return m;
+  /* Customers to search: the customer list, and anyone issued to before who
+     is not on it. The most recently served come first. */
+  const custOpts = useMemo(() => {
+    const last = {}; docs.forEach(d => { const k = normName(d.customer?.name); if (k && (d.date || '') > (last[k] || '')) last[k] = d.date; });
+    const out = []; const idx = custIndex([]);
+    customers.filter(c => c.name).forEach(c => { out.push({ key: c.id, label: c.name, c,
+      val: { name: c.name, taxId: c.taxId || '', address: [c.address, c.city].filter(Boolean).join(', '), phone: c.phone || '', email: c.email || '' } }); idx.add(c); });
+    const seen = new Set();
+    docs.forEach(d => { const c = d.customer; const k = normName(c?.name);
+      if (!k || seen.has(k)) return; seen.add(k); if (idx.find(c).length) return;
+      out.push({ key: 'doc:' + k, label: c.name, c, val: { name: c.name, taxId: c.taxId || '', address: c.address || '', phone: c.phone || '', email: c.email || '' } }); });
+    out.forEach(o => { o.hay = custIdents(o.c).flatMap(x => [searchNorm(x.name), String(x.phone || '').replace(/\D/g, ''), normEmail(x.email), String(x.taxId || '').replace(/\D/g, '')]);
+      o.rank = Math.max(...custIdents(o.c).map(x => Number(String(last[normName(x.name)] || '').replace(/\D/g, '')) || 0)); });
+    return out.sort((a, b) => b.rank - a.rank);
   }, [docs, customers]);
-  /* Picking a known customer fills their details; typing past one clears
-     them, so one customer's tax id never ends up on another's document. */
-  const pickName = (name) => setCust(c => known[name] ? { ...known[name] }
-    : known[c.name] ? { name, taxId: '', address: '', phone: '', email: '' } : { ...c, name });
+  const [picked, setPicked] = useState(false);
+  /* Picking a customer fills their details; typing past one clears them, so
+     one customer's tax id never ends up on another's document. */
+  const typeName = (name) => {
+    /* A name typed in full that belongs to exactly one customer counts as picking them. */
+    const n = searchNorm(name), hit = n ? custOpts.filter(o => searchNorm(o.label) === n) : [];
+    if (hit.length === 1) { setCust({ ...hit[0].val, name }); setPicked(true); return; }
+    setCust(c => picked ? { name, taxId: '', address: '', phone: '', email: '' } : { ...c, name }); setPicked(false);
+  };
+  const pickCust = (o) => { setCust({ ...o.val }); setPicked(true); };
 
   const total = T.lines ? tot.total : paySum;
   const needAlloc = ['305', '320'].includes(type) && vatRate > 0 && digitsOf(cust.taxId).length === 9 && (tot?.net || 0) > ALLOC_THRESHOLD;
@@ -3434,10 +3538,28 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   const setLine = (i, k, v) => setLines(ls => ls.map((l, j) => j === i ? { ...l, [k]: v } : l));
   /* Picking an item fills its price, converted to this document's VAT setting. */
   const activeItems = items.filter(x => x.active !== false);
-  const pickItem = (i, v) => {
-    const it = activeItems.find(x => x.name === v);
-    setLines(ls => ls.map((l, j) => j !== i ? l : it ? { ...l, desc: it.name, price: itemPrice(it, incl, vatRate), itemId: it.id, sku: it.sku || '' }
-                                                     : { ...l, desc: v, itemId: l.desc === v ? l.itemId : '' }));
+  const itemOpts = useMemo(() => {
+    const used = {}; docs.forEach(d => (d.lines || []).forEach(l => { if (l.itemId) used[l.itemId] = (used[l.itemId] || 0) + 1; }));
+    return activeItems.map(it => ({ key: it.id, label: it.name, it, rank: used[it.id] || 0,
+      hay: [searchNorm(it.name), searchNorm(it.sku), searchNorm(it.cat || it.category), searchNorm(it.desc)] })).sort((a, b) => b.rank - a.rank);
+  }, [items, docs]);
+  const typeItem = (i, v) => {
+    const n = searchNorm(v), hit = n ? itemOpts.filter(o => searchNorm(o.label) === n) : [];
+    if (hit.length === 1) return pickItem(i, hit[0]);
+    setLines(ls => ls.map((l, j) => j !== i ? l : { ...l, desc: v, itemId: '', sku: '' }));
+  };
+  const pickItem = (i, o) => setLines(ls => ls.map((l, j) => j !== i ? l : { ...l, desc: o.it.name, price: itemPrice(o.it, incl, vatRate), itemId: o.it.id, sku: o.it.sku || '' }));
+  /* The quick way: search once, tap, and the item is on the document (again = one more). */
+  const [quickQ, setQuickQ] = useState('');
+  const addItem = (o) => {
+    setLines(ls => {
+      const j = ls.findIndex(l => l.itemId === o.it.id);
+      if (j >= 0) return ls.map((l, k) => k === j ? { ...l, qty: (Number(l.qty) || 0) + 1 } : l);
+      const row = { desc: o.it.name, qty: 1, price: itemPrice(o.it, incl, vatRate), itemId: o.it.id, sku: o.it.sku || '' };
+      const blank = ls.findIndex(l => !String(l.desc).trim() && !Number(l.price));
+      return blank >= 0 ? ls.map((l, k) => k === blank ? row : l) : [...ls, row];
+    });
+    setQuickQ('');
   };
   const setPay = (i, k, v) => setPays(ps => ps.map((p, j) => j === i ? { ...p, [k]: v } : p));
 
@@ -3450,8 +3572,11 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
         {!ref && <Field label="סוג מסמך"><select value={type} onChange={e => setType(e.target.value)}>
           {allowedTypes(book).filter(t => t !== '330').map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>}
         <Field label="תאריך"><input type="date" value={date} min={lastDate || undefined} onChange={e => setDate(e.target.value)} /></Field>
-        <Field label="שם הלקוח"><input list="tz-known" value={cust.name} onChange={e => pickName(e.target.value)} disabled={!!ref} />
-          <datalist id="tz-known">{Object.keys(known).map(n => <option key={n} value={n} />)}</datalist></Field>
+        <div data-tour="doc-cust" style={{ gridColumn: '1 / -1' }}><Field label="לקוח · חיפוש לפי שם, טלפון, אימייל או ח.פ.">
+          <SearchPick value={cust.name} onType={typeName} onPick={pickCust} options={custOpts} disabled={!!ref} autoFocus={!ref}
+                      placeholder="הקלד שם או טלפון…" emptyHint="לקוח חדש: המשך להקליד את השם ומלא את הפרטים למטה"
+                      renderSub={o => [o.val.phone, o.val.email, o.val.taxId && 'ח.פ. ' + o.val.taxId, o.val.address].filter(Boolean).join(' · ') || (o.key.startsWith('doc:') ? 'ממסמך קודם' : '')} />
+        </Field>{picked && <div style={{ fontSize: 13, color: 'var(--green)', marginTop: 4 }}>✓ לקוח קיים · הפרטים מולאו</div>}</div>
         <Field label="ח.פ. / ת.ז."><input dir="ltr" value={cust.taxId || ''} onChange={e => setCust(c => ({ ...c, taxId: e.target.value }))} disabled={!!ref} /></Field>
         <Field label="כתובת"><input value={cust.address || ''} onChange={e => setCust(c => ({ ...c, address: e.target.value }))} disabled={!!ref} /></Field>
         <Field label="טלפון"><input dir="ltr" value={cust.phone || ''} onChange={e => setCust(c => ({ ...c, phone: e.target.value }))} /></Field>
@@ -3460,18 +3585,23 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
 
       {T.lines && <>
         <h4 style={{ margin: '16px 0 6px' }}>פריטים</h4>
-        <div className="mg-tblwrap"><table className="mg-tbl">
+        {itemOpts.length > 0 && <div data-tour="doc-items" style={{ marginBottom: 10 }}><Field label="הוספת פריט · חיפוש לפי שם או קוד">
+          <SearchPick value={quickQ} onType={setQuickQ} onPick={addItem} options={itemOpts} placeholder="הקלד כדי לחפש פריט…" max={10}
+                      emptyHint="לא נמצא פריט. אפשר לכתוב תיאור חופשי בשורה למטה."
+                      renderSub={o => [fmt(itemPrice(o.it, incl, vatRate)), o.it.sku, o.rank ? `נמכר ${o.rank} פעמים` : ''].filter(Boolean).join(' · ')} />
+        </Field></div>}
+        <div className="mg-tblwrap" style={{ overflow: 'visible' }}><table className="mg-tbl">
           <thead><tr><th>תיאור</th><th style={{ width: 80 }}>כמות</th><th style={{ width: 120 }}>מחיר ליחידה</th><th style={{ width: 100 }}>סה״כ</th><th style={{ width: 40 }}></th></tr></thead>
           <tbody>{lines.map((l, i) => (
             <tr key={i}>
-              <td><input list={activeItems.length ? 'tz-items' : undefined} value={l.desc} onChange={e => pickItem(i, e.target.value)} placeholder={activeItems.length ? 'בחר פריט או הקלד' : 'טיפול דיקור'} /></td>
+              <td><SearchPick value={l.desc} onType={v => typeItem(i, v)} onPick={o => pickItem(i, o)} options={itemOpts} max={6}
+                              placeholder={itemOpts.length ? 'פריט או תיאור חופשי' : 'טיפול דיקור'} renderSub={o => fmt(itemPrice(o.it, incl, vatRate))} /></td>
               <td><input inputMode="decimal" value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} /></td>
               <td><input inputMode="decimal" value={l.price} onChange={e => setLine(i, 'price', e.target.value)} /></td>
               <td>{fmt((Number(l.qty) || 0) * (Number(l.price) || 0))}</td>
               <td>{lines.length > 1 && <button className="mg-btn ghost sm" onClick={() => setLines(ls => ls.filter((_, j) => j !== i))}>×</button>}</td>
             </tr>))}
           </tbody></table></div>
-        {activeItems.length > 0 && <datalist id="tz-items">{activeItems.map(x => <option key={x.id} value={x.name}>{fmt(itemPrice(x, incl, vatRate))}</option>)}</datalist>}
         <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
           <button className="mg-btn ghost sm" onClick={() => setLines(ls => [...ls, { desc: '', qty: 1, price: '' }])}>＋ שורה</button>
           {vatRate > 0 && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
