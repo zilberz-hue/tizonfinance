@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.19.3';
+const VERSION = '1.20.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1019,6 +1019,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.20.0', date: '30.09.26', items: [
+    'אחרי הפקת מסמך: מסך "הופק" עם שליחה ללקוח בלחיצה אחת. בנייד ה-PDF עצמו נשלח בוואטסאפ (או בכל אפליקציה). במייל נשלח עותק חתום, והכתובת כבר ממולאת. הדפסה, PDF ו"מסמך נוסף" באותו מקום.',
+    'ברשימת המסמכים בנייד: כפתור 📲 שתף ששולח את ה-PDF עצמו.'] },
   { v: '1.19.3', date: '30.09.26', items: [
     'תאריכים לפי שעון ישראל: מסמך שמופק אחרי חצות נרשם ביום ובחודש הנכונים (קודם, בין 00:00 ל-03:00 הוא נרשם ביום הקודם).',
     'מסמך שההפקה שלו נתקעה ונוסתה שוב לא יופק פעמיים.',
@@ -3585,11 +3588,43 @@ function printHTML(html) {
 const waPhone = (p) => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('0')) d = '972' + d.slice(1); return d; };
 
 /* ------------------------------------------------------------ the list */
+/* Right after issuing: what the customer gets, in one place. */
+function IssuedPanel({ d, book, busy, canShareFiles, canMail, onShare, onMail, onPrint, onPdf, onAnother, onClose }) {
+  const [to, setTo] = useState(d.customer?.email || '');
+  const [sent, setSent] = useState('');
+  return (
+    <Box title="המסמך הופק" onClose={onClose}
+         footer={<><button className="mg-btn" onClick={onAnother}>＋ מסמך נוסף</button><button className="mg-btn ghost" onClick={onClose}>סגור</button></>}>
+      <div data-tour="doc-issued">
+        <div style={{ textAlign: 'center', margin: '4px 0 16px' }}>
+          <div style={{ fontSize: 44, lineHeight: 1, color: 'var(--green2)', fontWeight: 800 }}>✓</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>{docTitle(d)}</div>
+          <div style={{ fontSize: 16, marginTop: 2 }}>{d.customer?.name} · <b>{fmt(d.total)}</b>{d.series === 'test' ? ' · ניסיון' : ''}</div>
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <button className="mg-btn" style={{ padding: '14px', fontSize: 17 }} disabled={busy} onClick={() => onShare(d)}>
+            {busy ? 'מכין PDF…' : canShareFiles ? '📲 שלח ללקוח (וואטסאפ ועוד)' : '📲 וואטסאפ + שמירת PDF'}</button>
+          {canMail && <div style={{ display: 'flex', gap: 8 }}>
+            <input dir="ltr" type="email" inputMode="email" value={to} onChange={e => setTo(e.target.value)} placeholder="אימייל הלקוח" style={{ flex: 1 }} />
+            <button className="mg-btn ghost" disabled={busy || !to.trim()} onClick={async () => { if (await onMail(d, to.trim())) setSent(to.trim()); }}>✉️ שלח חתום</button>
+          </div>}
+          {sent && <div style={{ color: 'var(--green)', fontWeight: 700, fontSize: 14 }}>✓ נשלח ל-{sent}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="mg-btn ghost" style={{ flex: 1 }} onClick={() => onPrint(d)}>🖨 הדפס</button>
+            <button className="mg-btn ghost" style={{ flex: 1 }} disabled={busy} onClick={() => onPdf(d)}>⬇ PDF</button>
+          </div>
+        </div>
+      </div>
+    </Box>
+  );
+}
+
 function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
                   payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh }) {
   const [busyId, setBusyId] = useState('');
   const [payForm, setPayForm] = useState(false);
   const [form, setForm] = useState(null);
+  const [done, setDone] = useState(null);
   const [month, setMonth] = useState('');
   const [type, setType] = useState('');
   const [src, setSrc] = useState('');
@@ -3610,25 +3645,48 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
   const canSign = !!(cloud && server?.sign);
   const canMail = !!(cloud && server?.sign && server?.mail);
   /* A PDF: signed when the certificate is set up, plain otherwise. */
+  /* The document as a PDF: signed when the certificate is set up. */
+  const makePdf = async (d) => {
+    const raw = await docPDF(book, d, isCopy(d));
+    let bytes = new Uint8Array(raw);
+    if (canSign) {
+      const r = await fnCall({ action: 'doc', pdf: b64(raw), title: docTitle(d), business: book.legalName || book.name, businessEmail: book.email || '' });
+      bytes = unb64(r.pdf);
+    }
+    onLog({ action: canSign ? 'sign' : 'pdf', docId: d.id, title: docTitle(d), series: d.series });
+    onPrinted(d, true);
+    return bytes;
+  };
   const pdf = async (d) => {
     setBusyId(d.id);
-    try {
-      const raw = await docPDF(book, d, isCopy(d));
-      if (canSign) {
-        const r = await fnCall({ action: 'doc', pdf: b64(raw), title: docTitle(d), business: book.legalName || book.name, businessEmail: book.email || '' });
-        saveBytes(pdfName(d), unb64(r.pdf), 'application/pdf');
-        onLog({ action: 'sign', docId: d.id, title: docTitle(d), series: d.series });
-      } else {
-        saveBytes(pdfName(d), new Uint8Array(raw), 'application/pdf');
-        onLog({ action: 'pdf', docId: d.id, title: docTitle(d), series: d.series });
-      }
-      onPrinted(d, true);
-    } catch (e) { flash('הפקת ה-PDF נכשלה · ' + (e.message || '')); }
+    try { saveBytes(pdfName(d), await makePdf(d), 'application/pdf'); }
+    catch (e) { flash('הפקת ה-PDF נכשלה · ' + (e.message || '')); }
     setBusyId('');
   };
-  const sendSigned = async (d) => {
-    const to = window.prompt('לאיזה אימייל לשלוח?', d.customer?.email || '');
-    if (!to) return;
+  /* On a phone: the PDF itself goes to WhatsApp (or anywhere) through the share sheet.
+     Where files cannot be shared, the PDF is saved and WhatsApp opens with the message. */
+  const shareMsg = (d) => `שלום ${d.customer?.name || ''},\nמצורפת ${docTitle(d)} על סך ${fmt(d.total)}.\nתודה, ${book.legalName || book.name}`;
+  const share = async (d) => {
+    setBusyId(d.id);
+    try {
+      const bytes = await makePdf(d);
+      const file = new File([bytes], pdfName(d), { type: 'application/pdf' });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: docTitle(d), text: shareMsg(d) }).catch(e => { if (e?.name !== 'AbortError') throw e; });
+      } else {
+        saveBytes(pdfName(d), bytes, 'application/pdf');
+        if (d.customer?.phone) window.open(`https://wa.me/${waPhone(d.customer.phone)}?text=${encodeURIComponent(shareMsg(d) + '\n(ה-PDF נשמר במחשב: גרור אותו לשיחה)')}`, '_blank');
+        else flash('ה-PDF נשמר. אפשר לצרף אותו לכל שיחה.');
+      }
+      onSent(d, 'share');
+    } catch (e) { flash('השיתוף נכשל · ' + (e.message || '')); }
+    setBusyId('');
+  };
+  const canShareFiles = typeof navigator !== 'undefined' && !!navigator.canShare && (() => { try { return navigator.canShare({ files: [new File(['x'], 'x.pdf', { type: 'application/pdf' })] }); } catch { return false; } })();
+  const sendSigned = async (d, toIn) => {
+    const to = toIn || window.prompt('לאיזה אימייל לשלוח?', d.customer?.email || '');
+    if (!to) return false;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim())) { flash('כתובת האימייל לא תקינה'); return false; }
     setBusyId(d.id);
     try {
       const raw = await docPDF(book, d, (d.printCount || 0) > 0);
@@ -3638,10 +3696,11 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
         text: `שלום ${d.customer?.name || ''},\n\nמצורפת ${docTitle(d)} על סך ${fmt(d.total)}, חתומה דיגיטלית.\n\nתודה,\n${book.legalName || book.name}` });
       onSent(d, to);
       flash(`${docTitle(d)} נשלחה חתומה ל-${to}`);
+      setBusyId(''); return true;
     } catch (e) {
       flash(e.message === 'no-cert' ? 'אין תעודת חתימה מוגדרת בשרת' : e.message === 'no-mail' ? 'שליחת מייל לא מוגדרת בשרת' : 'השליחה נכשלה · ' + (e.message || ''));
     }
-    setBusyId('');
+    setBusyId(''); return false;
   };
   const send = (d, how) => {
     const text = `שלום ${d.customer?.name || ''},\nמצורפת ${docTitle(d)} על סך ${fmt(d.total)}.\nתודה, ${book.legalName || book.name}`;
@@ -3705,7 +3764,8 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
                     {ita?.connected && <button className="mg-btn sm" disabled={busyId === d.id}
                       onClick={async () => { setBusyId(d.id); await onRequestAlloc(d); setBusyId(''); }}>בקש מספר הקצאה</button>}
                     <button className="mg-btn ghost sm" onClick={() => { const n = window.prompt('מספר ההקצאה שהתקבל מרשות המסים:'); if (n && n.trim()) onManualAlloc(d, n.trim()); }}>הזן הקצאה</button></>}
-                  {d.customer?.phone && <button className="mg-btn ghost sm" onClick={() => send(d, 'wa')}>וואטסאפ</button>}
+                  {canShareFiles ? <button className="mg-btn ghost sm" disabled={busyId === d.id} onClick={() => share(d)}>📲 שתף</button>
+                    : d.customer?.phone && <button className="mg-btn ghost sm" onClick={() => send(d, 'wa')}>וואטסאפ</button>}
                   {d.customer?.email && <button className="mg-btn ghost sm" onClick={() => send(d, 'mail')}>מייל</button>}
                   {d.type === '305' && d.series === series && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setForm({ type: '400', ref: d })}>קבלה</button>}
                   {['305', '320'].includes(d.type) && d.series === series && !credited && book.dealerType !== 'exempt' &&
@@ -3726,7 +3786,11 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
       </div>
       {payForm && <PayForm book={book} docs={docs} customers={customers} items={items} flash={flash} onCreated={onPayCreated} onClose={() => setPayForm(false)} />}
       {form && <DocForm book={book} docs={docs} customers={customers} items={items} preset={form} itaReady={!!ita?.connected} series={series} onClose={() => setForm(null)}
-                        onIssue={async (rec) => { const d = await onIssue(rec); if (d) { setForm(null); flash(`${docTitle(d)} הופקה`); } return d; }} />}
+                        onIssue={async (rec) => { const d = await onIssue(rec); if (d) { setForm(null); setDone(d); } return d; }} />}
+      {done && <IssuedPanel d={docs.find(x => x.id === done.id) || done} book={book} busy={busyId === done.id} canShareFiles={canShareFiles} canMail={canMail}
+                            onShare={share} onMail={sendSigned} onPrint={print} onPdf={pdf}
+                            onAnother={() => { const t = done.type; setDone(null); setForm({ type: t === '400' || t === '330' ? allowedTypes(book)[0] : t }); }}
+                            onClose={() => setDone(null)} />}
     </>
   );
 }
