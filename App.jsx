@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.9.1';
+const VERSION = '1.9.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -186,7 +186,11 @@ const storeUser = () => new Promise(res => { const un = onAuthStateChanged(store
 /* The store's own id for a customer — its docId() of the email — so a later
    purchase with the same email lands on the same record. */
 const storeDocId = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '_').slice(0, 90);
+/* The store's id of a shop is a short word ("main"). A web address typed in
+   its place (https://www.drzilber.com/) means the one shop, "main". */
+const tenantId = (v) => { const t = String(v || '').trim(); return !t ? '' : /[/:.]/.test(t) ? 'main' : t; };
 async function storeAddCustomer(tenant, c) {
+  tenant = tenantId(tenant);
   let id = storeDocId(c.email) || ('c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
   /* Only ever a new record: if the id is taken, a new one, never an update. */
   for (let i = 0; i < 3; i++) {
@@ -203,6 +207,7 @@ async function storeAddCustomer(tenant, c) {
   return id;
 }
 async function storeRead(tenant, name) {
+  tenant = tenantId(tenant);
   const s = await getDocs(collection(store().db, 'tenants', tenant, name));
   return s.docs.map(d => ({ ...d.data(), id: d.id }));
 }
@@ -462,7 +467,7 @@ async function loadBook(book) {
   const res = await Promise.all(COLS.map(c => withTimeout(bookCol(book.id, c).list()).catch(() => null)));
   const out = { errors: [], orders: [], docs: [], storeErr: '', storeLogin: false };
   COLS.forEach((c, i) => { out[c] = res[i] || []; if (!res[i]) out.errors.push(c); });
-  const t = String(book.tenant || '').trim();
+  const t = tenantId(book.tenant);
   if (t) {
     try {
       const u = await withTimeout(storeUser(), 10000);
@@ -758,6 +763,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.9.2', date: '30.09.26', items: ['חיבור לחנות: כתובת אתר שהוזנה במקום מזהה החנות מתוקנת לבד ל-main.', 'ההודעה על סנכרון ההגדרות מפנה לחוקים העדכניים.'] },
   { v: '1.9.1', date: '30.09.26', items: ['תיקון בנייה ב-Netlify (תיקיית public).'] },
   { v: '1.9.0', date: '30.09.26', items: [
     'פריטים: קטלוג מוצרים ושירותים לכל עסק, עם ייבוא מ-iCount. בחשבונית בוחרים פריט והמחיר נכנס לבד.',
@@ -1575,7 +1581,7 @@ function BookForm({ rec, me, count, hasLive, onSave, onClose }) {
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const submit = () => {
     const { ownersText, viewersText, clerksText, ...b } = f;
-    onSave({ ...b, vatRate: Number(b.vatRate) || 0, owners: ownersText.split(/[,\s]+/).filter(Boolean),
+    onSave({ ...b, tenant: tenantId(b.tenant), vatRate: Number(b.vatRate) || 0, owners: ownersText.split(/[,\s]+/).filter(Boolean),
              viewers: viewersText.split(/[,\s]+/).map(x => x.trim().toLowerCase()).filter(x => x.includes('@')),
              clerks: clerksText.split(/[,\s]+/).map(x => x.trim().toLowerCase()).filter(x => x.includes('@')) });
   };
@@ -1595,7 +1601,8 @@ function BookForm({ rec, me, count, hasLive, onSave, onClose }) {
         <Field label="סוג עוסק"><select value={f.dealerType} onChange={e => set('dealerType', e.target.value)}>
           {Object.entries(DEALERS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
         {f.dealerType !== 'exempt' && <Field label="שיעור מע״מ (%)"><input inputMode="decimal" value={f.vatRate} onChange={e => set('vatRate', e.target.value)} /></Field>}
-        <Field label="קישור לחנות · מזהה החנות (אופציונלי)"><input dir="ltr" value={f.tenant || ''} onChange={e => set('tenant', e.target.value.trim())} placeholder="main" /></Field>
+        <Field label="קישור לחנות · מזהה החנות (אופציונלי)"><input dir="ltr" value={f.tenant || ''} onChange={e => set('tenant', e.target.value.trim())} onBlur={e => set('tenant', tenantId(e.target.value))} placeholder="main" />
+          <small style={{ color: 'var(--muted)' }}>מזהה, לא כתובת אתר. בחנות שלך: <b dir="ltr">main</b></small></Field>
         <Field label="צבע"><div style={{ display: 'flex', gap: 6 }}>
           {BOOK_COLORS.map(c => <button key={c} type="button" onClick={() => set('color', c)}
             style={{ width: 28, height: 28, borderRadius: '50%', background: c, border: f.color === c ? '3px solid #c4a36e' : '2px solid #fff', cursor: 'pointer', boxShadow: '0 0 0 1px #ddd' }} />)}
@@ -1790,7 +1797,7 @@ function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreCha
             <>
               <p style={{ marginTop: 0 }}>מחובר לפרויקט <b dir="ltr">{cloud.cfg.projectId}</b> כ-<b dir="ltr">{user.email}</b>.</p>
               {prefErr
-                ? <div className="mg-note bad" style={{ marginBottom: 12 }}>ההגדרות האישיות לא מסתנכרנות בין המכשירים ({prefErr}). כנראה צריך לפרסם מחדש את firestore.rules של גרסה 1.8.3 (Firestore ← Rules ← Publish).</div>
+                ? <div className="mg-note bad" style={{ marginBottom: 12 }}>ההגדרות האישיות לא מסתנכרנות בין המכשירים ({prefErr}). צריך לפרסם את firestore.rules העדכני מהריפו (Firestore ← Rules ← Publish).</div>
                 : <div className="mg-note" style={{ marginBottom: 12 }}>כל הנתונים וההגדרות נשמרים בענן ועוברים לכל מכשיר שנכנסים ממנו. במכשיר נשארים רק נעילת הקוד וההתחברות לחנות.</div>}
               {hasLocalData() && (
                 <div className="mg-note warn" style={{ marginBottom: 12 }}>
