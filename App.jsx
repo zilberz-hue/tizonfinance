@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.15.1';
+const VERSION = '1.15.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.15.2', date: '30.09.26', items: ['השרת עובד בלי הגדרות נוספות ב-Netlify: מזהה הפרויקט מובנה, והרשאות נבדקות לפי הכניסה שלך.', 'עסק כפול ריק נמחק בלחיצה אחת ממסך כל העסקים.'] },
   { v: '1.15.1', date: '30.09.26', items: ['חיבור ל-iCount: הודעת שגיאה מפורטת, כדי לדעת בדיוק מה חסר.'] },
   { v: '1.15.0', date: '30.09.26', items: [
     'חיבור ישיר ל-iCount: המסמכים נמשכים מ-iCount בלי לייצא קבצים, ואפשר שמסמכים חדשים ייכנסו לבד פעם ביום.'] },
@@ -1672,7 +1673,7 @@ function StoreLinkForm({ flash, onDone }) {
   const go = async () => {
     setBusy(true);
     try { const r = await fnCall({ action: 'store-link', email, password: pw }); flash(`החנות מחוברת בכל המכשירים (${r.email})`); setPw(''); setOpen(false); onDone(); }
-    catch (e) { flash(/INVALID|EMAIL|PASSWORD|login/i.test(e.message) ? 'אימייל או סיסמה של החנות שגויים' : e.message === 'set ALLOWED_EMAILS first' ? 'צריך קודם להגדיר ALLOWED_EMAILS ב-Netlify' : 'החיבור נכשל · ' + e.message); }
+    catch (e) { flash(/INVALID|EMAIL|PASSWORD|login/i.test(e.message) ? 'אימייל או סיסמה של החנות שגויים' : e.message === 'owners only' ? 'רק בעלי עסק יכולים לחבר את החנות' : 'החיבור נכשל · ' + e.message); }
     setBusy(false);
   };
   return (
@@ -4438,6 +4439,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
       const m = e.message || '';
       setErr(m === 'setup-role' ? 'השרת עוד לא יודע מי בעלי העסק: צריך להגדיר ב-Netlify את ALLOWED_EMAILS עם האימייל שלך, או להעלות מפתח שירות (גיבוי וענן ← דפי סליקה).'
         : m === 'owners only' ? 'רק בעלי העסק יכולים לחבר את iCount.'
+        : /BOOKS_PROJECT_ID/.test(m) ? 'השרת עדיין בגרסה ישנה. חכה לסיום הבנייה ב-Netlify ונסה שוב.'
         : /^HTTP 404/.test(m) ? 'השרת עדיין לא עודכן לגרסה הזו. חכה לסיום הבנייה ב-Netlify ונסה שוב.'
         : /auth|token|401|403|login|unauthori|invalid/i.test(m) ? 'iCount לא קיבל את המפתח (' + m + '). בדוק שהעתקת את כל ה-API Token, ושהוא פעיל ב-iCount.'
         : 'החיבור נכשל: ' + m);
@@ -4515,7 +4517,7 @@ function ICountLive({ book, data, cols, flash, onDone, onLog, server }) {
    and the other is removed. Real documents are never moved or deleted: the
    business that has them is the one that stays; two with real documents are
    left for the user to decide. */
-const bookKey = (b) => normName(b.name) + '|' + digitsOf(b.taxId);
+const bookKey = (b) => normName(b.name);
 function dupGroups(books, email) {
   const mine = books.filter(b => roleOf(b, email) === 'owner');
   const g = {};
@@ -4554,6 +4556,8 @@ function DupCard({ books, user, flash, onDone }) {
   if (!groups.length) return null;
   const merge = async (g) => {
     const st = g.map(b => ({ b, i: info[b.id] || { live: 0, docs: 0, recs: 0 } }));
+    const taxes = [...new Set(g.map(b => digitsOf(b.taxId)).filter(Boolean))];
+    if (taxes.length > 1) { flash('לעסקים האלה מספרי עוסק שונים, ולכן הם לא כפולים. אם אחד מיותר, מוחקים אותו בכפתור "מחק" לידו.'); return; }
     const withLive = st.filter(x => x.i.live > 0);
     if (withLive.length > 1) { flash('בשני העסקים יש מסמכים אמיתיים. אי אפשר למזג אותם אוטומטית; כדאי לשנות לאחד מהם את השם.'); return; }
     const keep = (withLive[0] || [...st].sort((a, z) => (z.i.docs + z.i.recs) - (a.i.docs + a.i.recs))[0]).b;
@@ -4564,6 +4568,15 @@ function DupCard({ books, user, flash, onDone }) {
     catch (e) { flash('המיזוג נכשל · ' + (e?.code || e?.message || '')); }
     setBusy('');
   };
+  /* An empty copy simply goes. */
+  const del = async (b) => {
+    if (!window.confirm(`למחוק את העותק הריק של "${b.name}"? אין בו מסמכים או רשומות.`)) return;
+    setBusy(b.id);
+    try { const d = await loadBook(b); for (const c of COLS) for (const r of d[c] || []) await bookCol(b.id, c).del(r.id).catch(() => {});
+          await delBook(b.id); flash('העותק הריק נמחק'); onDone(); }
+    catch (e) { flash('המחיקה נכשלה · ' + (e?.code || e?.message || '')); }
+    setBusy('');
+  };
   return (
     <div className="mg-note warn" style={{ marginBottom: 14 }}>
       <b>נמצאו עסקים כפולים.</b> כנראה נוצרו פעם במכשיר ופעם בענן. מיזוג משאיר עסק אחד עם כל הנתונים.
@@ -4572,6 +4585,8 @@ function DupCard({ books, user, flash, onDone }) {
           <b>{g[0].name}</b> ×{g.length}
           <span style={{ fontSize: 13, color: 'var(--muted)' }}>{g.map(b => info[b.id] ? `${info[b.id].docs} מסמכים · ${info[b.id].recs} רשומות` : '…').join(' | ')}</span>
           <button className="mg-btn sm" disabled={!!busy || g.some(b => !info[b.id])} onClick={() => merge(g)}>{busy ? 'ממזג…' : 'מזג לעסק אחד'}</button>
+          {g.filter(b => info[b.id] && !info[b.id].docs && !info[b.id].recs).slice(0, g.length - 1).map((b, k) => (
+            <button key={b.id} className="mg-btn ghost sm" disabled={!!busy} onClick={() => del(b)}>🗑 מחק את הריק{g.filter(x => info[x.id] && !info[x.id].docs && !info[x.id].recs).length > 1 ? ` (${k + 1})` : ''}</button>))}
         </div>))}
     </div>
   );

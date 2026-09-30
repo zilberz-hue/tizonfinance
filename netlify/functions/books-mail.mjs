@@ -1,4 +1,4 @@
-/* Tizon Books 1.15.1 · server function, in one file. Built from
+/* Tizon Books 1.15.2 · server function, in one file. Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -912,6 +912,7 @@ async function signState() {
   }
 }
 var mailReady = () => !!(env("SMTP_HOST") && env("SMTP_USER") && env("SMTP_PASS"));
+var projectId = () => env("BOOKS_PROJECT_ID") || "tizonfinance";
 var whoOverride = null;
 var dbOverride = null;
 var mailOverride = null;
@@ -971,28 +972,53 @@ async function storeId() {
   storeCache = t;
   return t.idToken;
 }
-async function roleOfBook(email, bookId) {
-  if (dbOverride || await saJson()) {
-    const b = /^[\w-]{1,80}$/.test(bookId) ? await (await adminDb()).get(`books/${bookId}`) : null;
-    return b ? roleIn(b, email) : "";
-  }
-  return env("ALLOWED_EMAILS") ? "owner" : "";
+var FSB = (p) => `https://firestore.googleapis.com/v1/projects/${projectId()}/databases/(default)/documents${p}`;
+async function bookAs(idToken, bookId) {
+  if (!/^[\w-]{1,80}$/.test(bookId)) return null;
+  const r = await (fetchOverride || fetch)(FSB("/books/" + bookId), { headers: { authorization: "Bearer " + idToken } });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return j?.fields ? { ...fromFields(j.fields), id: bookId } : null;
 }
-async function mayUseStore(email, tenant) {
-  if (dbOverride || await saJson()) {
-    const db = await adminDb();
-    const books = await db.list("books");
-    return books.some((b) => tenantId(b.tenant) === tenantId(tenant) && roleIn(b, email));
+async function booksAs(idToken, email) {
+  const out = {};
+  for (const f of ["owners", "clerks", "viewers"]) {
+    const r = await (fetchOverride || fetch)(FSB(":runQuery"), {
+      method: "POST",
+      headers: { authorization: "Bearer " + idToken, "content-type": "application/json" },
+      body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "books" }], where: { fieldFilter: { field: { fieldPath: f }, op: "ARRAY_CONTAINS", value: { stringValue: email } } } } })
+    });
+    const j = await r.json().catch(() => []);
+    (Array.isArray(j) ? j : []).filter((x) => x.document).forEach((x) => {
+      const id = x.document.name.split("/").pop();
+      out[id] = { ...fromFields(x.document.fields), id };
+    });
   }
-  return !!env("ALLOWED_EMAILS");
+  return Object.values(out);
+}
+async function roleOfBook(email, bookId, idToken) {
+  if (dbOverride || await saJson()) {
+    const b2 = /^[\w-]{1,80}$/.test(bookId) ? await (await adminDb()).get(`books/${bookId}`) : null;
+    return b2 ? roleIn(b2, email) : "";
+  }
+  const b = await bookAs(idToken, bookId);
+  return b ? roleIn(b, email) : "";
+}
+async function ownsAny(email, idToken) {
+  if (env("ALLOWED_EMAILS")) return true;
+  if (dbOverride || await saJson()) return (await (await adminDb()).list("books")).some((b) => roleIn(b, email) === "owner");
+  return (await booksAs(idToken, email)).some((b) => roleIn(b, email) === "owner");
+}
+async function mayUseStore(email, tenant, idToken) {
+  const books = dbOverride || await saJson() ? await (await adminDb()).list("books") : await booksAs(idToken, email);
+  return books.some((b) => tenantId(b.tenant) === tenantId(tenant) && roleIn(b, email));
 }
 var zcKeyOf = async (book) => (await secrets().get("zc:" + book, { type: "json" }).catch(() => null))?.key || "";
 var baseOf = (url) => env("URL") || url.origin;
 var html = (status, body) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 async function who(token2) {
   if (whoOverride) return whoOverride(token2);
-  const pid = env("BOOKS_PROJECT_ID");
-  if (!pid) throw Object.assign(new Error("BOOKS_PROJECT_ID is not set"), { status: 500 });
+  const pid = projectId();
   const { payload } = await jwtVerify(token2, JWKS, { issuer: `https://securetoken.google.com/${pid}`, audience: pid });
   const email = String(payload.email || "").toLowerCase();
   const allow = env("ALLOWED_EMAILS").toLowerCase().split(/[,\s]+/).filter(Boolean);
@@ -1145,7 +1171,7 @@ var books_mail_default = async (req) => {
       ok: true,
       ...await signState(),
       mail: mailReady(),
-      project: !!env("BOOKS_PROJECT_ID"),
+      project: true,
       pay: { admin: !!(dbOverride || await saJson()) },
       store: await storeLink().then((l) => l?.refreshToken ? { linked: true, email: l.email } : { linked: false }),
       password: !!env("SIGN_P12_PASSWORD"),
@@ -1156,7 +1182,7 @@ var books_mail_default = async (req) => {
     const body = await req.json().catch(() => ({}));
     const email = await who(String(body.idToken || ""));
     if (body.action === "cert") {
-      if (!env("ALLOWED_EMAILS")) return json(403, { error: "set ALLOWED_EMAILS first" });
+      if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
       if (!env("SIGN_P12_PASSWORD")) return json(400, { error: "set SIGN_P12_PASSWORD first" });
       const b = String(body.p12 || "");
       let info;
@@ -1200,7 +1226,7 @@ var books_mail_default = async (req) => {
     }
     if (body.action === "ita-connect") {
       if (!itaReady()) return json(400, { error: "ita not configured" });
-      if (!env("ALLOWED_EMAILS")) return json(403, { error: "set ALLOWED_EMAILS first" });
+      if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
       const state = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
       await secrets().setJSON("ita-state:" + state, { vat: String(body.vat || "").replace(/\D/g, ""), email, at: Date.now() });
       const q = new URLSearchParams({
@@ -1226,8 +1252,8 @@ var books_mail_default = async (req) => {
     }
     if (["icount-link", "icount-docs", "icount-status"].includes(body.action)) {
       const bookId = String(body.book || "");
-      const role = await roleOfBook(email, bookId);
-      if (role !== "owner") return json(403, { error: dbOverride || await saJson() || env("ALLOWED_EMAILS") ? "owners only" : "setup-role" });
+      const role = await roleOfBook(email, bookId, String(body.idToken || ""));
+      if (role !== "owner") return json(403, { error: "owners only" });
       const key = "icount:" + bookId;
       if (body.action === "icount-status") {
         const t2 = await secrets().get(key, { type: "json" }).catch(() => null);
@@ -1259,7 +1285,7 @@ var books_mail_default = async (req) => {
       return json(200, { ok: true, ...await icountDocs(t.token, from, to, fetchOverride || fetch) });
     }
     if (body.action === "store-link") {
-      if (!env("ALLOWED_EMAILS")) return json(403, { error: "set ALLOWED_EMAILS first" });
+      if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
       if (body.unlink) {
         await secrets().delete("store-link");
         storeCache = null;
@@ -1273,13 +1299,13 @@ var books_mail_default = async (req) => {
     if (body.action === "store-read" || body.action === "store-add-customer") {
       const tenant = tenantId(body.tenant);
       if (!tenant) return json(400, { error: "tenant" });
-      if (!await mayUseStore(email, tenant)) return json(403, { error: "role" });
+      if (!await mayUseStore(email, tenant, String(body.idToken || ""))) return json(403, { error: "role" });
       const tok = await storeId();
       if (body.action === "store-read") return json(200, { ok: true, rows: await storeList(tok, tenant, String(body.name || ""), fetchOverride || fetch) });
       return json(200, { ok: true, id: await storeCreateCustomer(tok, tenant, body.customer || {}, fetchOverride || fetch) });
     }
     if (body.action === "sa") {
-      if (!env("ALLOWED_EMAILS")) return json(403, { error: "set ALLOWED_EMAILS first" });
+      if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
       let j;
       try {
         j = JSON.parse(String(body.json || ""));
