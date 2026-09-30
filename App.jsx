@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.18.1';
+const VERSION = '1.19.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -980,6 +980,10 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.19.0', date: '30.09.26', items: [
+    'חשבוניות ספקים מ-Gmail: סקריפט קטן בחשבון Google שלך שולח לכאן כל שעה חשבוניות וקבלות שמגיעות במייל. הן ממתינות בלשונית ההוצאות.',
+    'רישום בלחיצה: הסכום, המע״מ, התאריך, מספר החשבונית והספק נקראים מקובץ ה-PDF ומתמלאים לבד. אתה רק מאשר.',
+    'כל הוצאה שנרשמה כך שומרת את החשבונית המקורית (📎).'] },
   { v: '1.18.1', date: '30.09.26', items: ['נייד וטאבלט: תצוגה חדה וברורה יותר. טקסט וכותרות כהים יותר, מסגרות שדות בולטות וגופן עבה יותר.'] },
   { v: '1.18.0', date: '30.09.26', items: [
     'כפתור 🧾 בראש כל עסק: הפקת חשבונית מס קבלה בלחיצה אחת.',
@@ -1091,6 +1095,7 @@ const TOURS = {
     { t: 'dash-chart', title: 'שנה אחורה', text: 'הכנסות מול הוצאות ב-12 החודשים האחרונים.', since: '1.0.0' },
   ],
   docs: [
+    { t: 'quick-doc', title: 'הפקה מהירה', text: 'מכל מקום בעסק: לחיצה כאן פותחת מסמך חדש (חשבונית מס קבלה, או קבלה לעוסק פטור).', since: '1.18.0' },
     { t: 'book-tabs', title: 'העסקים שלך', text: 'יש לך הרשאה להפיק מסמכים ולנהל לקוחות. שתי הלשוניות כאן.', since: '1.7.0', roles: ['clerk'] },
     { t: 'docs-mode', title: 'ניסיון או אמיתי', text: 'במצב ניסיון המסמכים מסומנים T- ולא נספרים. במצב אמיתי הם מסמכי מס: מספור רציף, בלי מחיקה ובלי עריכה.', since: '1.2.0' },
     { t: 'docs-new', title: 'הפקת מסמך', text: 'בוחרים סוג: חשבונית מס, קבלה, חשבונית מס קבלה, זיכוי ועוד. הסוגים מותאמים לסוג העוסק.', since: '1.2.0', roles: WRITERS },
@@ -1102,7 +1107,6 @@ const TOURS = {
   ],
   customers: [
     { t: 'cust-stats', title: 'הלקוחות', text: 'כמה לקוחות, כמה עם אימייל וטלפון, וכמה פעילים השנה.', since: '1.5.0' },
-    { t: 'quick-doc', title: 'הפקה מהירה', text: 'מכל מקום בעסק: לחיצה כאן פותחת מסמך חדש (חשבונית מס קבלה, או קבלה לעוסק פטור).', since: '1.18.0' },
     { t: 'cust-dups', title: 'איתור כפילויות', text: 'מוצא את אותו לקוח שנרשם כמה פעמים: שם בסדר הפוך, שם מקוצר, שגיאת כתיב, שם פרטי בלבד, או אותו טלפון / אימייל. אתה בוחר מי נשאר ומי נכלל, והמסמכים של כולם נספרים אליו.', since: '1.17.0' },
     { t: 'cust-store', title: 'סנכרון עם החנות', text: 'לקוחות החנות נקראים לכאן ומתמזגים בלחיצה, אחרי שרואים מה יקרה: חדשים מתווספים, ולקיימים נוספים רק פרטים חסרים. לחנות נוספים רק לקוחות חדשים, בלחיצה, ואף פרט קיים שם לא משתנה.', since: '1.6.0' },
     { t: 'cust-tools', title: 'חיפוש, הוספה וייבוא', text: 'מחפשים לפי שם, טלפון, אימייל או ח.פ. אפשר להוסיף לקוח, לייבא מ-iCount ולייצא לאקסל.', since: '1.5.0', roles: WRITERS },
@@ -1125,6 +1129,7 @@ const TOURS = {
     { t: 'inc-table', title: 'הרשימה', text: 'כל הכנסה עם תאריך, לקוח, מסמך ומע״מ.', since: '1.0.0' },
   ],
   expenses: [
+    { t: 'exp-inbox', title: 'חשבוניות מהמייל', text: 'חשבוניות ספקים שהגיעו ל-Gmail ממתינות כאן. "רשום כהוצאה" קורא את הקובץ וממלא סכום, מע״מ, תאריך וספק. בפעם הראשונה: "חבר את Gmail".', since: '1.19.0' },
     { t: 'exp-filters', title: 'הוצאות', text: 'סינון לפי חודש וקטגוריה, וייצוא לאקסל.', since: '1.0.0' },
     { t: 'exp-table', title: 'הרשימה', text: 'כל הוצאה עם ספק, קטגוריה ומע״מ מוכר. הסכומים נכנסים לדוח המע״מ ולרווח והפסד.', since: '1.0.0' },
   ],
@@ -2313,6 +2318,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const alerts = alertsOf(data, ledger);
   const suppliers = data.suppliers || [];
   const supName = (id) => suppliers.find(s => s.id === id)?.name || '';
+  const [inboxTick, setInboxTick] = useState(0);
+  const openExpFile = async (e) => { try { showBlob((await inboxOpen(book.id, e.file.inboxId)).blob); } catch { flash('פתיחת הקובץ נכשלה'); } };
 
   const save = async (name, rec) => {
     const r = clean({ ...rec, updatedAt: new Date().toISOString() });
@@ -2463,7 +2470,16 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       {sub === 'dash' && <Dash totals={tot} rate={rate} alerts={alerts} onSub={setSub} linked={!!book.tenant} />}
       {sub === 'income' && <IncomeList income={ledger.income} linked={!!book.tenant}
         onEdit={(r) => setEdit({ kind: 'income', rec: r })} onDel={(r) => remove('incomes', r.id, 'ההכנסה')} />}
-      {sub === 'expenses' && <ExpenseList outgo={ledger.outgo} supName={supName}
+      {sub === 'expenses' && !ro && <InboxCard book={book} server={server} role={role} flash={flash} refreshKey={inboxTick}
+        onRecord={(it, g, reload) => {
+          const sup = matchSupplier(suppliers, { ...g, from: it.from, fromName: it.fromName });
+          const f = { date: g.date || String(it.date || '').slice(0, 10) || todayIso(), supplierId: sup?.id || '', desc: it.subject || it.name || '',
+                      gross: g.gross ? String(g.gross) : '', docNo: g.docNo || '', pay: PAY_METHODS[0],
+                      ...(g.vatMode ? { vatMode: g.vatMode } : {}), ...(g.vatManual ? { vatManual: String(g.vatManual) } : {}),
+                      file: { inboxId: it.id, name: it.name, mime: it.mime } };
+          setEdit({ kind: 'expense', rec: null, init: { f, read: !!(g.gross || g.date || g.docNo), foreign: g.foreign || '', newSup: sup ? '' : (it.fromName || ''), supTax: g.taxId || '', supEmail: it.from || '' }, inboxId: it.id });
+        }} />}
+      {sub === 'expenses' && <ExpenseList outgo={ledger.outgo} supName={supName} onFile={openExpFile}
         onEdit={(r) => setEdit({ kind: 'expense', rec: r })} onDel={(r) => remove('expenses', r.id, 'ההוצאה')} />}
       {sub === 'suppliers' && <SupplierList suppliers={suppliers} outgo={ledger.outgo}
         onEdit={(r) => setEdit({ kind: 'supplier', rec: r })} onDel={(r) => remove('suppliers', r.id, 'הספק')} />}
@@ -2488,9 +2504,13 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         docLabel={!ro && allowedTypes(book).length ? DOC_TYPES[allowedTypes(book)[0]].label : ''}
         onDoc={() => { setEdit(null); setSub('docs'); setQuickDoc(Date.now()); }}
         onSave={async (r) => { if (await save('incomes', r)) { flash('ההכנסה נשמרה'); setEdit(null); } }} />}
-      {edit?.kind === 'expense' && <ExpenseForm rec={edit.rec} rate={rate} suppliers={suppliers} onClose={() => setEdit(null)}
-        onNewSupplier={(s) => save('suppliers', s)}
-        onSave={async (r) => { if (await save('expenses', r)) { flash('ההוצאה נשמרה'); setEdit(null); } }} />}
+      {edit?.kind === 'expense' && <ExpenseForm rec={edit.rec} init={edit.init} rate={rate} suppliers={suppliers} onClose={() => setEdit(null)}
+        onNewSupplier={(s) => save('suppliers', s)} onFile={cloud ? openExpFile : null}
+        onSave={async (r) => {
+          if (!(await save('expenses', r))) return;
+          if (edit.inboxId) { await inboxCall('inbox-mark', book.id, { id: edit.inboxId, status: 'done', expenseId: r.id }).catch(() => {}); setInboxTick(t => t + 1); }
+          flash('ההוצאה נשמרה'); setEdit(null);
+        }} />}
       {edit?.kind === 'supplier' && <SupplierForm rec={edit.rec} onClose={() => setEdit(null)}
         onSave={async (r) => { if (await save('suppliers', r)) { flash('הספק נשמר'); setEdit(null); } }} />}
     </div>
@@ -2657,7 +2677,210 @@ function IncomeForm({ rec, rate, onSave, onClose, docLabel = '', onDoc }) {
 }
 
 /* ------------------------------------------------------------------ הוצאות */
-function ExpenseList({ outgo, supName, onEdit, onDel }) {
+
+/* ============================================================ invoice inbox */
+/* Supplier invoices that reach the owner's Gmail arrive here through a small
+   script in their own Google account (see GmailSetup). Each waits until it is
+   recorded as an expense, with what could be read from the file filled in. */
+async function inboxCall(action, bookId, extra = {}) { return fnCall({ action, book: bookId, ...extra }); }
+async function inboxOpen(bookId, id) {
+  const f = await inboxCall('inbox-file', bookId, { id });
+  const blob = new Blob([unb64(f.data)], { type: f.mime });
+  return { ...f, blob, bytes: unb64(f.data) };
+}
+function showBlob(blob) {
+  const u = URL.createObjectURL(blob);
+  const w = window.open(u, '_blank');
+  if (!w) { const a = document.createElement('a'); a.href = u; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+  setTimeout(() => URL.revokeObjectURL(u), 120000);
+}
+/* The text of a PDF (the library loads only when a file is read). Scans have no text; that is fine. */
+async function pdfText(bytes) {
+  const [pdfjs, { default: workerUrl }] = await Promise.all([import('pdfjs-dist/legacy/build/pdf.min.mjs'), import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')]);
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  const doc = await pdfjs.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+  let out = '';
+  for (let i = 1; i <= Math.min(doc.numPages, 3); i++) {
+    const c = await (await doc.getPage(i)).getTextContent();
+    out += c.items.map(x => x.str + (x.hasEOL ? '\n' : ' ')).join('') + '\n';
+  }
+  return out;
+}
+/* What an invoice most likely says: the total (the largest amount), the VAT
+   (an amount that is that total's VAT), the date, the supplier's tax id and
+   the invoice number. Every guess is shown for the user to confirm. */
+function guessInvoice(text, rate, ownIds = []) {
+  const t = String(text || '').replace(/[‎‏‪-‮]/g, '');
+  const amounts = [...t.matchAll(/(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d{1,7})\.(\d{2})(?![\d])/g)].map(m => Number(m[1].replace(/,/g, '') + '.' + m[2])).filter(n => n > 0 && n < 5e6);
+  const out = {};
+  if (amounts.length) {
+    const total = Math.max(...amounts);
+    out.gross = total;
+    const rates = [...new Set([rate, 18, 17].filter(Boolean))];
+    for (const r of rates) {
+      const v = amounts.find(a => a !== total && Math.abs(a - total * r / (100 + r)) <= 0.06);
+      if (v) { out.vat = v; out.vatMode = r === rate ? 'full' : 'manual'; if (r !== rate) out.vatManual = v; break; }
+    }
+    if (!out.vat && /עוסק\s*פטור|פטור\s*ממע|exempt|no\s*vat/i.test(t)) out.vatMode = 'none';
+  }
+  /* Abroad: the amount is not in shekels, and there is no Israeli VAT to deduct. */
+  const cur = !/₪|ש["״]ח|ILS|NIS/i.test(t) && (/\bUSD\b|US\$|\$\s?\d|\d\s?\$/.test(t) ? 'USD' : /\bEUR\b|€/.test(t) ? 'EUR' : '');
+  if (cur) { out.foreign = cur; out.vatMode = 'none'; delete out.vat; }
+  const today = todayIso();
+  for (const m of t.matchAll(/(?<!\d)(\d{1,2})[./-](\d{1,2})[./-](20\d{2}|\d{2})(?!\d)/g)) {
+    const y = m[3].length === 2 ? '20' + m[3] : m[3], mo = Number(m[2]), d = Number(m[1]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) continue;
+    const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (iso <= today && iso >= addMonths(today.slice(0, 7), -18) + '-01') { out.date = iso; break; }
+  }
+  const own = new Set(ownIds.map(x => String(x || '').replace(/\D/g, '')).filter(Boolean));
+  const ids = [...t.matchAll(/(?<!\d)(\d{9})(?!\d)/g)].map(m => m[1]).filter(x => !own.has(x) && !/^0{3}/.test(x));
+  if (ids.length) out.taxId = ids[0];
+  /* The number next to the word: after it, or before it when the PDF keeps Hebrew words in reverse order. */
+  const skip = new Set([...own, out.taxId].filter(Boolean));
+  const cands = [...t.matchAll(/(?:חשבונית|קבלה|invoice|receipt)(?:\s+(?:מס['׳]?|קבלה|מספר|no\.?|number|#|:)){0,3}\s*[:#]?\s*([A-Z]{0,4}[-/]?\d{3,12})(?![\d./])/gi),
+                 ...t.matchAll(/(?<![\d.,/])([A-Z]{0,4}[-/]?\d{3,12})(?![\d.,/])\s+(?:[^\s\d]{1,6}\s+){0,3}(?:חשבונית|קבלה)/g)]
+    .map(m => m[1]).filter(x => !skip.has(x.replace(/\D/g, '')));
+  if (cands.length) out.docNo = cands[0];
+  return out;
+}
+/* The supplier an invoice came from: by tax id, email, the email's domain, or name. */
+function matchSupplier(suppliers, g) {
+  const tax = String(g.taxId || '').replace(/\D/g, ''), em = String(g.from || '').toLowerCase(), dom = em.split('@')[1] || '';
+  const free = /^(gmail|walla|hotmail|outlook|yahoo|icloud|live|me)\./i.test(dom);
+  return suppliers.find(s => tax && String(s.taxId || '').replace(/\D/g, '') === tax)
+      || suppliers.find(s => em && String(s.email || '').toLowerCase() === em)
+      || (!free && dom ? suppliers.find(s => String(s.email || '').toLowerCase().endsWith('@' + dom)) : null)
+      || suppliers.find(s => g.fromName && normName(s.name) && (normName(g.fromName).includes(normName(s.name)) || normName(s.name).includes(normName(g.fromName))))
+      || null;
+}
+
+/* The script for the owner's Gmail: every hour, new mail with an invoice file
+   is sent to this business's inbox and labelled, so nothing is sent twice. */
+function gmailScript(endpoint, bookId, key, bookName) {
+  return `/* Tizon Books · איסוף חשבוניות מ-Gmail עבור "${bookName}"
+   רץ בחשבון Google שלך בלבד. שולח ל-Tizon Books קבצי PDF ותמונות
+   ממיילים שנראים כמו חשבונית או קבלה, ומסמן אותם בתווית tizon-books.
+   הפעלה: בחר את הפונקציה setup למעלה ולחץ "הרצה" (Run), ואשר את ההרשאות. */
+const ENDPOINT = '${endpoint}?action=inbox-push&b=${bookId}&k=${key}';
+const QUERY = 'has:attachment newer_than:45d -in:sent -from:me -label:tizon-books ' +
+  '(חשבונית OR "חשבון עסקה" OR קבלה OR invoice OR receipt OR bill OR "tax invoice")';
+
+function setup() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('collect').timeBased().everyHours(1).create();
+  collect();
+}
+
+function collect() {
+  var label = GmailApp.getUserLabelByName('tizon-books') || GmailApp.createLabel('tizon-books');
+  var threads = GmailApp.search(QUERY, 0, 40);
+  threads.forEach(function (t) {
+    var ok = true;
+    t.getMessages().forEach(function (m) {
+      m.getAttachments({ includeInlineImages: false }).forEach(function (a, i) {
+        var type = String(a.getContentType() || '').toLowerCase();
+        if (!/pdf|image\\/(jpe?g|png|webp|heic)/.test(type) || a.getSize() > 4200000) return;
+        var res = UrlFetchApp.fetch(ENDPOINT, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+          payload: JSON.stringify({ id: m.getId() + '_' + i, from: m.getFrom(), subject: m.getSubject(),
+            date: m.getDate().toISOString(), name: a.getName(), mime: type, data: Utilities.base64Encode(a.getBytes()) }) });
+        if (res.getResponseCode() >= 300) ok = false;
+      });
+    });
+    if (ok) t.addLabel(label);
+  });
+}
+`;
+}
+
+function GmailSetup({ book, onClose, flash }) {
+  const [k, setK] = useState(null);
+  const [err, setErr] = useState('');
+  const load = async (renew) => { setErr(''); try { setK(await inboxCall('inbox-key', book.id, renew ? { renew: true } : {})); } catch (e) { setErr(String(e.message || e)); } };
+  useEffect(() => { load(false); }, []);
+  const code = k ? gmailScript(location.origin + FN, book.id, k.key, book.name) : '';
+  const copy = async () => { try { await navigator.clipboard.writeText(code); flash('הסקריפט הועתק'); } catch { flash('סמן את הטקסט והעתק ידנית'); } };
+  return (
+    <Box title="איסוף חשבוניות מ-Gmail" onClose={onClose} wide footer={<button className="mg-btn ghost" onClick={onClose}>סגור</button>}>
+      <div data-tour="gmail-setup">
+        <div className="mg-note" style={{ marginBottom: 12 }}>
+          סקריפט קטן שרץ <b>בחשבון Google שלך</b>, פעם בשעה. הוא מוצא מיילים עם חשבונית או קבלה מצורפת (PDF או תמונה), שולח את הקובץ לכאן, ומסמן את המייל בתווית <b dir="ltr">tizon-books</b>.
+          הסיסמה של Gmail לא עוברת לשום מקום, ואפשר לעצור אותו בכל רגע.</div>
+        <ol style={{ lineHeight: 1.9, paddingInlineStart: 22, margin: '0 0 12px' }}>
+          <li>לחץ <b>העתק סקריפט</b>.</li>
+          <li>פתח את <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com ← פרויקט חדש</a> (מחובר לחשבון שאליו מגיעות החשבוניות).</li>
+          <li>מחק את מה שכתוב שם, הדבק, ולחץ 💾 שמירה.</li>
+          <li>למעלה בחר את הפונקציה <b dir="ltr">setup</b> ולחץ <b>הרצה</b> (Run).</li>
+          <li>אשר את ההרשאות: "Advanced" ← "Go to … (unsafe)" ← Allow. זה הסקריפט שלך, ולכן Google מבקש אישור.</li>
+        </ol>
+        {err && <div className="mg-note bad">{err}</div>}
+        {k && <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <button className="mg-btn" onClick={copy}>📋 העתק סקריפט</button>
+            <button className="mg-btn ghost sm" onClick={() => window.confirm('ליצור מפתח חדש? הסקריפט הקיים יפסיק לעבוד עד שתדביק את החדש.') && load(true)}>מפתח חדש</button>
+          </div>
+          <textarea readOnly dir="ltr" value={code} style={{ width: '100%', height: 160, fontFamily: 'monospace', fontSize: 12 }} onFocus={e => e.target.select()} />
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+            {k.lastAt ? `קובץ אחרון התקבל ${new Date(k.lastAt).toLocaleString('he-IL')} · ${k.count} בסך הכול` : 'עוד לא התקבל קובץ. אחרי ההרצה הראשונה החשבוניות מ-45 הימים האחרונים יופיעו כאן.'}</div>
+        </>}
+      </div>
+    </Box>
+  );
+}
+
+function InboxCard({ book, server, role, onRecord, flash, refreshKey }) {
+  const [st, setSt] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [setup, setSetup] = useState(false);
+  const [open, setOpen] = useState(true);
+  const load = async () => { try { setSt(await inboxCall('inbox-list', book.id)); } catch (e) { setSt({ err: String(e.message || e) }); } };
+  useEffect(() => { if (cloud && server?.inbox) load(); }, [book.id, server?.inbox, refreshKey]);
+  if (!cloud || !server?.inbox || !st) return null;
+  const items = (st.items || []).slice().sort((a, b) => String(b.date || b.at).localeCompare(String(a.date || a.at)));
+  const canAct = ['owner', 'clerk'].includes(role);
+  const view = async (it) => { setBusy(it.id); try { showBlob((await inboxOpen(book.id, it.id)).blob); } catch { flash('פתיחת הקובץ נכשלה'); } setBusy(''); };
+  const record = async (it) => {
+    setBusy(it.id);
+    let guess = {};
+    try {
+      const f = await inboxOpen(book.id, it.id);
+      if (/pdf/i.test(f.mime)) guess = guessInvoice(await pdfText(f.bytes).catch(() => ''), rateOf(book), [book.taxId]);
+    } catch { /* recorded by hand then */ }
+    setBusy('');
+    onRecord(it, guess, load);
+  };
+  const ignore = async (it) => { setBusy(it.id); try { await inboxCall('inbox-mark', book.id, { id: it.id, status: 'ignored' }); await load(); } catch { flash('לא הצלחתי לעדכן'); } setBusy(''); };
+  if (!st.keyed && role !== 'owner') return null;
+  return (
+    <div data-tour="exp-inbox" className="mg-card" style={{ marginBottom: 14, padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <b style={{ flex: 1 }}>📥 חשבוניות שהגיעו במייל {items.length ? <span className="mg-chip warn">{items.length} ממתינות</span> : ''}</b>
+        {items.length > 0 && <button className="mg-btn ghost sm" onClick={() => setOpen(o => !o)}>{open ? 'הסתר' : 'הצג'}</button>}
+        {role === 'owner' && <button className="mg-btn ghost sm" onClick={() => setSetup(true)}>{st.keyed ? '⚙ הגדרות' : 'חבר את Gmail'}</button>}
+      </div>
+      {st.err && <div className="mg-note bad" style={{ marginTop: 8 }}>{st.err}</div>}
+      {!st.keyed && <div style={{ fontSize: 14, marginTop: 6 }}>חשבוניות ספקים שמגיעות אליך ל-Gmail יכולות להגיע לכאן לבד, ולהירשם כהוצאה בלחיצה. ההגדרה לוקחת כ-2 דקות.</div>}
+      {st.keyed && !items.length && <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 6 }}>
+        אין חשבוניות ממתינות.{st.lastAt ? ` אחרונה התקבלה ${new Date(st.lastAt).toLocaleString('he-IL')}.` : ' עוד לא התקבלה אף חשבונית: ודא שהרצת את setup בסקריפט.'}</div>}
+      {open && items.map(it => (
+        <div key={it.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--line)', padding: '9px 0' }}>
+          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+            <div style={{ fontWeight: 700 }}>{it.fromName || it.from}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {it.date ? heDate(String(it.date).slice(0, 10)) + ' · ' : ''}{it.subject || it.name}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="mg-btn ghost sm" disabled={!!busy} onClick={() => view(it)}>👁 צפה</button>
+            {canAct && <button className="mg-btn sm" disabled={!!busy} onClick={() => record(it)}>{busy === it.id ? 'קורא…' : 'רשום כהוצאה'}</button>}
+            {canAct && <button className="mg-btn ghost sm" disabled={!!busy} onClick={() => ignore(it)}>לא הוצאה</button>}
+          </div>
+        </div>))}
+      {setup && <GmailSetup book={book} flash={flash} onClose={() => { setSetup(false); load(); }} />}
+    </div>
+  );
+}
+
+function ExpenseList({ outgo, supName, onEdit, onDel, onFile }) {
   const [month, setMonth] = useState('');
   const [cat, setCat] = useState('');
   const list = outgo.filter(e => (!month || (e.date || '').startsWith(month)) && (!cat || e.cat === cat));
@@ -2682,7 +2905,8 @@ function ExpenseList({ outgo, supName, onEdit, onDel }) {
               <td>{supName(e.supplierId) || e.supplierName || '—'}</td>
               <td>{e.desc}{e.review && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>לבדיקה</span>}</td>
               <td><span className="mg-chip">{e.cat}</span></td>
-              <td>{e.docNo || (e.hasDoc ? 'יש' : <span style={{ color: 'var(--warn)' }}>חסר</span>)}</td>
+              <td>{e.docNo || (e.hasDoc ? 'יש' : <span style={{ color: 'var(--warn)' }}>חסר</span>)}
+                {e.file?.inboxId && onFile && <button className="mg-btn ghost sm" style={{ marginInlineStart: 6 }} title="החשבונית" onClick={() => onFile(e)}>📎</button>}</td>
               <td>{fmt(e.gross - e.vat)}</td><td>{fmt(e.vat)}</td><td><b>{fmt(e.gross)}</b></td>
               <td><div style={{ display: 'flex', gap: 4 }}>
                 <button className="mg-btn ghost sm" onClick={() => onEdit(e)}>✎</button>
@@ -2699,12 +2923,14 @@ function ExpenseList({ outgo, supName, onEdit, onDel }) {
   );
 }
 
-function ExpenseForm({ rec, rate, suppliers, onSave, onClose, onNewSupplier }) {
-  const [f, setF] = useState(() => ({
-    id: uid('exp'), date: todayIso(), supplierId: '', desc: '', cat: EXP_CATS[0], pay: PAY_METHODS[0],
-    gross: '', vatMode: rate > 0 ? 'full' : 'none', vatManual: '', docNo: '', ...(rec || {})
-  }));
-  const [newSup, setNewSup] = useState('');
+function ExpenseForm({ rec, init, rate, suppliers, onSave, onClose, onNewSupplier, onFile }) {
+  const [f, setF] = useState(() => {
+    const base = { id: uid('exp'), date: todayIso(), supplierId: '', desc: '', cat: EXP_CATS[0], pay: PAY_METHODS[0],
+                   gross: '', vatMode: rate > 0 ? 'full' : 'none', vatManual: '', docNo: '', ...(rec || init?.f || {}) };
+    const s = suppliers.find(x => x.id === base.supplierId);
+    return init && s?.cat ? { ...base, cat: s.cat } : base;
+  });
+  const [newSup, setNewSup] = useState(init?.newSup || '');
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const g = Number(f.gross) || 0;
   /* Deductible VAT: full, a private car's two thirds, none, or typed in. */
@@ -2718,10 +2944,15 @@ function ExpenseForm({ rec, rate, suppliers, onSave, onClose, onNewSupplier }) {
     setF(p => ({ ...p, supplierId: id, cat: s?.cat && !rec ? s.cat : p.cat }));
   };
   return (
-    <Box title={rec ? 'עריכת הוצאה' : 'הוצאה חדשה'} onClose={onClose} wide
+    <Box title={rec ? 'עריכת הוצאה' : init ? 'רישום חשבונית שהגיעה במייל' : 'הוצאה חדשה'} onClose={onClose} wide
          footer={<><button className="mg-btn" disabled={!ok}
-                           onClick={() => onSave({ ...f, gross: g, vat, desc: String(f.desc).trim(), hasDoc: !!f.docNo || !!f.hasDoc, review: false })}>שמור</button>
+                           onClick={() => onSave({ ...f, gross: g, vat, desc: String(f.desc).trim(), hasDoc: !!f.docNo || !!f.hasDoc || !!f.file, review: false })}>שמור</button>
                    <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      {init && <div className="mg-note" style={{ marginBottom: 12 }}>
+        {init.read ? <>מה שנקרא מהקובץ כבר מולא. <b>בדוק את הסכום, המע״מ והתאריך</b> לפני השמירה.</> : <>לא הצלחתי לקרוא טקסט מהקובץ (למשל תמונה או סריקה). מלא את הסכום לפי החשבונית.</>}
+        {init.foreign && <div style={{ marginTop: 6, color: 'var(--warn)', fontWeight: 700 }}>⚠ החשבונית ב-{init.foreign}. הסכום שנקרא ({init.f.gross}) אינו בשקלים: הזן את הסכום בשקלים כפי שחויב בכרטיס. מע״מ: ללא (ספק מחו״ל).</div>}
+        {onFile && <>{' '}<button className="mg-btn ghost sm" onClick={() => onFile(f)}>👁 פתח את החשבונית</button></>}</div>}
+      {!init && f.file?.inboxId && onFile && <div style={{ marginBottom: 10 }}><button className="mg-btn ghost sm" onClick={() => onFile(f)}>📎 {f.file.name || 'החשבונית'}</button></div>}
       <div style={grid}>
         <Field label="תאריך"><input type="date" value={f.date} onChange={e => set('date', e.target.value)} /></Field>
         <Field label="ספק"><select value={f.supplierId} onChange={e => pickSupplier(e.target.value)}>
@@ -2729,7 +2960,7 @@ function ExpenseForm({ rec, rate, suppliers, onSave, onClose, onNewSupplier }) {
         <Field label="או ספק חדש">
           <div style={{ display: 'flex', gap: 6 }}><input value={newSup} onChange={e => setNewSup(e.target.value)} />
             <button type="button" className="mg-btn ghost sm" disabled={!newSup.trim()} onClick={async () => {
-              const s = { id: uid('sup'), name: newSup.trim(), cat: f.cat, taxId: '', phone: '', email: '' };
+              const s = { id: uid('sup'), name: newSup.trim(), cat: f.cat, taxId: init?.supTax || '', phone: '', email: init?.supEmail || '' };
               if (await onNewSupplier(s)) { setF(p => ({ ...p, supplierId: s.id })); setNewSup(''); }
             }}>＋</button></div></Field>
         <Field label="תיאור"><input value={f.desc} onChange={e => set('desc', e.target.value)} /></Field>

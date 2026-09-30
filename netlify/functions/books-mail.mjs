@@ -1,4 +1,4 @@
-/* Tizon Books 1.15.5 · server function, in one file. Built from
+/* Tizon Books 1.19.0 · server function, in one file. Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -874,8 +874,80 @@ async function storeCreateCustomer(idToken, tenant, c, fetchImpl = fetch) {
   throw Object.assign(new Error("id taken"), { status: 409 });
 }
 
+// netlify/lib/inbox.mjs
+var MAX_FILE = 4.2 * 1024 * 1024;
+var OK_MIME = /^(application\/pdf|image\/(jpe?g|png|webp|heic|heif))$/i;
+var idOk = (s) => /^[\w.-]{1,120}$/.test(String(s || ""));
+var keyName = (b) => "inbox-key:" + b;
+var idxName = (b) => "inbox:" + b;
+var fileName = (b, id) => "inboxf:" + b + ":" + id;
+async function readIndex(store, b) {
+  const x = await store.get(idxName(b), { type: "json" }).catch(() => null);
+  return Array.isArray(x?.items) ? x : { items: [], lastAt: null };
+}
+var writeIndex = (store, b, x) => store.setJSON(idxName(b), x);
+function parseFrom(s) {
+  const t = String(s || "").trim();
+  const m = t.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  const email = (m ? m[2] : t).trim().toLowerCase();
+  const name = (m ? m[1] : "").trim();
+  return { name: name || email.split("@")[0], email: /@/.test(email) ? email : "" };
+}
+async function inboxPush(store, b, key, body) {
+  if (!idOk(b)) return { status: 400, body: { error: "book" } };
+  const want = await store.get(keyName(b), { type: "json" }).catch(() => null);
+  if (!want?.key || !key || key !== want.key) return { status: 403, body: { error: "key" } };
+  const id = String(body?.id || "");
+  if (!idOk(id)) return { status: 400, body: { error: "id" } };
+  const mime = String(body?.mime || "").toLowerCase();
+  if (!OK_MIME.test(mime)) return { status: 200, body: { ok: true, skipped: "type" } };
+  const data = String(body?.data || "");
+  const size = Math.floor(data.length * 3 / 4);
+  if (!data || size > MAX_FILE) return { status: 200, body: { ok: true, skipped: "size" } };
+  const idx = await readIndex(store, b);
+  if (idx.items.some((x) => x.id === id)) return { status: 200, body: { ok: true, dup: true } };
+  const from = parseFrom(body.from);
+  const item = {
+    id,
+    from: from.email,
+    fromName: from.name.slice(0, 120),
+    subject: String(body.subject || "").slice(0, 200),
+    date: String(body.date || "").slice(0, 40),
+    name: String(body.name || "file").slice(0, 160),
+    mime,
+    size,
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    status: "new"
+  };
+  await store.set(fileName(b, id), data);
+  idx.items.push(item);
+  idx.lastAt = item.at;
+  if (idx.items.length > 1500) idx.items = [...idx.items.filter((x) => x.status === "new"), ...idx.items.filter((x) => x.status !== "new").slice(-800)];
+  await writeIndex(store, b, idx);
+  return { status: 200, body: { ok: true } };
+}
+async function inboxFile(store, b, id) {
+  if (!idOk(b) || !idOk(id)) return null;
+  const data = await store.get(fileName(b, id)).catch(() => null);
+  if (!data) return null;
+  const idx = await readIndex(store, b);
+  const it = idx.items.find((x) => x.id === id);
+  return { data: String(data), mime: it?.mime || "application/octet-stream", name: it?.name || "file" };
+}
+async function inboxMark(store, b, id, status, expenseId) {
+  if (!["done", "ignored", "new"].includes(status)) return false;
+  const idx = await readIndex(store, b);
+  const it = idx.items.find((x) => x.id === id);
+  if (!it) return false;
+  it.status = status;
+  it.expenseId = status === "done" ? String(expenseId || "") : "";
+  it.handledAt = (/* @__PURE__ */ new Date()).toISOString();
+  await writeIndex(store, b, idx);
+  return true;
+}
+
 // netlify/functions/books-mail.mjs
-var VERSION = "1.15.0";
+var VERSION = "1.19.0";
 var JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
 var env = (k) => (process.env[k] || "").trim();
 var json = (status, body) => new Response(JSON.stringify(body), {
@@ -884,6 +956,7 @@ var json = (status, body) => new Response(JSON.stringify(body), {
 });
 var storeOverride = null;
 var secrets = () => storeOverride || getStore({ name: "books-secrets", consistency: "strong" });
+var inboxStore = () => storeOverride || getStore({ name: "books-inbox", consistency: "strong" });
 async function certB64() {
   if (env("SIGN_P12_BASE64")) return env("SIGN_P12_BASE64");
   try {
@@ -1202,12 +1275,18 @@ var books_mail_default = async (req) => {
       });
       return json(r.status || 200, r);
     }
+    if (req.method === "POST" && act === "inbox-push") {
+      const body2 = await req.json().catch(() => ({}));
+      const r = await inboxPush(inboxStore(), url.searchParams.get("b") || "", url.searchParams.get("k") || "", body2);
+      return json(r.status, r.body);
+    }
     if (req.method === "GET") return json(200, {
       ok: true,
       ...await signState(),
       mail: mailReady(),
       project: true,
       pay: { admin: !!(dbOverride || await saJson()) },
+      inbox: true,
       store: await storeLink().then((l) => l?.refreshToken ? { linked: true, email: l.email } : { linked: false }),
       password: !!env("SIGN_P12_PASSWORD"),
       guarded: !!env("ALLOWED_EMAILS"),
@@ -1318,6 +1397,34 @@ var books_mail_default = async (req) => {
       const from = String(body.from || ""), to = String(body.to || "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return json(400, { error: "dates" });
       return json(200, { ok: true, ...await icountDocs(t.token, from, to, fetchOverride || fetch) });
+    }
+    if (["inbox-key", "inbox-list", "inbox-file", "inbox-mark"].includes(body.action)) {
+      const bookId = String(body.book || "");
+      const role = await roleOfBook(email, bookId, String(body.idToken || ""));
+      if (!role || body.action === "inbox-key" && role !== "owner" || body.action === "inbox-mark" && !["owner", "clerk"].includes(role))
+        return json(403, { error: "not allowed", detail: lastRole });
+      const st = inboxStore();
+      if (body.action === "inbox-key") {
+        let k = await secrets().get(keyName(bookId), { type: "json" }).catch(() => null);
+        if (!k?.key || body.renew) {
+          k = { key: token(32), by: email, at: (/* @__PURE__ */ new Date()).toISOString() };
+          await st.setJSON(keyName(bookId), k);
+          await secrets().setJSON(keyName(bookId), k);
+        }
+        const idx = await readIndex(st, bookId);
+        return json(200, { ok: true, key: k.key, at: k.at, lastAt: idx.lastAt, count: idx.items.length });
+      }
+      if (body.action === "inbox-list") {
+        const idx = await readIndex(st, bookId);
+        const keyed = !!(await secrets().get(keyName(bookId), { type: "json" }).catch(() => null))?.key;
+        return json(200, { ok: true, keyed, lastAt: idx.lastAt, items: idx.items.filter((x) => body.all || x.status === "new") });
+      }
+      if (body.action === "inbox-file") {
+        const f = await inboxFile(st, bookId, String(body.id || ""));
+        return f ? json(200, { ok: true, ...f }) : json(404, { error: "not found" });
+      }
+      const ok = await inboxMark(st, bookId, String(body.id || ""), String(body.status || ""), body.expenseId);
+      return ok ? json(200, { ok: true }) : json(404, { error: "not found" });
     }
     if (body.action === "store-link") {
       if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
