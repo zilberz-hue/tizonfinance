@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.16.1';
+const VERSION = '1.16.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -943,6 +943,10 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.16.2', date: '30.09.26', items: [
+    'מיזוג לקוחות מהחנות: לפני המיזוג מוצג מה יקרה (חדשים, מה יושלם אצל קיימים, כפילויות בתוך החנות), ואחריו פס התקדמות. שום פרט קיים לא מוחלף.',
+    'לקוח שכבר נמשך מהחנות מזוהה לפי הקישור שלו, גם אם שמו או הטלפון השתנו.',
+    'לשונית הלקוחות מהירה גם עם אלפי לקוחות ומסמכים.'] },
   { v: '1.16.1', date: '30.09.26', items: [
     'פתיחה מהירה: העסק מוצג מיד, וההיסטוריה המיובאת והזמנות החנות נטענות ברקע ומתווספות כשהן מגיעות (עם חיווי קטן בזמן הטעינה).'] },
   { v: '1.16.0', date: '30.09.26', items: [
@@ -1051,7 +1055,7 @@ const TOURS = {
   ],
   customers: [
     { t: 'cust-stats', title: 'הלקוחות', text: 'כמה לקוחות, כמה עם אימייל וטלפון, וכמה פעילים השנה.', since: '1.5.0' },
-    { t: 'cust-store', title: 'סנכרון עם החנות', text: 'לקוחות החנות נקראים לכאן. לחנות נוספים רק לקוחות חדשים, בלחיצה, ואף פרט קיים שם לא משתנה.', since: '1.6.0' },
+    { t: 'cust-store', title: 'סנכרון עם החנות', text: 'לקוחות החנות נקראים לכאן ומתמזגים בלחיצה, אחרי שרואים מה יקרה: חדשים מתווספים, ולקיימים נוספים רק פרטים חסרים. לחנות נוספים רק לקוחות חדשים, בלחיצה, ואף פרט קיים שם לא משתנה.', since: '1.6.0' },
     { t: 'cust-tools', title: 'חיפוש, הוספה וייבוא', text: 'מחפשים לפי שם, טלפון, אימייל או ח.פ. אפשר להוסיף לקוח, לייבא מ-iCount ולייצא לאקסל.', since: '1.5.0', roles: WRITERS },
     { t: 'cust-table', title: 'כרטיס לקוח', text: 'מחזור ופעילות אחרונה לכל לקוח. בכרטיס יש גם כפתור לכרטסת. כפילויות מתאחדות לפי ח.פ., ורק כשהשם תואם גם לפי אימייל או טלפון.', since: '1.5.0' },
   ],
@@ -4120,24 +4124,48 @@ function mergeCustomer(old, inc, source) {
   if (inc.storeId && !out.storeId) out.storeId = inc.storeId;
   return out;
 }
+/* Candidates by tax id, email, phone and name, so thousands of customers are
+   matched without comparing each with every other. sameCustomer still has
+   the last word; the index only saves the looking. Items may be anything:
+   get() gives the customer-shaped part. */
+function custKeys(c) {
+  const k = [], t = normTax(c?.taxId), e = normEmail(c?.email), p = normPhone(c?.phone), n = normName(c?.name);
+  if (t) k.push('t:' + t); if (e) k.push('e:' + e); if (p) k.push('p:' + p); if (n) k.push('n:' + n);
+  return k;
+}
+function custIndex(items, get = (x) => x) {
+  const m = new Map();
+  const add = (it) => custKeys(get(it)).forEach(k => { const l = m.get(k); if (!l) m.set(k, [it]); else if (!l.includes(it)) l.push(it); });
+  items.forEach(add);
+  const find = (c) => { const seen = new Set(), out = [];
+    custKeys(c).forEach(k => (m.get(k) || []).forEach(it => { if (!seen.has(it)) { seen.add(it); if (sameCustomer(get(it), c)) out.push(it); } }));
+    return out; };
+  return { add, find };
+}
 /* A batch of incoming customers against the list: what is new, what adds
-   something to an existing one, and what is already known. */
+   something to an existing one, and what is already known. A customer that
+   came from the store before is found again by its store id first. */
 function planCustomers(list, incoming, source) {
-  const cur = [...list]; const add = [], upd = [], same = [];
+  const cur = [...list]; const add = [], upd = [], same = [], added = new Set(); let dupIn = 0;
+  const idx = custIndex([], (i) => cur[i]); cur.forEach((_, i) => idx.add(i));
+  const byStore = new Map(); cur.forEach((x, i) => { if (x.storeId) byStore.set(x.storeId, i); });
   incoming.filter(c => String(c.name || '').trim() || normEmail(c.email) || normPhone(c.phone)).forEach(c => {
-    const hit = cur.find(x => sameCustomer(x, c));
-    if (!hit) {
+    const hi = c.storeId && byStore.has(c.storeId) ? byStore.get(c.storeId) : idx.find(c).sort((x, y) => x - y)[0];
+    if (hi === undefined) {
       const n = clean({ id: uid('cust'), ...Object.fromEntries(CUST_FIELDS.map(k => [k, String(c[k] ?? '').trim()])),
                         name: String(c.name || c.email || c.phone).trim(), sources: [source], storeId: c.storeId || '', createdAt: new Date().toISOString() });
-      cur.push(n); add.push(n);
+      cur.push(n); add.push(n); added.add(n.id); idx.add(cur.length - 1); if (n.storeId) byStore.set(n.storeId, cur.length - 1);
     } else {
+      const hit = cur[hi];
+      if (added.has(hit.id)) dupIn++;
       const m = mergeCustomer(hit, c, source);
       const changed = CUST_FIELDS.some(k => (m[k] || '') !== (hit[k] || '')) || (m.sources || []).length !== (hit.sources || []).length || m.storeId !== hit.storeId;
-      if (changed) { cur[cur.indexOf(hit)] = m; const i = add.indexOf(hit); if (i >= 0) add[i] = m; else { const j = upd.findIndex(x => x.id === m.id); if (j >= 0) upd[j] = m; else upd.push(m); } }
-      else same.push(hit);
+      if (changed) { cur[hi] = m; idx.add(hi); if (m.storeId && !byStore.has(m.storeId)) byStore.set(m.storeId, hi);
+        const i = add.findIndex(x => x.id === m.id); if (i >= 0) add[i] = m; else { const j = upd.findIndex(x => x.id === m.id); if (j >= 0) upd[j] = m; else upd.push(m); } }
+      else if (!added.has(hit.id)) same.push(hit);
     }
   });
-  return { add, upd, same, all: cur };
+  return { add, upd, same, dupIn, all: cur };
 }
 async function saveCustomers(col, recs, onProgress) {
   let n = 0;
@@ -4263,6 +4291,41 @@ function CustomerImport({ list, col, flash, onDone, onClose }) {
   );
 }
 
+/* What a merge from the store will do, before anything is written. */
+function StoreMergeReview({ plan, list, total, busy, prog, onGo, onCancel }) {
+  const byId = useMemo(() => new Map(list.map(c => [c.id, c])), [list]);
+  const diffs = plan.upd.map(m => { const o = byId.get(m.id) || {};
+    const f = CUST_FIELDS.filter(k => (m[k] || '') !== (o[k] || '')).map(k => CUST_LABELS[k]);
+    if (m.storeId && !o.storeId) f.push('קישור ללקוח בחנות');
+    return { m, f }; });
+  return (
+    <div data-tour="cust-merge" style={{ marginTop: 10, background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, padding: 12, color: 'var(--ink)' }}>
+      <b>מיזוג לקוחות מהחנות</b> · נקראו {total} לקוחות מהחנות
+      <ul style={{ margin: '8px 0', paddingInlineStart: 20, lineHeight: 1.7 }}>
+        <li><b>{plan.add.length}</b> לקוחות חדשים יתווספו לרשימה.</li>
+        {plan.upd.length > 0 && <li><b>{plan.upd.length}</b> לקוחות שכבר קיימים כאן יקבלו רק פרטים שחסרים להם. שום פרט קיים לא מוחלף.</li>}
+        <li><b>{plan.same.length}</b> כבר קיימים כאן בדיוק כמו בחנות ולא ישתנו.</li>
+        {plan.dupIn > 0 && <li><b>{plan.dupIn}</b> רשומות כפולות בתוך החנות עצמה (אותו אדם פעמיים) אוחדו ללקוח אחד.</li>}
+      </ul>
+      <div className="mg-note" style={{ fontSize: '.9em', margin: '6px 0' }}>
+        ההתאמה: לפי ח.פ./ת.ז., אחר כך אימייל או טלפון (רק כשהשם לא סותר), ולפי שם רק כשאין שום פרט אחר. בחנות עצמה לא משתנה דבר.</div>
+      {diffs.length > 0 && <details style={{ margin: '6px 0' }}><summary>מה יושלם אצל הקיימים ({diffs.length})</summary>
+        <div style={{ maxHeight: 220, overflow: 'auto', fontSize: '.92em' }}>
+          {diffs.map(({ m, f }) => <div key={m.id} style={{ padding: '3px 0', borderBottom: '1px dashed var(--line)' }}><b>{m.name}</b> · יתווסף: {f.join(', ') || 'מקור: חנות'}</div>)}
+        </div></details>}
+      {plan.add.length > 0 && <details style={{ margin: '6px 0' }}><summary>דוגמה מהחדשים</summary>
+        <div style={{ maxHeight: 220, overflow: 'auto', fontSize: '.92em' }}>
+          {plan.add.slice(0, 50).map(c => <div key={c.id} style={{ padding: '3px 0', borderBottom: '1px dashed var(--line)' }}>{c.name} <span style={{ color: 'var(--muted)' }} dir="ltr">{[c.email, c.phone].filter(Boolean).join(' · ')}</span></div>)}
+          {plan.add.length > 50 && <div style={{ color: 'var(--muted)' }}>ועוד {plan.add.length - 50}…</div>}
+        </div></details>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+        <button className="mg-btn sm" disabled={busy} onClick={onGo}>{busy ? `ממזג… ${prog}` : `מזג ${plan.add.length + plan.upd.length} לקוחות`}</button>
+        <button className="mg-btn ghost sm" disabled={busy} onClick={onCancel}>ביטול</button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------- the list */
 function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onReload, onStoreLogin, onLedger }) {
   const list = data.customers || [];
@@ -4277,9 +4340,10 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
   /* What each customer did: documents issued or imported, and store orders. */
   const activity = useMemo(() => {
     const docs = data.documents || [], orders = data.orders || [];
+    const di = custIndex(docs, d => d.customer || {});
+    const oi = custIndex(orders, o => ({ name: o.customerName, email: o.customerEmail || o.emailKey, phone: o.customerPhone }));
     return Object.fromEntries(list.map(c => {
-      const ds = docs.filter(d => sameCustomer(c, d.customer || {}));
-      const os = orders.filter(o => sameCustomer(c, { name: o.customerName, email: o.customerEmail || o.emailKey, phone: o.customerPhone }));
+      const ds = di.find(c), os = oi.find(c);
       const total = ds.filter(d => ['305', '320', '330'].includes(d.type) && !d.cancelled).reduce((a, d) => a + (d.type === '330' ? -d.total : d.total), 0)
                   + os.filter(isPaidOrder).reduce((a, o) => a + (Number(o.total) || 0), 0);
       const last = [...ds.map(d => d.date), ...os.map(o => d10(o.paidAt) || d10(o.createdIso) || d10(o.createdAt))].filter(Boolean).sort().pop() || '';
@@ -4307,15 +4371,20 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
   const storePlan = useMemo(() => storeCust?.rows ? planCustomers(list, storeCust.rows, 'store') : null, [storeCust, list]);
   /* The other way: customers here that the store does not have. Only ones
      that can be reached (email or phone), and never one already linked. */
-  const toStore = useMemo(() => storeCust?.rows ? list.filter(c => !c.storeId && (normEmail(c.email) || normPhone(c.phone))
-    && !storeCust.rows.some(r => sameCustomer(r, c))) : [], [storeCust, list]);
+  const toStore = useMemo(() => { if (!storeCust?.rows) return [];
+    const si = custIndex(storeCust.rows);
+    return list.filter(c => !c.storeId && (normEmail(c.email) || normPhone(c.phone)) && !si.find(c).length); }, [storeCust, list]);
+  const [review, setReview] = useState(false);
+  const [prog, setProg] = useState('');
   const [push, setPush] = useState(null);
 
   const syncStore = async () => {
     setBusy('store');
-    const recs = [...storePlan.add, ...storePlan.upd];
-    const n = await saveCustomers(cols.customers, recs);
-    setBusy(''); flash(`סונכרנו ${n} לקוחות מהחנות`); onReload();
+    const recs = [...storePlan.upd, ...storePlan.add];
+    const n = await saveCustomers(cols.customers, recs, (i, t) => setProg(`${i} / ${t}`));
+    setBusy(''); setProg(''); setReview(false);
+    flash(n === recs.length ? `המיזוג הסתיים: ${storePlan.add.length} נוספו, ${storePlan.upd.length} הושלמו` : `נשמרו ${n} מתוך ${recs.length}. אפשר ללחוץ שוב כדי להשלים את השאר.`);
+    onReload();
   };
   const saveOne = async (c) => {
     const r = clean({ ...c, sources: c.sources?.length ? c.sources : ['manual'], updatedAt: new Date().toISOString() });
@@ -4347,7 +4416,9 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
             : storeCust.err ? <>לא הצלחתי לקרוא את לקוחות החנות ({storeCust.err}).</>
             : storePlan && storePlan.add.length + storePlan.upd.length
               ? <>בחנות יש <b>{storePlan.add.length}</b> לקוחות חדשים{storePlan.upd.length ? ` ו-${storePlan.upd.length} עם פרטים נוספים` : ''}. {' '}
-                  <button className="mg-btn sm" disabled={!!busy} onClick={syncStore}>{busy === 'store' ? 'מסנכרן…' : '↻ סנכרן מהחנות'}</button></>
+                  {!review && <button className="mg-btn sm" disabled={!!busy || ro} onClick={() => setReview(true)}>↻ מזג מהחנות…</button>}
+                  {review && <StoreMergeReview plan={storePlan} list={list} total={storeCust.rows.length} busy={busy === 'store'} prog={prog}
+                                               onGo={syncStore} onCancel={() => setReview(false)} />}</>
               : <>כל {storeCust.rows.length} לקוחות החנות כבר ברשימה.</>}
           {!ro && toStore.length > 0 && <div style={{ marginTop: 6 }}>
             ב-Tizon Books יש <b>{toStore.length}</b> לקוחות שלא קיימים בחנות.{' '}
