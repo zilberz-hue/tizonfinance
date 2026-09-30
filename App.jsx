@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.19.2';
+const VERSION = '1.19.3';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -120,6 +120,7 @@ const local = {
   /* The next number and the document, written together. */
   async issue(bookId, key, start, rec) {
     const o = lsGet(LOCAL_KEY, {});
+    if (o[`books/${bookId}/documents/${rec.id}`]) return o[`books/${bookId}/documents/${rec.id}`];
     const ck = `books/${bookId}/counters/${key}`;
     const n = Math.max(Number(o[ck]?.next) || 0, start);
     const d = { ...rec, number: n };
@@ -139,6 +140,9 @@ const remote = {
     const ck = doc(cloud.db, 'books', bookId, 'counters', key);
     const dk = doc(cloud.db, 'books', bookId, 'documents', rec.id);
     return runTransaction(cloud.db, async (tx) => {
+      /* The same document tried again after a timeout: it was already issued. */
+      const was = await tx.get(dk);
+      if (was.exists()) return { ...was.data(), id: rec.id };
       const snap = await tx.get(ck);
       const n = Math.max(snap.exists() ? Number(snap.data().next) || 0 : 0, start);
       const d = { ...rec, number: n };
@@ -233,14 +237,19 @@ const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counte
 const ARCH_BYTES = 600 * 1024;
 const utf8Len = (s) => new TextEncoder().encode(s).length;
 function archiveDocs(chunks) {
-  const out = [];
-  (chunks || []).filter(c => c.kind === 'documents').sort((a, b) => String(a.id).localeCompare(String(b.id)))
-    .forEach(c => { try { JSON.parse(c.data || '[]').forEach(d => out.push({ ...d, _arch: true })); } catch { /* a damaged chunk is skipped */ } });
-  return out;
+  const by = new Map();
+  (chunks || []).filter(c => c.kind === 'documents').sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')) || String(a.id).localeCompare(String(b.id)))
+    .forEach(c => { try { JSON.parse(c.data || '[]').forEach(d => by.set(d.id, { ...d, _arch: true })); } catch { /* a damaged chunk is skipped */ } });
+  /* One copy of each document, even if a write was cut off between two generations of the pack. */
+  return [...by.values()];
 }
+/* A new generation of the pack is written in full before the old one is
+   removed: if the connection drops halfway, the old pack is still whole and
+   reading merges the two without doubling. */
 async function archiveWrite(bookId, docs, oldChunks = []) {
   const col = bookCol(bookId, 'archive');
-  const list = [...docs].map(({ _arch, ...d }) => d).sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id)));
+  const list = [...new Map([...docs].map(({ _arch, ...d }) => [d.id, d])).values()]
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id)));
   const chunks = []; let cur = [], size = 2;
   for (const d of list) {
     const j = JSON.stringify(d), n = utf8Len(j) + 1;
@@ -248,21 +257,23 @@ async function archiveWrite(bookId, docs, oldChunks = []) {
     cur.push(j); size += n;
   }
   if (cur.length) chunks.push(cur);
-  const ids = chunks.map((_, i) => 'docs_' + String(i).padStart(3, '0'));
-  for (let i = 0; i < chunks.length; i++) {
-    const data = '[' + chunks[i].join(',') + ']';
-    const was = oldChunks.find(c => c.id === ids[i]);
-    if (!was || was.data !== data) await withTimeout(col.put(ids[i], { kind: 'documents', n: chunks[i].length, data, updatedAt: new Date().toISOString() }), 30000);
-  }
-  for (const c of oldChunks.filter(c => c.kind === 'documents' && !ids.includes(c.id))) await col.del(c.id).catch(() => {});
+  const old = oldChunks.filter(c => c.kind === 'documents');
+  const datas = chunks.map(c => '[' + c.join(',') + ']');
+  /* Nothing changed: nothing to write. */
+  if (old.length === datas.length && datas.every(d => old.some(c => c.data === d))) return list.length;
+  const gen = Date.now().toString(36), at = new Date().toISOString();
+  for (let i = 0; i < datas.length; i++)
+    await withTimeout(col.put(`docs_${gen}_${String(i).padStart(3, '0')}`, { kind: 'documents', n: chunks[i].length, data: datas[i], gen, updatedAt: at }), 30000);
+  for (const c of old) await col.del(c.id).catch(() => {});
   return list.length;
 }
 /* Adds imported documents to the packed history, without doubling. */
 async function archiveAdd(bookId, data, docs) {
   /* The pack as stored now, not as loaded: the history may still be arriving in the background. */
   const fresh = await withTimeout(bookCol(bookId, 'archive').list(), 30000).catch(() => null);
-  if (fresh) data = { ...data, archive: fresh };
-  else if (data.histPending) throw new Error('archive not loaded');
+  /* Never write the pack without having read it: it would replace what is there. */
+  if (!fresh) throw new Error('archive not loaded');
+  data = { ...data, archive: fresh };
   const have = archiveDocs(data.archive);
   const ids = new Set(have.map(d => d.id));
   const all = [...have, ...docs.filter(d => !ids.has(d.id))];
@@ -309,11 +320,20 @@ async function importAll(file, me) {
     const { data = {}, ...b } = bk;
     const owners = [...new Set([...(b.owners || []), ...(me ? [me.toLowerCase()] : [])])];
     await putBook(clean({ ...b, owners }));
-    for (const c of COLS) for (const r of (data[c] || [])) {
+    /* What is there now wins where going back would lose something: an issued
+       document is never replaced by an older copy of itself, a counter never
+       goes back, and the packed history is merged rather than overwritten. */
+    const now = {};
+    for (const c of ['documents', 'counters']) now[c] = await bookCol(b.id, c).list().catch(() => []);
+    for (const c of COLS.filter(c => c !== 'archive')) for (const r of (data[c] || [])) {
       const { id, ...rest } = r;
+      if (c === 'documents' && now.documents.some(x => x.id === id)) continue;
+      if (c === 'counters') { const was = now.counters.find(x => x.id === id); if (was && Number(was.next) >= Number(rest.next)) continue; }
       // Payment pages are written only by the server in the cloud; a restore skips them there.
       try { await bookCol(b.id, c).put(id, clean(rest)); n++; } catch (e) { if (c !== 'payreqs') throw e; }
     }
+    const packed = archiveDocs(data.archive || []);
+    if (packed.length) n += await archiveAdd(b.id, {}, packed);
   }
   return { books: file.books.length, records: n };
 }
@@ -349,8 +369,12 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 /* The minus sign stays in front of the shekel sign inside Hebrew text. */
 const fmt = (n) => (r2(n) < 0 ? '\u200E-' : '') + '₪' + Math.abs(r2(n)).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const pad = (n) => String(n).padStart(2, '0');
-const thisMonth = () => new Date().toISOString().slice(0, 7);
-const todayIso = () => new Date().toISOString().slice(0, 10);
+/* Dates as the business sees them: Israel time, not UTC (at 01:30 on the 1st
+   UTC is still in the previous month, and so would the VAT period be). */
+const IL_TZ = 'Asia/Jerusalem';
+const ilDate = (d) => { try { return new Date(d).toLocaleDateString('sv-SE', { timeZone: IL_TZ }); } catch { const x = new Date(d); return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`; } };
+const todayIso = () => ilDate(Date.now());
+const thisMonth = () => todayIso().slice(0, 7);
 const clean = (o) => JSON.parse(JSON.stringify(o));
 const uid = (p = 'id') => p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const withTimeout = (p, ms = 15000) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -358,11 +382,13 @@ const withTimeout = (p, ms = 15000) => Promise.race([p, new Promise((_, rej) => 
 function d10(v) {
   if (!v) return '';
   const s = String(v).trim();
+  /* A moment in time (with its hour and zone) falls on its day in Israel. */
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(s)) { const t = Date.parse(s); if (!isNaN(t)) return ilDate(t); }
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
   if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad(m[2])}-${pad(m[1])}`;
   const t = Date.parse(s);
-  return isNaN(t) ? '' : new Date(t).toISOString().slice(0, 10);
+  return isNaN(t) ? '' : ilDate(t);
 }
 const heDate = (d) => d ? d.split('-').reverse().join('/') : '—';
 const monthName = (ym) => {
@@ -469,7 +495,8 @@ function buildLedger(book, data) {
      imported iCount document: by its invoice number, or — for orders paid on
      iCount's own page, which carry no number — by the same total within two
      days. Each imported document can stand for one order only. */
-  const imp = (data?.documents || []).filter(d => d.series === 'import' && ['305', '320'].includes(d.type));
+  const impTypes = book?.dealerType === 'exempt' ? ['400'] : ['305', '320'];
+  const imp = (data?.documents || []).filter(d => d.series === 'import' && impTypes.includes(d.type));
   const impNums = new Set(imp.map(d => String(d.number)));
   const impUsed = new Set();
   const inICount = (o) => {
@@ -547,6 +574,8 @@ async function loadHistory(book) {
   return { archive: archive || [], packed: archiveDocs(archive || []), failed: !archive };
 }
 function withHistory(d, h) {
+  /* A failed read keeps whatever history was already on screen. */
+  if (h.failed) return { ...d, histPending: false, histErr: true, errors: [...new Set([...(d.errors || []), 'archive'])] };
   const ids = new Set((d.documents || []).map(x => x.id));
   return { ...d, archive: h.archive, histPending: false, histErr: h.failed,
            documents: [...(d.documents || []).filter(x => !x._arch), ...h.packed.filter(x => !ids.has(x.id))],
@@ -990,6 +1019,15 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.19.3', date: '30.09.26', items: [
+    'תאריכים לפי שעון ישראל: מסמך שמופק אחרי חצות נרשם ביום ובחודש הנכונים (קודם, בין 00:00 ל-03:00 הוא נרשם ביום הקודם).',
+    'מסמך שההפקה שלו נתקעה ונוסתה שוב לא יופק פעמיים.',
+    'לא ניתן להפיק קבלה או זיכוי אמיתיים על מסמך ניסיון. זיכוי מחושב לפי שיעור המע״מ של החשבונית המקורית. תקרת מזומן כוללת קבלות קודמות על אותה חשבונית. חובה תאריך.',
+    'הדפסה: רק הדפסה ראשונה מסומנת "מקור", גם בלחיצה כפולה.',
+    'הגנה על נתונים: ההיסטוריה הארוזה לא תידרס אם הטעינה נכשלה. שחזור מגיבוי לא מחליף מסמכים ומונים עדכניים. מיזוג עסקים כפולים לא מוחק דבר אם משהו לא נקרא או לא הועתק.',
+    'איתור כפילויות: "מזג את הוודאיות" לא ממזג יותר בני משפחה שחולקים טלפון או אימייל.',
+    'עוסק פטור עם חנות: קבלות iCount לא נספרות פעמיים. זיכוי ספק (הוצאה שלילית) ניתן לעריכה. שיעור מע״מ ריק לא נשמר.',
+    'תוקנו: כפתור שגוי בלשונית פריטים, נעילה אוטומטית אחרי ביטול הקוד, רענון שהעלים רשומה שנשמרה באותו רגע, גיבוי שבועי שנשלח פעמיים.'] },
   { v: '1.19.2', date: '30.09.26', items: ['מהירות: רשימות ארוכות (מסמכים, הכנסות, הוצאות, לקוחות) מציגות את 100 החדשים ו"הצג עוד". המסכים נפתחים מיד גם עם אלפי מסמכים היסטוריים. הסכומים, החיפוש והייצוא ממשיכים לכלול הכול.'] },
   { v: '1.19.1', date: '30.09.26', items: ['נייד: תיקון מסך שזז הצידה (כפתור ארוך בלשונית הייבוא). מעכשיו שום רכיב לא יכול לדחוף את הדף הצידה.'] },
   { v: '1.19.0', date: '30.09.26', items: [
@@ -1374,9 +1412,9 @@ function App() {
   const [storeTick, setStoreTick] = useState(0);
   const [server, setServer] = useState(null);
   const [locked, setLocked] = useState(() => !!lsGet(PIN_KEY, null) && sessionStorage.getItem(UNLOCK_KEY) !== '1');
+  /* After 15 idle minutes, while a code is set (it may be set or removed during the session). */
   useEffect(() => {
-    if (!lsGet(PIN_KEY, null)) return;
-    let t; const reset = () => { clearTimeout(t); t = setTimeout(() => { sessionStorage.removeItem(UNLOCK_KEY); setLocked(true); }, 15 * 60000); };
+    let t; const reset = () => { clearTimeout(t); t = setTimeout(() => { if (!lsGet(PIN_KEY, null)) return; sessionStorage.removeItem(UNLOCK_KEY); setLocked(true); }, 15 * 60000); };
     ['mousemove', 'keydown', 'click', 'touchstart'].forEach(ev => window.addEventListener(ev, reset));
     reset();
     return () => { clearTimeout(t); ['mousemove', 'keydown', 'click', 'touchstart'].forEach(ev => window.removeEventListener(ev, reset)); };
@@ -1442,12 +1480,15 @@ function App() {
   };
   useEffect(() => { if (user) refreshBooks(); }, [user]);
 
+  const sending = useRef({});
   /* Once a week, a backup of every book I own to my own inbox — when the
      cloud and the mail function are both there. */
   useEffect(() => {
     if (!prefsReady || !cloud || !user || !server?.mail || !books?.some(b => (b.owners || []).includes(user.email.toLowerCase()))) return;
     const last = lsGet('tzbooks_autobk', null);
     if (last && Date.now() - Date.parse(last) < 7 * 86400000) return;
+    if (sending.current.backup) return;
+    sending.current.backup = true;
     (async () => {
       try {
         const data = await exportAll(user.email);
@@ -1456,6 +1497,7 @@ function App() {
         lsSet('tzbooks_autobk', new Date().toISOString()); lsSet(BACKUP_KEY, new Date().toISOString());
         flash('גיבוי שבועי נשלח למייל שלך');
       } catch (e) { console.warn('auto backup', e); }
+      sending.current.backup = false;
     })();
   }, [books, server, prefsReady]);
 
@@ -1463,7 +1505,8 @@ function App() {
     if (!prefsReady || !cloud || !user || !server?.mail || !books?.length) return;
     const mine = books.filter(b => (b.owners || []).includes(user.email.toLowerCase()));
     const prev = addMonths(thisMonth(), -1);
-    if (!mine.length || lsGet(ARCH_KEY, '') === prev) return;
+    if (!mine.length || lsGet(ARCH_KEY, '') === prev || sending.current.archive) return;
+    sending.current.archive = true;
     (async () => {
       try {
         const { zip, lines } = await makeArchive(mine, prev, user.email);
@@ -1473,6 +1516,7 @@ function App() {
         for (const b of mine) await logAct(b.id, { action: 'archive', title: `${prev} נשלח ל-${user.email}`, series: 'live' });
         flash(`ארכיון ${prev} נשלח למייל`);
       } catch (e) { console.warn('archive', e); }
+      sending.current.archive = false;
     })();
   }, [books, server, prefsReady]);
 
@@ -1480,11 +1524,20 @@ function App() {
     if (!force && (datas[book.id] || loading[book.id])) return;
     setLoading(l => ({ ...l, [book.id]: true }));
     const histP = loadHistory(book), storeP = loadStore(book);
-    const d = await loadCore(book);
-    setDatas(x => ({ ...x, [book.id]: force && x[book.id] ? { ...x[book.id], ...d, histPending: false,
+    const since = new Date(Date.now() - 2000).toISOString();
+    const d0 = await loadCore(book);
+    /* A reload never takes back what was saved on screen while it was reading. */
+    const fresh = (x) => { const cur = x[book.id]; if (!force || !cur) return d0; const d = { ...d0 };
+      CORE.forEach(c => { const mine = (cur[c] || []).filter(r => !r._arch && String(r.updatedAt || r.createdAt || '') >= since); if (!mine.length) return;
+        const by = new Map((d[c] || []).map(r => [r.id, r]));
+        mine.forEach(r => { const o = by.get(r.id); if (!o || String(o.updatedAt || o.createdAt || '') < String(r.updatedAt || r.createdAt || '')) by.set(r.id, r); });
+        d[c] = [...by.values()]; });
+      return d; };
+    let d = d0;
+    setDatas(x => { d = fresh(x); return { ...x, [book.id]: force && x[book.id] ? { ...x[book.id], ...d, histPending: false,
       documents: [...d.documents, ...(x[book.id].documents || []).filter(z => z._arch && !d.documents.some(y => y.id === z.id))],
       archive: x[book.id].archive || [], orders: x[book.id].orders || [], docs: x[book.id].docs || [], storePending: d.storePending && !x[book.id].storeAt,
-      storeAt: x[book.id].storeAt, storeErr: x[book.id].storeErr, storeLogin: x[book.id].storeLogin } : d }));
+      storeAt: x[book.id].storeAt, storeErr: x[book.id].storeErr, storeLogin: x[book.id].storeLogin } : d }; });
     setLoading(l => ({ ...l, [book.id]: false }));
     histP.then(h => setDatas(x => x[book.id] ? { ...x, [book.id]: withHistory(x[book.id], h) } : x));
     storeP.then(st => setDatas(x => x[book.id] ? { ...x, [book.id]: { ...x[book.id], ...st } } : x));
@@ -1931,7 +1984,7 @@ function BookForm({ rec, me, count, hasLive, onSave, onClose }) {
   };
   return (
     <Box title={rec.id ? 'הגדרות העסק' : 'עסק חדש'} onClose={onClose} wide
-         footer={<><button className="mg-btn" disabled={!String(f.name).trim()} onClick={submit}>שמור</button>
+         footer={<><button className="mg-btn" disabled={!String(f.name).trim() || (f.dealerType !== 'exempt' && !(Number(f.vatRate) > 0 && Number(f.vatRate) < 50))} onClick={submit}>שמור</button>
                    <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
       <div style={grid}>
         <Field label="שם העסק (לתצוגה)"><input value={f.name} onChange={e => set('name', e.target.value)} /></Field>
@@ -2180,7 +2233,8 @@ function AllView({ books, datas, loading, onOpen, onStoreLogin }) {
 
   const rows = books.map(b => {
     const d = datas[b.id];
-    if (!d) return { b, pending: true };
+    /* Until its history is in, a business's totals would be too low: it waits. */
+    if (!d || d.histPending) return { b, pending: true, loadingHist: !!d };
     const L = buildLedger(b, d);
     return { b, d, L, t: totals(L, from, to), a: alertsOf(d, L) };
   });
@@ -2245,7 +2299,7 @@ function AllView({ books, datas, loading, onOpen, onStoreLogin }) {
               <td><span className="dot" style={{ background: r.b.color, display: 'inline-block', marginInlineEnd: 8 }} /><b>{r.b.name}</b></td>
               <td><span className="mg-chip">{KINDS[r.b.kind] || 'אחר'}</span> <span className="mg-chip">{DEALERS[r.b.dealerType]}</span></td>
               {r.pending
-                ? <td colSpan={4} style={{ color: 'var(--muted)' }}>{loading[r.b.id] ? 'טוען…' : '—'}</td>
+                ? <td colSpan={4} style={{ color: 'var(--muted)' }}>{loading[r.b.id] || r.loadingHist ? 'טוען…' : '—'}</td>
                 : <><td>{fmt(r.t.incNet)}</td><td>{fmt(r.t.expNet)}</td>
                     <td style={{ color: r.t.profit < 0 ? 'var(--bad)' : undefined, fontWeight: 700 }}>{fmt(r.t.profit)}</td>
                     <td>{r.L.rate > 0 ? fmt(r.t.vatDue) : 'פטור'}</td></>}
@@ -2378,7 +2432,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     const start = Math.max(rec.series === 'live' ? (Number(book.docStart) || 1) : 1, have.length ? Math.max(...have) + 1 : 0);
     const withStamp = { ...rec, stamp: await stampOf({ ...rec, number: '?' }) };
     const d = await withTimeout(DB.issue(book.id, key, start, clean(withStamp)), 20000);
-    patch('documents', list => [...list, d]);
+    patch('documents', list => [...list.filter(x => x.id !== d.id), d]);
     /* The customer on the document joins the list, or fills in what it lacked. */
     const cp = planCustomers(data.customers || [], [d.customer || {}], 'doc');
     if (cp.add.length + cp.upd.length) {
@@ -2485,7 +2539,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       {sub === 'expenses' && !ro && <InboxCard book={book} server={server} role={role} flash={flash} refreshKey={inboxTick}
         onRecord={(it, g, reload) => {
           const sup = matchSupplier(suppliers, { ...g, from: it.from, fromName: it.fromName });
-          const f = { date: g.date || String(it.date || '').slice(0, 10) || todayIso(), supplierId: sup?.id || '', desc: it.subject || it.name || '',
+          const f = { date: g.date || d10(it.date) || todayIso(), supplierId: sup?.id || '', desc: it.subject || it.name || '',
                       gross: g.gross ? String(g.gross) : '', docNo: g.docNo || '', pay: PAY_METHODS[0],
                       ...(g.vatMode ? { vatMode: g.vatMode } : {}), ...(g.vatManual ? { vatManual: String(g.vatManual) } : {}),
                       file: { inboxId: it.id, name: it.name, mime: it.mime } };
@@ -2895,7 +2949,7 @@ function InboxCard({ book, server, role, onRecord, flash, refreshKey }) {
           <div style={{ flex: '1 1 220px', minWidth: 0 }}>
             <div style={{ fontWeight: 700 }}>{it.fromName || it.from}</div>
             <div style={{ fontSize: 13, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {it.date ? heDate(String(it.date).slice(0, 10)) + ' · ' : ''}{it.subject || it.name}</div>
+              {it.date ? heDate(d10(it.date)) + ' · ' : ''}{it.subject || it.name}</div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="mg-btn ghost sm" disabled={!!busy} onClick={() => view(it)}>👁 צפה</button>
@@ -2967,8 +3021,9 @@ function ExpenseForm({ rec, init, rate, suppliers, onSave, onClose, onNewSupplie
   const vat = rate === 0 ? 0
             : f.vatMode === 'full' ? vatOf(g, rate)
             : f.vatMode === 'car' ? r2(vatOf(g, rate) * 2 / 3)
-            : f.vatMode === 'manual' ? r2(Number(f.vatManual) || 0) : 0;
-  const ok = String(f.desc).trim() && g > 0 && f.date;
+            : f.vatMode === 'manual' ? r2((g < 0 ? -1 : 1) * Math.abs(Number(f.vatManual) || 0)) : 0;
+  /* A supplier's credit note is a negative expense. */
+  const ok = String(f.desc).trim() && g !== 0 && f.date;
   const pickSupplier = (id) => {
     const s = suppliers.find(x => x.id === id);
     setF(p => ({ ...p, supplierId: id, cat: s?.cat && !rec ? s.cat : p.cat }));
@@ -3548,14 +3603,17 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || ((Number(b.number) || 0) - (Number(a.number) || 0)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
   const openInv = docs.filter(d => d.type === '305' && d.series === series && openOf(d, docs) > 0.009);
 
-  const print = async (d) => { printHTML(docHTML(book, d, (d.printCount || 0) > 0)); onPrinted(d); };
+  /* One original only: a second quick click, or a print whose count did not save yet, prints a copy. */
+  const printedNow = useRef(new Set());
+  const isCopy = (d) => { const c = (d.printCount || 0) > 0 || printedNow.current.has(d.id); printedNow.current.add(d.id); return c; };
+  const print = async (d) => { printHTML(docHTML(book, d, isCopy(d))); onPrinted(d); };
   const canSign = !!(cloud && server?.sign);
   const canMail = !!(cloud && server?.sign && server?.mail);
   /* A PDF: signed when the certificate is set up, plain otherwise. */
   const pdf = async (d) => {
     setBusyId(d.id);
     try {
-      const raw = await docPDF(book, d, (d.printCount || 0) > 0);
+      const raw = await docPDF(book, d, isCopy(d));
       if (canSign) {
         const r = await fnCall({ action: 'doc', pdf: b64(raw), title: docTitle(d), business: book.legalName || book.name, businessEmail: book.email || '' });
         saveBytes(pdfName(d), unb64(r.pdf), 'application/pdf');
@@ -3649,8 +3707,8 @@ function DocsTab({ quick = 0, book, docs, customers = [], items = [], onIssue, o
                     <button className="mg-btn ghost sm" onClick={() => { const n = window.prompt('מספר ההקצאה שהתקבל מרשות המסים:'); if (n && n.trim()) onManualAlloc(d, n.trim()); }}>הזן הקצאה</button></>}
                   {d.customer?.phone && <button className="mg-btn ghost sm" onClick={() => send(d, 'wa')}>וואטסאפ</button>}
                   {d.customer?.email && <button className="mg-btn ghost sm" onClick={() => send(d, 'mail')}>מייל</button>}
-                  {d.type === '305' && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setForm({ type: '400', ref: d })}>קבלה</button>}
-                  {['305', '320'].includes(d.type) && !credited && book.dealerType !== 'exempt' &&
+                  {d.type === '305' && d.series === series && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setForm({ type: '400', ref: d })}>קבלה</button>}
+                  {['305', '320'].includes(d.type) && d.series === series && !credited && book.dealerType !== 'exempt' &&
                     <button className="mg-btn ghost sm" onClick={() => setForm({ type: '330', ref: d })}>זיכוי</button>}
                 </div>}</td>
               </tr>
@@ -3742,7 +3800,10 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   const ref = preset.ref || null;
   const [type, setType] = useState(preset.type);
   const T = DOC_TYPES[type];
-  const vatRate = T.vat ? rate : 0;
+  /* A credit note follows the invoice it credits, even if the rate changed since. */
+  const vatRate = !T.vat ? 0 : (type === '330' && ref && ref.vatRate !== undefined ? Number(ref.vatRate) || 0 : rate);
+  /* One id for this document however many times issuing is tried: a retry after a timeout finds it issued. */
+  const docId = useRef(uid('doc'));
   const [date, setDate] = useState(todayIso());
   const [cust, setCust] = useState(() => ref ? { ...ref.customer } : { name: '', taxId: '', address: '', phone: '', email: '' });
   const [incl, setIncl] = useState(ref ? !!ref.incl : true);
@@ -3791,6 +3852,8 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   useEffect(() => { if (T.pay && T.lines && pays.length === 1) setPays(p => [{ ...p[0], amount: r2((tot.total || 0) - whAmt) || '' }]); }, [tot?.total, type, whAmt]);
 
   const problems = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) problems.push('חסר תאריך');
+  if (ref && ref.series !== series) problems.push(ref.series === 'test' ? 'זה מסמך ניסיון: אי אפשר להפיק עליו קבלה או זיכוי אמיתיים' : 'אי אפשר להפיק מסמך ניסיון על מסמך אמיתי');
   if (!String(cust.name).trim()) problems.push('חסר שם לקוח');
   if (T.lines && !lines.some(l => String(l.desc).trim() && Number(l.qty) && Number(l.price))) problems.push('צריך לפחות שורה אחת עם תיאור, כמות ומחיר');
   if (total <= 0) problems.push('הסכום צריך להיות גדול מאפס');
@@ -3801,7 +3864,10 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   if (needAlloc && series === 'live' && !alloc.trim() && !itaReady) problems.push('חסר מספר הקצאה');
   /* Cash: counted against the whole deal — the invoice a receipt pays, or
      this document itself. */
-  const cash = r2(pays.filter(p => p.kind === 'מזומן').reduce((a, p) => a + (Number(p.amount) || 0), 0));
+  /* Including cash already taken on earlier receipts for the same invoice. */
+  const cashBefore = ref && type === '400' ? r2(docs.filter(d => d.type === '400' && d.refId === ref.id && !d.cancelled)
+    .reduce((a, d) => a + (d.payments || []).filter(p => p.kind === 'מזומן').reduce((x, p) => x + (Number(p.amount) || 0), 0), 0)) : 0;
+  const cash = r2(cashBefore + pays.filter(p => p.kind === 'מזומן').reduce((a, p) => a + (Number(p.amount) || 0), 0));
   const dealValue = ref && type === '400' ? ref.total : total;
   const cashMax = r2(cashAllowed(dealValue));
   const cashOver = T.pay && cash > cashMax + 0.009;
@@ -3813,7 +3879,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
     const cleanLines = T.lines ? lines.filter(l => String(l.desc).trim()).map(l => clean({ desc: String(l.desc).trim(), qty: Number(l.qty) || 0, price: r2(l.price),
                                                                                         ...(l.itemId ? { itemId: l.itemId, sku: l.sku || '' } : {}) })) : [];
     const rec = {
-      id: uid('doc'), type, series, date, customer: { ...cust, name: String(cust.name).trim() },
+      id: docId.current, type, series, date, customer: { ...cust, name: String(cust.name).trim() },
       lines: cleanLines, incl: T.lines ? incl : false, vatRate: T.lines ? vatRate : 0,
       net: T.lines ? tot.net : paySum, vat: T.lines ? tot.vat : 0, total: r2(total),
       payments: T.pay ? pays.filter(p => Number(p.amount)).map(p => ({ ...p, amount: r2(p.amount) })) : [],
@@ -4593,8 +4659,11 @@ function dupReason(a, b) {
   const ta = normTax(a.taxId), tb = normTax(b.taxId);
   if (ta && tb) return ta === tb ? { lvl: 3, why: 'אותו ח.פ. / ת.ז.' } : null;
   const ea = normEmail(a.email), eb = normEmail(b.email), pa = normPhone(a.phone), pb = normPhone(b.phone);
-  if (ea && ea === eb) return { lvl: 2, why: 'אותו אימייל' };
-  if (pa && pa === pb) return { lvl: 2, why: 'אותו טלפון' };
+  /* A shared email or phone with names that do not agree may be a couple, or a parent and child. */
+  const na0 = normName(a.name), nb0 = normName(b.name);
+  const agree = !na0 || !nb0 || na0 === nb0 || na0.includes(nb0) || nb0.includes(na0) || nameToks(a.name).some(t => t.length > 2 && nameToks(b.name).includes(t) && nameToks(a.name)[0] === nameToks(b.name)[0]);
+  if (ea && ea === eb) return agree ? { lvl: 2, why: 'אותו אימייל' } : { lvl: 1, why: 'אותו אימייל, שם אחר', warn: 'שמות שונים' };
+  if (pa && pa === pb) return agree ? { lvl: 2, why: 'אותו טלפון' } : { lvl: 1, why: 'אותו טלפון, שם אחר', warn: 'שמות שונים' };
   const contra = (ea && eb) || (pa && pb);             // both have contact details, and none is shared
   const A = nameToks(a.name), B = nameToks(b.name);
   let r = null;
@@ -4656,8 +4725,9 @@ function findDupGroups(list) {
   list.forEach((_, i) => { const r = root(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); });
   return [...groups.values()].filter(g => g.length > 1).map(g => {
     const inG = new Set(g); const rs = g.flatMap(i => (why.get(i) || []).filter(w => inG.has(w.with)));
-    return { members: g.map(i => list[i]), lvl: rs.length ? Math.max(...rs.map(r => r.lvl)) : 1,
-             whys: [...new Set(rs.map(r => r.why))], warn: rs.some(r => r.warn) };
+    /* A group is only as sure as its weakest link. */
+    return { members: g.map(i => list[i]), lvl: rs.length ? Math.max(...rs.map(r => r.lvl)) : 1, minLvl: rs.length ? Math.min(...rs.map(r => r.lvl)) : 1,
+             whys: [...new Set(rs.map(r => r.why))], warn: rs.some(r => r.warn), warns: rs.filter(r => r.warn).map(r => r.warn) };
   }).sort((a, b) => b.lvl - a.lvl || b.members.length - a.members.length);
 }
 /* One customer from a group: the chosen one keeps its details, the others
@@ -4886,7 +4956,7 @@ function DupFinder({ list, activity, cols, patch, flash, onClose }) {
       await withTimeout(cols.customers.put(r.id, r), 15000).catch(() => {}); patch('customers', l => l.map(x => x.id === r.id ? r : x)); }
   };
   const run = async (key, f) => { setBusy(key); try { await f(); } catch { flash('השמירה נכשלה'); } setBusy(''); };
-  const sure = groups.filter(g => g.lvl >= 3 && !g.warn);
+  const sure = groups.filter(g => g.minLvl >= 3 && !g.warn);
   const fmtC = (c) => [c.email, c.phone, c.taxId, c.city].filter(Boolean).join(' · ');
   return (
     <div data-tour="cust-dupfinder" className="mg-card" style={{ marginBottom: 14, padding: 14 }}>
@@ -4904,8 +4974,8 @@ function DupFinder({ list, activity, cols, patch, flash, onClose }) {
       {groups.slice(0, more).map(g => { const st = stateOf(g), k = gkey(g); return (
         <div key={k} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 10, marginTop: 10, background: g.lvl >= 3 ? 'transparent' : g.lvl === 2 ? 'transparent' : 'rgba(0,0,0,.015)' }}>
           <div style={{ fontSize: '.9em', color: 'var(--muted)', marginBottom: 6 }}>
-            <b style={{ color: g.lvl >= 3 ? 'var(--green)' : g.lvl === 2 ? '#8a6d1a' : 'var(--muted)' }}>{g.lvl >= 3 ? 'כמעט ודאי' : g.lvl === 2 ? 'סביר' : 'אפשרי, כדאי לבדוק'}</b>
-            {' · '}{g.whys.join(' · ')}{g.warn ? ' · ⚠ פרטי קשר שונים' : ''}</div>
+            <b style={{ color: g.minLvl >= 3 && !g.warn ? 'var(--green)' : g.lvl >= 2 && !g.warn ? '#8a6d1a' : 'var(--muted)' }}>{g.minLvl >= 3 && !g.warn ? 'כמעט ודאי' : g.lvl >= 2 && !g.warn ? 'סביר' : 'אפשרי, כדאי לבדוק'}</b>
+            {' · '}{g.whys.join(' · ')}{g.warn ? ' · ⚠ ' + [...new Set(g.warns || [])].join(', ') : ''}</div>
           {g.members.map(c => { const a = activity[c.id]; const off = st.skip.includes(c.id); return (
             <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', opacity: off ? .45 : 1, flexWrap: 'wrap' }}>
               <input type="radio" name={'keep-' + k} checked={st.keep === c.id} onChange={() => setG(g, s => ({ ...s, keep: c.id, skip: s.skip.filter(x => x !== c.id) }))} title="נשאר" />
@@ -5308,8 +5378,11 @@ function dupGroups(books, email) {
 }
 async function mergeBooks(keep, drop, onStep) {
   const dataK = await loadBook(keep), dataD = await loadBook(drop);
-  let n = 0;
-  const put = async (c, r) => { const { id, ...rest } = r; try { await withTimeout(bookCol(keep.id, c).put(id, clean(rest)), 15000); n++; } catch { /* skip */ } };
+  /* Nothing is deleted unless both were read in full and every copy was written. */
+  const bad = [...(dataK.errors || []), ...(dataD.errors || [])];
+  if (bad.length) throw new Error('לא הצלחתי לקרוא את כל הנתונים (' + [...new Set(bad)].join(', ') + '). לא נמחק דבר; נסה שוב.');
+  let n = 0, failed = 0;
+  const put = async (c, r) => { const { id, ...rest } = r; try { await withTimeout(bookCol(keep.id, c).put(id, clean(rest)), 15000); n++; } catch { failed++; } };
   for (const c of ['incomes', 'expenses', 'suppliers', 'banktx']) {
     const have = new Set((dataK[c] || []).map(x => x.id));
     for (const r of dataD[c] || []) if (!have.has(r.id)) await put(c, r);
@@ -5322,6 +5395,7 @@ async function mergeBooks(keep, drop, onStep) {
   const haveImp = new Set((dataK.documents || []).filter(d => d.series === 'import').map(d => d.type + ':' + d.number));
   const moreImp = (dataD.documents || []).filter(d => d.series === 'import' && !haveImp.has(d.type + ':' + d.number));
   if (moreImp.length) n += await archiveAdd(keep.id, dataK, moreImp);
+  if (failed) throw new Error(`${failed} רשומות לא הועתקו. העסק הכפול לא נמחק; נסה שוב.`);
   /* The duplicate goes: whatever the rules let go (test and imported documents, test counters and log), then the business itself. */
   for (const c of COLS) for (const r of dataD[c] || []) await bookCol(drop.id, c).del(r.id).catch(() => {});
   await delBook(drop.id);
@@ -5332,7 +5406,7 @@ function DupCard({ books, user, flash, onDone }) {
   const [info, setInfo] = useState({});
   const [busy, setBusy] = useState('');
   useEffect(() => {
-    groups.flat().forEach(b => loadBook(b).then(d => setInfo(x => ({ ...x, [b.id]: {
+    groups.flat().forEach(b => loadBook(b).then(d => setInfo(x => ({ ...x, [b.id]: { err: (d.errors || []).length > 0,
       live: (d.documents || []).filter(z => z.series === 'live').length, docs: (d.documents || []).length,
       recs: ['incomes', 'expenses', 'suppliers', 'banktx', 'customers', 'items'].reduce((a, c) => a + (d[c] || []).length, 0) } }))).catch(() => {}));
   }, [groups.flat().map(b => b.id).join()]);
@@ -5355,7 +5429,9 @@ function DupCard({ books, user, flash, onDone }) {
   const del = async (b) => {
     if (!window.confirm(`למחוק את העותק הריק של "${b.name}"? אין בו מסמכים או רשומות.`)) return;
     setBusy(b.id);
-    try { const d = await loadBook(b); for (const c of COLS) for (const r of d[c] || []) await bookCol(b.id, c).del(r.id).catch(() => {});
+    try { const d = await loadBook(b);
+          if ((d.errors || []).length || (d.documents || []).length || ['incomes', 'expenses', 'suppliers', 'banktx', 'customers', 'items'].some(c => (d[c] || []).length)) throw new Error('העותק לא ריק או לא נקרא במלואו; לא נמחק');
+          for (const c of COLS) for (const r of d[c] || []) await bookCol(b.id, c).del(r.id).catch(() => {});
           await delBook(b.id); flash('העותק הריק נמחק'); onDone(); }
     catch (e) { flash('המחיקה נכשלה · ' + (e?.code || e?.message || '')); }
     setBusy('');
@@ -5368,7 +5444,7 @@ function DupCard({ books, user, flash, onDone }) {
           <b>{g[0].name}</b> ×{g.length}
           <span style={{ fontSize: 13, color: 'var(--muted)' }}>{g.map(b => info[b.id] ? `${info[b.id].docs} מסמכים · ${info[b.id].recs} רשומות` : '…').join(' | ')}</span>
           <button className="mg-btn sm" disabled={!!busy || g.some(b => !info[b.id])} onClick={() => merge(g)}>{busy ? 'ממזג…' : 'מזג לעסק אחד'}</button>
-          {g.filter(b => info[b.id] && !info[b.id].docs && !info[b.id].recs).slice(0, g.length - 1).map((b, k) => (
+          {g.filter(b => info[b.id] && !info[b.id].err && !info[b.id].docs && !info[b.id].recs).slice(0, g.length - 1).map((b, k) => (
             <button key={b.id} className="mg-btn ghost sm" disabled={!!busy} onClick={() => del(b)}>🗑 מחק את הריק{g.filter(x => info[x.id] && !info[x.id].docs && !info[x.id].recs).length > 1 ? ` (${k + 1})` : ''}</button>))}
         </div>))}
     </div>
@@ -6024,7 +6100,6 @@ function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
           {shown.every(x => sel.has(x.id)) ? '☐ בטל בחירה' : `☑ בחר הכול (${shown.length})`}</button>}
         {book.tenant && <button className="mg-btn ghost" onClick={() => setFromStore(true)}>🛒 ייבוא מהחנות</button>}
         <button className="mg-btn ghost" onClick={() => setImp(true)}>⬆ ייבוא מ-iCount (אקסל / CSV)</button>
-        {!ro && <button data-tour="cust-dups" className="mg-btn ghost" onClick={() => setDups(true)}>🔍 איתור כפילויות</button>}
         <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`items-${book.name}.csv`, [
           ['שם הפריט', 'מק״ט', 'מחיר', 'כולל מע״מ', 'יחידה', 'קטגוריה', 'תיאור נוסף', 'פעיל'],
           ...shown.map(x => [x.name, x.sku || '', x.price, x.incl ? 'כן' : 'לא', x.unit || '', x.category || '', x.desc || '', x.active === false ? 'לא' : 'כן'])])}>⬇ ייצוא</button>
