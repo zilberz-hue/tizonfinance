@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.19.0';
+const VERSION = '1.19.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -853,6 +853,16 @@ input:focus,select:focus{border-color:var(--gold)}
   .tz-pick-row .t{color:#0d0c0a;font-weight:700}.tz-pick-row .s{color:#3a352c}
   .mg-chip{color:#2c2821}
 }
+
+/* Phones: nothing may be wider than the screen. A long button wraps to a
+   second line, and should anything still overflow, it is clipped inside the
+   page instead of pushing the whole page sideways. */
+@media (max-width:820px){
+  .mg-btn{white-space:normal;max-width:100%;text-align:center;line-height:1.3}
+  .shell,main{max-width:100vw;overflow-x:clip}
+  main img,main table,main pre,main textarea{max-width:100%}
+  .mg-note,.mg-card{overflow-wrap:anywhere}
+}
 `;
 
 /* ===================================================================== ui */
@@ -980,6 +990,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.19.1', date: '30.09.26', items: ['נייד: תיקון מסך שזז הצידה (כפתור ארוך בלשונית הייבוא). מעכשיו שום רכיב לא יכול לדחוף את הדף הצידה.'] },
   { v: '1.19.0', date: '30.09.26', items: [
     'חשבוניות ספקים מ-Gmail: סקריפט קטן בחשבון Google שלך שולח לכאן כל שעה חשבוניות וקבלות שמגיעות במייל. הן ממתינות בלשונית ההוצאות.',
     'רישום בלחיצה: הסכום, המע״מ, התאריך, מספר החשבונית והספק נקראים מקובץ ה-PDF ומתמלאים לבד. אתה רק מאשר.',
