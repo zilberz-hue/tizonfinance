@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.13.0';
+const VERSION = '1.13.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -862,6 +862,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.13.1', date: '30.09.26', items: ['ייבוא פריטים מ-iCount: קובץ XLS ישן נקרא ישירות, המע״מ לפי העמודה בקובץ, קטגוריה ויחידה מתוך הגיליונות, ופריטים מחוקים מדולגים.'] },
   { v: '1.13.0', date: '30.09.26', items: [
     'פריטים: ייבוא מוצרים ישירות מהחנות, עם בחירה אילו לייבא.',
     'פריטים: תיבות סימון למחיקה של פריט אחד, כמה, או כל הרשימה.'] },
@@ -4031,13 +4032,20 @@ function guessMap(headers) {
   if (map.name === undefined) { const i = headers.findIndex((h, j) => /שם|name/i.test(String(h || '')) && !Object.values(map).includes(j)); if (i >= 0) map.name = i; }
   return map;
 }
+/* Every sheet of an Excel file, old (.xls, as iCount exports) or new (.xlsx). */
+async function readWorkbook(file) {
+  const X = await import('xlsx');
+  const wb = X.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true });
+  return wb.SheetNames.map(name => ({ name, rows: X.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' })
+    .map(r => r.map(c => c instanceof Date ? c.toISOString().slice(0, 10) : c == null ? '' : String(c))) }));
+}
 async function readTable(file) {
+  if (/\.xls$/i.test(file.name)) return (await readWorkbook(file))[0]?.rows || [];
   if (/\.xlsx$/i.test(file.name)) {
     const { readSheet } = await import('read-excel-file/browser');
     const rows = await readSheet(file);
     return (rows || []).map(r => r.map(c => c instanceof Date ? c.toISOString().slice(0, 10) : c == null ? '' : String(c)));
   }
-  if (/\.xls$/i.test(file.name)) throw new Error('קובץ XLS ישן: פתח אותו באקסל ושמור בשם כ-XLSX או CSV.');
   const buf = new Uint8Array(await file.arrayBuffer());
   /* UTF-8 first; a Windows-1255 export (common from Israeli software) shows
      up as replacement characters, and is read again as such. */
@@ -4091,7 +4099,7 @@ function CustomerImport({ list, col, flash, onDone, onClose }) {
                    <button className="mg-btn ghost" onClick={onClose}>סגור</button></>}>
       <p style={{ marginTop: 0 }}>ב-iCount: <b>לקוחות ← ייצוא לאקסל</b>. אפשר גם CSV, מכל מערכת.</p>
       <label className="mg-btn" style={{ cursor: 'pointer' }}>⬆ בחר קובץ (XLSX / CSV)
-        <input type="file" accept=".xlsx,.csv,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) load(f); }} /></label>
+        <input type="file" accept=".xlsx,.xls,.csv,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) load(f); }} /></label>
       {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
       {rows && <>
         <h4 style={{ margin: '16px 0 6px' }}>איזו עמודה היא מה</h4>
@@ -4734,7 +4742,7 @@ const ITEM_GUESS = [
   ['name', /^(שם\s*(ה)?(פריט|מוצר|שירות)|תיאור\s*(ה)?(פריט|מוצר)|פריט|מוצר|שירות|שם|תיאור|item( name)?|product( name)?|name|description)$/i],
   ['sku', /(מק"?״?ט|מקט|קוד( ה)?פריט|ברקוד|sku|catalog|item ?code|code)/i],
   ['price', /(מחיר|price|תעריף|סכום)/i],
-  ['unit', /(יחידה|יח['׳]? ?מידה|unit)/i],
+  ['unit', /^(?!.*\bid\b)(.*(יחידה|יח['׳]? ?מידה|unit).*)$/i],
   ['category', /(קטגוריה|סיווג|קבוצה|category|group)/i],
   ['desc', /(הערות|פירוט|תיאור מורחב|notes|details)/i],
 ];
@@ -4747,7 +4755,7 @@ function guessItemMap(headers) {
   if (map.name === undefined) { const i = headers.findIndex((h, j) => /שם|פריט|name|item/i.test(String(h || '')) && !Object.values(map).includes(j)); if (i >= 0) map.name = i; }
   return map;
 }
-const normItem = (s) => String(s || '').replace(/[\s"״'׳.,-]+/g, ' ').trim().toLowerCase();
+const normItem = (s) => String(s || '').replace(/[\s"״'׳.,·–—-]+/g, ' ').trim().toLowerCase();
 const numOf = (v) => { const n = Number(String(v ?? "").replace(/[₪,\s]/g, "")); return Number.isFinite(n) ? n : 0; };
 /* The price of an item in a document whose prices are (or are not) with VAT. */
 const itemPrice = (it, incl, rate) => {
@@ -4783,23 +4791,39 @@ function ItemImport({ list, col, rate, flash, onDone, onClose }) {
   const [updPrices, setUpdPrices] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [extra, setExtra] = useState({});
   const load = async (file) => {
     setErr(''); setRows(null);
     try {
-      const r = await readTable(file);
+      /* An Excel file may have several sheets (iCount: Inventory, Types, Measurement Units…):
+         the items are on the biggest; the small ones name the ids it refers to. */
+      const sheets = /\.xlsx?$/i.test(file.name) ? await readWorkbook(file) : [{ name: '', rows: await readTable(file) }];
+      const main = [...sheets].sort((a, b) => b.rows.length - a.rows.length)[0];
+      const r = main?.rows || [];
       if (!r.length) throw new Error('הקובץ ריק');
       const h = Math.max(0, r.slice(0, 10).findIndex(x => Object.keys(guessItemMap(x)).length >= 2));
       const m = guessItemMap(r[h]);
+      const hd = r[h].map(x => String(x || '').trim());
+      const col = (re) => { const i = hd.findIndex(x => re.test(x)); return i >= 0 ? i : undefined; };
+      const lookup = (re) => { const sh = sheets.find(x => re.test(x.name)); return sh ? Object.fromEntries(sh.rows.slice(1).filter(x => x[0] !== '' && x[1]).map(x => [String(Number(x[0]) || x[0]), String(x[1]).trim()])) : {}; };
+      setExtra({ inclCol: col(/^(includes vat|כולל מע.?מ)$/i), exemptCol: col(/^(vat exempt|פטור ממע.?מ)$/i), delCol: col(/^(is_deleted|נמחק)$/i),
+                 barcodeCol: col(/^(ברקוד|barcode)$/i), typeCol: col(/^type id$/i), unitIdCol: col(/^measurement unit id$/i),
+                 types: lookup(/^types$/i), units: lookup(/^measurement units$/i) });
       setRows(r); setHead(h); setMap(m);
       const ph = m.price !== undefined ? String(r[h][m.price] || '') : '';
       setIncl(/(לפני|ללא|בלי|without|excl|net)/i.test(ph) ? false : /(כולל|incl|gross)/i.test(ph) ? true : rate > 0 ? false : true);
     } catch (e) { setErr(e.message || String(e)); }
   };
   const headers = rows ? rows[head] || [] : [];
-  const incoming = useMemo(() => rows ? rows.slice(head + 1).map(r => {
+  const incoming = useMemo(() => rows ? rows.slice(head + 1).filter(r => extra.delCol === undefined || !['1', 'true', 'TRUE'].includes(String(r[extra.delCol]).trim())).map(r => {
     const x = { incl }; Object.entries(map).forEach(([k, i]) => { if (i !== '' && i != null) x[k] = String(r[i] ?? '').trim(); });
+    /* Per row, when the file says it: price with VAT or without. */
+    if (extra.inclCol !== undefined) x.incl = String(r[extra.inclCol]).trim() === '1' || /^(true|כן|yes)$/i.test(String(r[extra.inclCol]).trim());
+    if (!x.sku && extra.barcodeCol !== undefined) x.sku = String(r[extra.barcodeCol] || '').trim();
+    if (!x.category && extra.typeCol !== undefined) x.category = extra.types?.[String(Number(r[extra.typeCol]) || r[extra.typeCol])] || '';
+    if (!x.unit && extra.unitIdCol !== undefined) x.unit = extra.units?.[String(Number(r[extra.unitIdCol]) || r[extra.unitIdCol])] || '';
     return x;
-  }).filter(x => x.name) : [], [rows, head, map, incl]);
+  }).filter(x => x.name) : [], [rows, head, map, incl, extra]);
   const plan = useMemo(() => rows ? planItems(list, incoming, updPrices) : null, [rows, incoming, list, updPrices]);
   const run = async () => {
     setBusy(true);
@@ -4812,8 +4836,8 @@ function ItemImport({ list, col, rate, flash, onDone, onClose }) {
                    {busy ? 'שומר…' : `ייבא ${plan.add.length} חדשים${plan.upd.length ? ` ועדכן ${plan.upd.length}` : ''}`}</button>}
                    <button className="mg-btn ghost" onClick={onClose}>סגור</button></>}>
       <p style={{ marginTop: 0 }}>ב-iCount: <b>פריטים ← ייצוא לאקסל</b>. אפשר גם CSV מכל מערכת.</p>
-      <label className="mg-btn" style={{ cursor: 'pointer' }}>⬆ בחר קובץ (XLSX / CSV)
-        <input type="file" accept=".xlsx,.csv,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) load(f); }} /></label>
+      <label className="mg-btn" style={{ cursor: 'pointer' }}>⬆ בחר קובץ (XLS / XLSX / CSV)
+        <input type="file" accept=".xlsx,.xls,.csv,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) load(f); }} /></label>
       {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
       {rows && <>
         <h4 style={{ margin: '16px 0 6px' }}>איזו עמודה היא מה</h4>
@@ -4826,8 +4850,10 @@ function ItemImport({ list, col, rate, flash, onDone, onClose }) {
           ))}
         </div>
         <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', margin: '12px 0' }}>
-          {rate > 0 && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
-            <input type="checkbox" style={{ width: 'auto' }} checked={incl} onChange={e => setIncl(e.target.checked)} />המחירים בקובץ כוללים מע״מ</label>}
+          {rate > 0 && (extra.inclCol !== undefined
+            ? <span style={{ fontSize: 14 }}>מע״מ: לפי העמודה "{headers[extra.inclCol]}" בקובץ, שורה שורה.</span>
+            : <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={incl} onChange={e => setIncl(e.target.checked)} />המחירים בקובץ כוללים מע״מ</label>)}
           <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
             <input type="checkbox" style={{ width: 'auto' }} checked={updPrices} onChange={e => setUpdPrices(e.target.checked)} />לעדכן מחיר של פריטים שכבר קיימים</label>
         </div>
