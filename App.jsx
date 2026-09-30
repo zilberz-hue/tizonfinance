@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.16.2';
+const VERSION = '1.17.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -943,6 +943,10 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.17.0', date: '30.09.26', items: [
+    'איתור כפילויות בלקוחות: מוצא את אותו אדם גם בשם בסדר הפוך, בשם מקוצר, עם שגיאת כתיב או בשם פרטי בלבד, ומציע קבוצות למיזוג. אתה בוחר מי נשאר ומי נכלל.',
+    'לקוח ממוזג שומר את השמות האחרים, כך שכל המסמכים וההזמנות שלהם נספרים אליו בכרטסת ובמחזור.',
+    'הכרטסת מהירה גם עם אלפי לקוחות ומסמכים.'] },
   { v: '1.16.2', date: '30.09.26', items: [
     'מיזוג לקוחות מהחנות: לפני המיזוג מוצג מה יקרה (חדשים, מה יושלם אצל קיימים, כפילויות בתוך החנות), ואחריו פס התקדמות. שום פרט קיים לא מוחלף.',
     'לקוח שכבר נמשך מהחנות מזוהה לפי הקישור שלו, גם אם שמו או הטלפון השתנו.',
@@ -1055,6 +1059,7 @@ const TOURS = {
   ],
   customers: [
     { t: 'cust-stats', title: 'הלקוחות', text: 'כמה לקוחות, כמה עם אימייל וטלפון, וכמה פעילים השנה.', since: '1.5.0' },
+    { t: 'cust-dups', title: 'איתור כפילויות', text: 'מוצא את אותו לקוח שנרשם כמה פעמים: שם בסדר הפוך, שם מקוצר, שגיאת כתיב, שם פרטי בלבד, או אותו טלפון / אימייל. אתה בוחר מי נשאר ומי נכלל, והמסמכים של כולם נספרים אליו.', since: '1.17.0' },
     { t: 'cust-store', title: 'סנכרון עם החנות', text: 'לקוחות החנות נקראים לכאן ומתמזגים בלחיצה, אחרי שרואים מה יקרה: חדשים מתווספים, ולקיימים נוספים רק פרטים חסרים. לחנות נוספים רק לקוחות חדשים, בלחיצה, ואף פרט קיים שם לא משתנה.', since: '1.6.0' },
     { t: 'cust-tools', title: 'חיפוש, הוספה וייבוא', text: 'מחפשים לפי שם, טלפון, אימייל או ח.פ. אפשר להוסיף לקוח, לייבא מ-iCount ולייצא לאקסל.', since: '1.5.0', roles: WRITERS },
     { t: 'cust-table', title: 'כרטיס לקוח', text: 'מחזור ופעילות אחרונה לכל לקוח. בכרטיס יש גם כפתור לכרטסת. כפילויות מתאחדות לפי ח.פ., ורק כשהשם תואם גם לפי אימייל או טלפון.', since: '1.5.0' },
@@ -4128,19 +4133,126 @@ function mergeCustomer(old, inc, source) {
    matched without comparing each with every other. sameCustomer still has
    the last word; the index only saves the looking. Items may be anything:
    get() gives the customer-shaped part. */
+/* A customer merged from several records keeps the others as aliases, so
+   documents and orders under any of those names still count as theirs. */
+const custIdents = (c) => [c, ...((c && Array.isArray(c.alias)) ? c.alias : [])];
+const matchCust = (a, b) => custIdents(a).some(x => custIdents(b).some(y => sameCustomer(x, y)));
 function custKeys(c) {
-  const k = [], t = normTax(c?.taxId), e = normEmail(c?.email), p = normPhone(c?.phone), n = normName(c?.name);
-  if (t) k.push('t:' + t); if (e) k.push('e:' + e); if (p) k.push('p:' + p); if (n) k.push('n:' + n);
-  return k;
+  const k = new Set();
+  custIdents(c).forEach(x => { const t = normTax(x?.taxId), e = normEmail(x?.email), p = normPhone(x?.phone), n = normName(x?.name);
+    if (t) k.add('t:' + t); if (e) k.add('e:' + e); if (p) k.add('p:' + p); if (n) k.add('n:' + n); });
+  return [...k];
 }
 function custIndex(items, get = (x) => x) {
   const m = new Map();
   const add = (it) => custKeys(get(it)).forEach(k => { const l = m.get(k); if (!l) m.set(k, [it]); else if (!l.includes(it)) l.push(it); });
   items.forEach(add);
   const find = (c) => { const seen = new Set(), out = [];
-    custKeys(c).forEach(k => (m.get(k) || []).forEach(it => { if (!seen.has(it)) { seen.add(it); if (sameCustomer(get(it), c)) out.push(it); } }));
+    custKeys(c).forEach(k => (m.get(k) || []).forEach(it => { if (!seen.has(it)) { seen.add(it); if (matchCust(get(it), c)) out.push(it); } }));
     return out; };
   return { add, find };
+}
+
+/* ------------------------------------------- finding likely duplicates
+   What exact matching cannot know: the same person written as "גילמן
+   אלכסנדרה" and "אלכסנדרה גילמן", shortened ("אלכסנדרה גיל"), with a typo,
+   or as a first name only. These are suggestions for the user to confirm;
+   nothing is merged by itself. A first name alone joins a group only when
+   every full name it could be belongs to that one group. */
+const HEB_FINAL = { 'ם': 'מ', 'ן': 'נ', 'ץ': 'צ', 'ף': 'פ', 'ך': 'כ' };
+const nameToks = (n) => normName(n).replace(/[םןץףך]/g, ch => HEB_FINAL[ch]).split(' ').filter(Boolean);
+function lev1(a, b) {                      // edit distance of at most one
+  if (a === b) return true; const la = a.length, lb = b.length; if (Math.abs(la - lb) > 1) return false;
+  let i = 0, j = 0, d = 0;
+  while (i < la && j < lb) { if (a[i] === b[j]) { i++; j++; continue; } if (++d > 1) return false; if (la > lb) i++; else if (lb > la) j++; else { i++; j++; } }
+  return d + (la - i) + (lb - j) <= 1;
+}
+function dupReason(a, b) {
+  if ((a.notDup || []).includes(b.id) || (b.notDup || []).includes(a.id)) return null;
+  const ta = normTax(a.taxId), tb = normTax(b.taxId);
+  if (ta && tb) return ta === tb ? { lvl: 3, why: 'אותו ח.פ. / ת.ז.' } : null;
+  const ea = normEmail(a.email), eb = normEmail(b.email), pa = normPhone(a.phone), pb = normPhone(b.phone);
+  if (ea && ea === eb) return { lvl: 2, why: 'אותו אימייל' };
+  if (pa && pa === pb) return { lvl: 2, why: 'אותו טלפון' };
+  const contra = (ea && eb) || (pa && pb);             // both have contact details, and none is shared
+  const A = nameToks(a.name), B = nameToks(b.name);
+  let r = null;
+  if (A.length && B.length) {
+    if ([...A].sort().join(' ') === [...B].sort().join(' ')) r = { lvl: 3, why: A.join(' ') === B.join(' ') ? 'אותו שם' : 'אותו שם בסדר הפוך' };
+    else {
+      const [S, L] = A.length <= B.length ? [A, B] : [B, A];
+      const used = new Set(); let ok = true, exact = 0;
+      for (const t of S) {
+        let j = L.findIndex((u, i) => !used.has(i) && u === t);
+        if (j >= 0) exact++;
+        else if (!/\d/.test(t)) j = L.findIndex((u, i) => !used.has(i) && !/\d/.test(u) && ((t.length >= 3 && u.startsWith(t)) || (u.length >= 3 && t.startsWith(u)) || (t.length >= 4 && u.length >= 4 && lev1(t, u))));
+        if (j < 0) { ok = false; break; } used.add(j);
+      }
+      if (ok && exact >= 1 || ok && S.length >= 2) {
+        if (S.length === L.length) r = { lvl: 2, why: 'שם כמעט זהה (קיצור או אות)' };
+        else if (S.length >= 2) r = { lvl: 2, why: 'שם מלא יותר אצל אחד' };
+        else r = { lvl: 1, why: 'שם פרטי בלבד', weak: true };
+      }
+    }
+  }
+  if (!r && ea && eb) { const la = ea.split('@')[0], lb = eb.split('@')[0]; if (la.length >= 5 && la === lb) r = { lvl: 2, why: 'אימייל דומה' }; }
+  /* Different phones or emails on both sides: the same person only if the name is exactly the same. */
+  if (r && contra) r = r.lvl >= 3 ? { ...r, lvl: 1, warn: 'פרטי קשר שונים' } : null;
+  return r;
+}
+function findDupGroups(list) {
+  const n = list.length, blocks = new Map();
+  const put = (k, i) => { const l = blocks.get(k); if (!l) blocks.set(k, [i]); else l.push(i); };
+  list.forEach((c, i) => {
+    nameToks(c.name).forEach(t => put('n:' + t.slice(0, 3), i));
+    const e = normEmail(c.email), p = normPhone(c.phone), t = normTax(c.taxId);
+    if (e) { put('e:' + e, i); put('l:' + e.split('@')[0], i); } if (p) put('p:' + p, i); if (t) put('t:' + t, i);
+  });
+  const pairs = new Map();
+  for (const l of blocks.values()) {
+    if (l.length < 2 || l.length > 400) continue;
+    for (let x = 0; x < l.length; x++) for (let y = x + 1; y < l.length; y++) {
+      const i = Math.min(l[x], l[y]), j = Math.max(l[x], l[y]), k = i * n + j;
+      if (i === j || pairs.has(k)) continue;
+      pairs.set(k, dupReason(list[i], list[j]));
+    }
+  }
+  const par = list.map((_, i) => i), root = (i) => par[i] === i ? i : (par[i] = root(par[i]));
+  const weak = new Map(), why = new Map();
+  for (const [k, r] of pairs) {
+    if (!r) continue; const i = Math.floor(k / n), j = k % n;
+    if (r.weak) { [[i, j], [j, i]].forEach(([a, b]) => { if (!weak.has(a)) weak.set(a, []); weak.get(a).push(b); }); }
+    else par[root(i)] = root(j);
+    [i, j].forEach(z => { if (!why.has(z)) why.set(z, []); why.get(z).push({ with: z === i ? j : i, ...r }); });
+  }
+  /* A first name alone: joined only to the one group all its candidates are in. */
+  for (const [a, bs] of weak) {
+    if (nameToks(list[a].name).length !== 1) continue;
+    const roots = new Set(bs.map(root));
+    if (roots.size === 1) par[root(a)] = root([...roots][0]);
+  }
+  const groups = new Map();
+  list.forEach((_, i) => { const r = root(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); });
+  return [...groups.values()].filter(g => g.length > 1).map(g => {
+    const inG = new Set(g); const rs = g.flatMap(i => (why.get(i) || []).filter(w => inG.has(w.with)));
+    return { members: g.map(i => list[i]), lvl: rs.length ? Math.max(...rs.map(r => r.lvl)) : 1,
+             whys: [...new Set(rs.map(r => r.why))], warn: rs.some(r => r.warn) };
+  }).sort((a, b) => b.lvl - a.lvl || b.members.length - a.members.length);
+}
+/* One customer from a group: the chosen one keeps its details, the others
+   fill what is missing and stay on as aliases. */
+function mergeGroup(primary, others) {
+  let m = { ...primary };
+  others.forEach(o => { m = mergeCustomer(m, o, null); });
+  m.sources = [...new Set([primary, ...others].flatMap(x => x.sources || []))];
+  const ali = [...(primary.alias || [])];
+  others.forEach(o => custIdents(o).forEach(x => { const a = clean({ name: x.name || '', email: x.email || '', phone: x.phone || '', taxId: x.taxId || '', storeId: x.storeId || '' });
+    if (!ali.some(y => JSON.stringify(y) === JSON.stringify(a))) ali.push(a); }));
+  m.alias = ali;
+  const gone = new Set(others.map(o => o.id));
+  m.notDup = [...new Set([...(primary.notDup || []), ...others.flatMap(o => o.notDup || [])])].filter(id => !gone.has(id) && id !== m.id);
+  if (!m.notDup.length) delete m.notDup;
+  return m;
 }
 /* A batch of incoming customers against the list: what is new, what adds
    something to an existing one, and what is already known. A customer that
@@ -4148,7 +4260,7 @@ function custIndex(items, get = (x) => x) {
 function planCustomers(list, incoming, source) {
   const cur = [...list]; const add = [], upd = [], same = [], added = new Set(); let dupIn = 0;
   const idx = custIndex([], (i) => cur[i]); cur.forEach((_, i) => idx.add(i));
-  const byStore = new Map(); cur.forEach((x, i) => { if (x.storeId) byStore.set(x.storeId, i); });
+  const byStore = new Map(); cur.forEach((x, i) => custIdents(x).forEach(y => { if (y.storeId) byStore.set(y.storeId, i); }));
   incoming.filter(c => String(c.name || '').trim() || normEmail(c.email) || normPhone(c.phone)).forEach(c => {
     const hi = c.storeId && byStore.has(c.storeId) ? byStore.get(c.storeId) : idx.find(c).sort((x, y) => x - y)[0];
     if (hi === undefined) {
@@ -4326,6 +4438,71 @@ function StoreMergeReview({ plan, list, total, busy, prog, onGo, onCancel }) {
   );
 }
 
+/* Likely duplicates, a group at a time: pick who stays, untick who is not
+   the same person, merge; or mark the group as different people. */
+function DupFinder({ list, activity, cols, patch, flash, onClose }) {
+  const groups = useMemo(() => findDupGroups(list), [list]);
+  const [more, setMore] = useState(30);
+  const [busy, setBusy] = useState('');
+  const [pick, setPick] = useState({});          // group key → { keep, skip:Set }
+  const gkey = (g) => g.members.map(m => m.id).sort().join('|');
+  const score = (c) => CUST_FIELDS.filter(k => c[k]).length * 2 + (c.storeId ? 3 : 0) + (activity[c.id]?.ds.length || 0) + (activity[c.id]?.os.length || 0) + nameToks(c.name).length;
+  const stateOf = (g) => pick[gkey(g)] || { keep: [...g.members].sort((a, b) => score(b) - score(a))[0].id, skip: [] };
+  const setG = (g, f) => setPick(p => ({ ...p, [gkey(g)]: f(stateOf(g)) }));
+  const doMerge = async (g) => {
+    const st = stateOf(g); const keep = g.members.find(m => m.id === st.keep);
+    const others = g.members.filter(m => m.id !== st.keep && !st.skip.includes(m.id));
+    if (!others.length) return;
+    const m = clean({ ...mergeGroup(keep, others), updatedAt: new Date().toISOString() });
+    await withTimeout(cols.customers.put(m.id, m), 15000);
+    for (const o of others) await cols.customers.del(o.id).catch(() => {});
+    patch('customers', l => [...l.filter(x => x.id !== m.id && !others.some(o => o.id === x.id)), m]);
+    return others.length;
+  };
+  const notDup = async (g) => {
+    const ids = g.members.map(m => m.id);
+    for (const c of g.members) { const r = clean({ ...c, notDup: [...new Set([...(c.notDup || []), ...ids.filter(i => i !== c.id)])] });
+      await withTimeout(cols.customers.put(r.id, r), 15000).catch(() => {}); patch('customers', l => l.map(x => x.id === r.id ? r : x)); }
+  };
+  const run = async (key, f) => { setBusy(key); try { await f(); } catch { flash('השמירה נכשלה'); } setBusy(''); };
+  const sure = groups.filter(g => g.lvl >= 3 && !g.warn);
+  const fmtC = (c) => [c.email, c.phone, c.taxId, c.city].filter(Boolean).join(' · ');
+  return (
+    <div data-tour="cust-dupfinder" className="mg-card" style={{ marginBottom: 14, padding: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <b>איתור כפילויות · {groups.length ? `${groups.length} קבוצות אפשריות` : 'לא נמצאו כפילויות'}</b>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {sure.length > 0 && <button className="mg-btn sm" disabled={!!busy} onClick={() => run('all', async () => { let n = 0; for (const g of sure) n += (await doMerge(g)) || 0; flash(`מוזגו ${sure.length} קבוצות (${n} רשומות כפולות הוסרו)`); })}>
+            {busy === 'all' ? 'ממזג…' : `מזג את ${sure.length} הוודאיות`}</button>}
+          <button className="mg-btn ghost sm" onClick={onClose}>סגור</button>
+        </div>
+      </div>
+      <div className="mg-note" style={{ fontSize: '.9em', margin: '8px 0' }}>
+        בכל קבוצה: בחר מי נשאר (●), הורד סימון ממי שאינו אותו אדם, ולחץ "מזג". הנשאר שומר את הפרטים שלו ומקבל מהאחרים רק פרטים שחסרים לו.
+        השמות האחרים נשמרים אצלו, כך שכל המסמכים וההזמנות שלהם נספרים אליו בכרטסת. "ודאיות" = אותו שם (גם בסדר הפוך) או אותו ח.פ., בלי פרטי קשר סותרים.</div>
+      {groups.slice(0, more).map(g => { const st = stateOf(g), k = gkey(g); return (
+        <div key={k} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 10, marginTop: 10, background: g.lvl >= 3 ? 'transparent' : g.lvl === 2 ? 'transparent' : 'rgba(0,0,0,.015)' }}>
+          <div style={{ fontSize: '.9em', color: 'var(--muted)', marginBottom: 6 }}>
+            <b style={{ color: g.lvl >= 3 ? 'var(--green)' : g.lvl === 2 ? '#8a6d1a' : 'var(--muted)' }}>{g.lvl >= 3 ? 'כמעט ודאי' : g.lvl === 2 ? 'סביר' : 'אפשרי, כדאי לבדוק'}</b>
+            {' · '}{g.whys.join(' · ')}{g.warn ? ' · ⚠ פרטי קשר שונים' : ''}</div>
+          {g.members.map(c => { const a = activity[c.id]; const off = st.skip.includes(c.id); return (
+            <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', opacity: off ? .45 : 1, flexWrap: 'wrap' }}>
+              <input type="radio" name={'keep-' + k} checked={st.keep === c.id} onChange={() => setG(g, s => ({ ...s, keep: c.id, skip: s.skip.filter(x => x !== c.id) }))} title="נשאר" />
+              <input type="checkbox" checked={!off} disabled={st.keep === c.id} onChange={e => setG(g, s => ({ ...s, skip: e.target.checked ? s.skip.filter(x => x !== c.id) : [...s.skip, c.id] }))} title="באותו אדם" />
+              <b>{c.name}</b>
+              <span dir="ltr" style={{ color: 'var(--muted)', fontSize: '.9em' }}>{fmtC(c)}</span>
+              <span style={{ color: 'var(--muted)', fontSize: '.85em' }}>{(c.sources || []).map(x => SRC_LABEL[x] || x).join(', ')}{a && (a.ds.length || a.os.length) ? ` · ${a.ds.length} מסמכים${a.os.length ? `, ${a.os.length} הזמנות` : ''}` : ''}</span>
+            </label>); })}
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <button className="mg-btn sm" disabled={!!busy} onClick={() => run(k, async () => { const n = await doMerge(g); if (n) flash(`מוזג: ${g.members.find(m => m.id === st.keep).name} (${n + 1} רשומות לאחת)`); })}>{busy === k ? 'ממזג…' : 'מזג'}</button>
+            <button className="mg-btn ghost sm" disabled={!!busy} onClick={() => run(k, () => notDup(g))}>אלה אנשים שונים</button>
+          </div>
+        </div>); })}
+      {groups.length > more && <button className="mg-btn ghost sm" style={{ marginTop: 10 }} onClick={() => setMore(m => m + 30)}>הצג עוד ({groups.length - more})</button>}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------- the list */
 function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onReload, onStoreLogin, onLedger }) {
   const list = data.customers || [];
@@ -4336,6 +4513,7 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
   const [imp, setImp] = useState(false);
   const [busy, setBusy] = useState('');
   const [storeCust, setStoreCust] = useState(null);
+  const [dups, setDups] = useState(false);
 
   /* What each customer did: documents issued or imported, and store orders. */
   const activity = useMemo(() => {
@@ -4442,12 +4620,14 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
           <option value="">הכול</option>{Object.entries(SRC_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
         <button className="mg-btn" onClick={() => setEdit({})}>＋ לקוח</button>
         <button className="mg-btn ghost" onClick={() => setImp(true)}>⬆ ייבוא מ-iCount (אקסל / CSV)</button>
+        {!ro && <button data-tour="cust-dups" className="mg-btn ghost" onClick={() => setDups(true)}>🔍 איתור כפילויות</button>}
         <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`customers-${book.name}.csv`, [
           [...CUST_FIELDS.map(k => CUST_LABELS[k]), 'מקור', 'מחזור', 'פעילות אחרונה'],
           ...shown.map(c => [...CUST_FIELDS.map(k => c[k] || ''), (c.sources || []).map(s => SRC_LABEL[s] || s).join(' '), r2(activity[c.id]?.total || 0), activity[c.id]?.last || ''])
         ])}>⬇ ייצוא</button>
       </div>
 
+      {dups && <DupFinder list={list} activity={activity} cols={cols} patch={patch} flash={flash} onClose={() => setDups(false)} />}
       <div data-tour="cust-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>שם</th><th>ח.פ. / ת.ז.</th><th>טלפון</th><th>אימייל</th><th>עיר</th><th>מקור</th><th>מחזור</th><th>אחרון</th></tr></thead>
         <tbody>
@@ -4781,9 +4961,9 @@ function DupCard({ books, user, flash, onDone }) {
 const LEDGER_KINDS = [['cust', 'כרטסת לקוח'], ['supp', 'כרטסת ספק'], ['acc', 'כרטסת חשבון'], ['tb', 'מאזן בוחן']];
 
 /* One customer's movements: debit what was invoiced, credit what was paid or credited. */
-function customerMoves(book, docs, who, withTest) {
+function customerMoves(book, docs, who, withTest, idx) {
   const out = [];
-  docs.filter(d => (withTest || d.series !== 'test') && !d.cancelled && sameCustomer(who, d.customer || {})).forEach(d => {
+  (idx ? idx.find(who) : docs.filter(d => matchCust(who, d.customer || {}))).filter(d => (withTest || d.series !== 'test') && !d.cancelled).forEach(d => {
     const t = docTitle(d), wh = Number(d.withholding) || 0;
     const paid = r2((d.payments || []).reduce((a, p) => a + (Number(p.amount) || 0), 0) + wh);
     if (d.type === '305') out.push({ date: d.date, ref: t, desc: 'חשבונית', dr: r2(d.total), cr: 0, docId: d.id });
@@ -4846,10 +5026,12 @@ function LedgerTab({ book, data, ledger, pick }) {
   /* Customers: the list, and anyone on a document who is not on it. */
   const custs = useMemo(() => {
     const list = (data.customers || []).map(c => ({ ...c, key: c.id }));
+    const ci = custIndex(list);
     docs.filter(d => (withTest || d.series !== 'test') && d.customer?.name).forEach(d => {
-      if (!list.some(c => sameCustomer(c, d.customer))) list.push({ ...d.customer, key: 'doc:' + normName(d.customer.name) });
+      if (!ci.find(d.customer).length) { const c = { ...d.customer, key: 'doc:' + normName(d.customer.name) }; list.push(c); ci.add(c); }
     });
-    return list.map(c => { const m = withBalance(customerMoves(book, docs, c, withTest), '0000-00-00', '9999-12-31'); return { ...c, bal: m.close, n: m.rows.length }; })
+    const di = custIndex(docs, d => d.customer || {});
+    return list.map(c => { const m = withBalance(customerMoves(book, docs, c, withTest, di), '0000-00-00', '9999-12-31'); return { ...c, bal: m.close, n: m.rows.length }; })
       .filter(c => c.n).sort((a, b) => Math.abs(b.bal) - Math.abs(a.bal) || String(a.name).localeCompare(String(b.name), 'he'));
   }, [data.customers, docs, book, withTest]);
   const supps = useMemo(() => (data.suppliers || []).map(s => ({ ...s, key: s.id, n: supplierMoves(ledger, s).length })).filter(s => s.n)
@@ -5419,6 +5601,7 @@ function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
           {shown.every(x => sel.has(x.id)) ? '☐ בטל בחירה' : `☑ בחר הכול (${shown.length})`}</button>}
         {book.tenant && <button className="mg-btn ghost" onClick={() => setFromStore(true)}>🛒 ייבוא מהחנות</button>}
         <button className="mg-btn ghost" onClick={() => setImp(true)}>⬆ ייבוא מ-iCount (אקסל / CSV)</button>
+        {!ro && <button data-tour="cust-dups" className="mg-btn ghost" onClick={() => setDups(true)}>🔍 איתור כפילויות</button>}
         <button className="mg-btn ghost sm keep" onClick={() => downloadCSV(`items-${book.name}.csv`, [
           ['שם הפריט', 'מק״ט', 'מחיר', 'כולל מע״מ', 'יחידה', 'קטגוריה', 'תיאור נוסף', 'פעיל'],
           ...shown.map(x => [x.name, x.sku || '', x.price, x.incl ? 'כן' : 'לא', x.unit || '', x.category || '', x.desc || '', x.active === false ? 'לא' : 'כן'])])}>⬇ ייצוא</button>
