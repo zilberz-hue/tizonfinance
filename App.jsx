@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -605,19 +605,10 @@ input:focus,select:focus{border-color:var(--gold)}
 .help-btn:hover{background:var(--bronze1)}
 .help-btn .nd{position:absolute;top:2px;right:2px;width:11px;height:11px;border-radius:50%;background:var(--bad);border:2px solid #fff}
 .tour-news{max-width:520px;width:100%;max-height:85vh;overflow:auto}
-@media print{.help-btn,.tour{display:none}}
+@media print{.help-btn,.tour,.topbar,.side-dim{display:none}}
 .ledger-item{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:right;background:none;border:0;border-radius:9px;padding:8px 10px;cursor:pointer;font-size:14px;color:var(--ink)}
 .ledger-item:hover{background:#f6efe1}.ledger-item.on{background:#f3e6cc;font-weight:700}.ledger-item b{font-size:13px;color:var(--green)}.ledger-item b.owe{color:var(--bad)}
 @media (max-width:820px){.ledger-grid{grid-template-columns:1fr !important}.ledger-item{font-size:16px}}
-@media (max-width:820px){
-  .shell{flex-direction:column}
-  .side{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px}
-  .side .sec,.side .foot small{display:none}
-  .brand{padding:0 4px;border:0;margin:0}.brand small,.brand img.full{display:none}.brand img.mark{display:block}
-  .side button.bk{width:auto;padding:7px 10px}
-  .side .foot{margin:0;padding:4px 8px}
-  .main{padding:14px}
-}
 /* Phones: noticeably larger type everywhere (inputs at 17px also stop iOS from zooming in). */
 @media (max-width:820px){
   body{font-size:18px;line-height:1.55}
@@ -654,6 +645,94 @@ input:focus,select:focus{border-color:var(--gold)}
   :is(.shell,.mg-mod,.login) [style*="font-size: 13px"]{font-size:15.5px !important}
   :is(.shell,.mg-mod,.login) [style*="font-size: 14px"]{font-size:16.5px !important}
 }
+/* ================================================================ layout for every screen */
+.topbar,.side-dim{display:none}
+.mg-tabs{scrollbar-width:none}.mg-tabs::-webkit-scrollbar{display:none}
+.mg-tblwrap{-webkit-overflow-scrolling:touch}
+.mg-btn,.mg-tab,.side button.bk{touch-action:manipulation}
+/* Tablets (landscape) and small laptops */
+@media (min-width:821px) and (max-width:1280px){
+  body{font-size:16px}
+  button,input,select,textarea{font-size:15.5px}
+  .side{width:224px;padding:16px 10px}
+  .brand img.full{max-width:132px}
+  .brand small{font-size:12px}
+  .side button.bk{font-size:15.5px;padding:11px 10px}
+  .main{padding:20px 22px}
+  .mg-h{padding:18px 20px}.mg-h h2{font-size:26px}
+  .mg-tabs.book-tabs{flex-wrap:nowrap;overflow-x:auto;margin-inline:-4px;padding:2px 4px 6px}
+  .mg-tab{font-size:15.5px;padding:9px 16px;flex-shrink:0}
+  .mg-stats{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .mg-stat .vl{font-size:clamp(22px,2.6vw,28px)}
+  .mg-stat .lb{font-size:14px}
+  .mg-tbl th{font-size:14px}.mg-tbl td{font-size:15.5px;padding:11px 12px}
+  .mg-btn{font-size:15.5px;padding:10px 15px}.mg-btn.sm{font-size:14px;padding:7px 11px}
+  .mg-note{font-size:15px}.mg-card h3{font-size:18px}
+  .mg-fld label{font-size:13.5px}
+}
+/* Phones and tablets upright: a top bar, the menu slides in from the side */
+@media (max-width:820px){
+  .shell{flex-direction:column}
+  .topbar{display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:45;background:rgba(255,253,248,.96);
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+    padding:10px 14px;padding-top:max(10px,env(safe-area-inset-top))}
+  .tb-menu{width:44px;height:44px;border:1.5px solid var(--line);border-radius:12px;background:#fff;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:5px;cursor:pointer;flex-shrink:0}
+  .tb-menu span{display:block;width:20px;height:2.5px;border-radius:2px;background:#6e4d22}
+  .tb-title{flex:1;font-size:19px;color:#6e4d22;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tb-mark{width:36px;height:36px}
+  .side-dim{display:block;position:fixed;inset:0;background:rgba(30,24,12,.45);z-index:55}
+  .side{position:fixed;top:0;bottom:0;right:0;z-index:56;width:min(84vw,330px);flex-direction:column;flex-wrap:nowrap;align-items:stretch;
+    padding:18px 12px;padding-top:max(18px,env(safe-area-inset-top));overflow-y:auto;transform:translateX(105%);transition:transform .25s ease;
+    box-shadow:-12px 0 40px rgba(0,0,0,.18)}
+  .side.open{transform:none}
+  .side .sec,.side .foot small{display:block}
+  .brand{padding:0 8px 12px;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .brand img.full{display:block;max-width:170px}.brand img.mark{display:none}.brand small{display:block}
+  .side button.bk{width:100%;padding:13px 12px;font-size:17px}
+  .side .foot{margin-top:auto;padding:12px 10px}
+  .main{padding:14px;padding-bottom:90px}
+  .mg-h{padding:16px;border-radius:18px;gap:8px}
+  .mg-h > div:first-child{flex-basis:100%}
+  .mg-h h2{font-size:26px}
+  .mg-h .mg-btn{flex:1 1 auto;justify-content:center}
+  .mg-tabs{flex-wrap:nowrap;overflow-x:auto;margin-inline:-14px;padding:2px 14px 8px}
+  .mg-tab{flex-shrink:0}
+  .mg-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .mg-stat{padding:12px 14px;border-radius:14px}
+  .mg-stat .vl{font-size:clamp(20px,6.2vw,28px);overflow-wrap:anywhere}
+  .mg-card{padding:14px 14px;border-radius:16px}
+  .main .mg-fld{flex:1 1 140px;min-width:0}
+  .flash{left:16px;right:16px;top:calc(72px + env(safe-area-inset-top));bottom:auto;max-width:none;text-align:center}
+  .help-btn{left:14px;bottom:max(14px,env(safe-area-inset-bottom));width:50px;height:50px;font-size:23px}
+  /* dialogs become sheets from the bottom */
+  .mg-mod{padding:0;align-items:flex-end}
+  .mg-mod-in{max-width:100% !important;max-height:94vh;border-radius:22px 22px 0 0}
+  .mg-mod-h{padding:14px 16px}.mg-mod-h h3{font-size:19px}
+  .mg-mod-b{padding:14px 16px}
+  .mg-mod-f{padding:12px 16px;padding-bottom:max(12px,env(safe-area-inset-bottom));flex-wrap:wrap}
+  .mg-mod-f .mg-btn{flex:1 1 auto;justify-content:center}
+  .sf-x{font-size:30px;width:44px;height:44px}
+  .tour-news{border-radius:22px 22px 0 0}
+}
+/* Phones: tables as cards */
+@media (max-width:640px){
+  .mg-tblwrap{overflow:visible;background:transparent;border:0;border-radius:0}
+  .mg-tbl.has-labels,.mg-tbl.has-labels tbody,.mg-tbl.has-labels tfoot,.mg-tbl.has-labels tr{display:block;width:100%}
+  .mg-tbl.has-labels thead{display:none}
+  .mg-tbl.has-labels tr{background:#fff;border:1px solid var(--line);border-radius:14px;padding:8px 14px;margin-bottom:10px;box-shadow:0 2px 10px rgba(120,90,40,.05)}
+  .mg-tbl.has-labels tfoot tr{background:var(--soft)}
+  .mg-tbl.has-labels td{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border:0;border-bottom:1px dashed #efe7d6;
+    text-align:left;white-space:normal !important;min-height:36px}
+  .mg-tbl.has-labels td:last-child{border-bottom:0}
+  .mg-tbl.has-labels td[data-label]::before{content:attr(data-label);font-weight:700;color:var(--muted);font-size:14.5px;text-align:right;flex-shrink:0;max-width:45%}
+  .mg-tbl.has-labels td:not([data-label]){justify-content:flex-start;flex-wrap:wrap}
+  .mg-tbl.has-labels td:empty{display:none}
+  .mg-tbl.has-labels td > input,.mg-tbl.has-labels td > select{flex:1;min-width:0;max-width:62%}
+  .mg-tbl.has-labels tr:hover td{background:transparent}
+  .mg-tbl.has-labels td:first-child{font-size:17.5px}
+}
+
 `;
 
 /* ===================================================================== ui */
@@ -781,6 +860,8 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.12.0', date: '30.09.26', items: [
+    'מראה אחיד ומותאם לכל מכשיר: בטלפון תפריט נפתח מהצד, טבלאות מוצגות ככרטיסים וחלונות נפתחים מלמטה; בטאבלט טקסט וכפתורים גדולים יותר ולשוניות בשורה אחת.'] },
   { v: '1.11.0', date: '30.09.26', items: [
     'חיבור קבוע לחנות לכל המכשירים: מתחברים פעם אחת בגיבוי וענן, וכל מכשיר קורא את החנות דרך השרת בלי להתחבר בעצמו.',
     'גם קוד הנעילה עובר עכשיו בין המכשירים.'] },
@@ -941,7 +1022,7 @@ const TOURS = {
 };
 
 const tourAnchor = (t) => document.querySelector(`[data-tour="${t}"]`);
-const tourVisible = (t) => { const el = tourAnchor(t); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+const tourVisible = (t) => { const el = tourAnchor(t); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > 0 && r.left < window.innerWidth; };
 /* The steps that can run now: allowed for this role, on screen, and — when
    the screen was seen before — newer than that visit. */
 function tourSteps(ctx, role, seen) {
@@ -1137,6 +1218,7 @@ function App() {
 
   /* Guided tours: which screen is showing, and whether its tour should run. */
   const [bookTab, setBookTab] = useState(null);
+  const [navOpen, setNavOpen] = useState(false);
   const [tabReq, setTabReq] = useState(null);
   const [tour, setTour] = useState(null);
   const [tourWant, setTourWant] = useState(null);
@@ -1313,7 +1395,14 @@ function App() {
 
   return (
     <div className="shell">
-      <aside className="side">
+      {/* Phones and small tablets: a top bar, and the menu as a drawer. */}
+      <header className="topbar">
+        <button className="tb-menu" aria-label="תפריט" onClick={() => setNavOpen(true)}><span /><span /><span /></button>
+        <b className="tb-title">{book ? book.name : ({ all: 'כל העסקים', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך' })[cur] || 'Tizon Books'}</b>
+        <img className="tb-mark" src={MARK} alt="Tizon" />
+      </header>
+      {navOpen && <div className="side-dim" onClick={() => setNavOpen(false)} />}
+      <aside className={'side' + (navOpen ? ' open' : '')} onClickCapture={e => { if (e.target.closest('button.bk')) setTimeout(() => setNavOpen(false), 0); }}>
         <div className="brand"><img className="full" src={LOGO} alt="Tizon Health" /><img className="mark" src={MARK} alt="Tizon" /><small>Books · הנהלת חשבונות</small></div>
         <button className={'bk' + (cur === 'all' ? ' on' : '')} onClick={() => setCur('all')}>
           <span className="dot" style={{ background: 'var(--bronze2)' }} />כל העסקים</button>
@@ -2035,6 +2124,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
   useEffect(() => { onTab?.(sub); }, [sub]);
+  /* On a narrow screen the tabs scroll sideways: keep the chosen one in view. */
+  useEffect(() => { document.querySelector('.book-tabs .mg-tab.on')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }, [sub]);
   useEffect(() => { if (tabReq) { if (SUBS.some(([k]) => k === tabReq)) setSub(tabReq); onTabDone?.(); } }, [tabReq]);
   const [edit, setEdit] = useState(null);
   const cols = useMemo(() => Object.fromEntries(COLS.map(c => [c, bookCol(book.id, c)])), [book.id]);
@@ -2169,7 +2260,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         חלק מהנתונים לא נטענו ({data.errors.join(', ')}). בדוק שחוקי ה-Firestore המעודכנים פורסמו.{' '}
         <button className="mg-linkish" onClick={onReload}>נסה שוב</button></div>}
 
-      <div data-tour="book-tabs" className="mg-tabs" style={{ marginBottom: 16 }}>
+      <div data-tour="book-tabs" className="mg-tabs book-tabs" style={{ marginBottom: 16 }}>
         {SUBS.map(([k, l]) => <button key={k} className={'mg-tab' + (sub === k ? ' on' : '')} onClick={() => setSub(k)}>{l}</button>)}
       </div>
 
@@ -4825,6 +4916,30 @@ function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
     </>
   );
 }
+
+/* ============================================================ small screens */
+/* On a phone a wide table becomes a stack of cards: each cell shows its
+   column's name beside it. The names come from the table's own header, for
+   every table, as it is drawn — nothing to maintain screen by screen. */
+function labelTables() {
+  document.querySelectorAll('table.mg-tbl').forEach(t => {
+    const hs = [...t.querySelectorAll(':scope > thead th')].map(th => th.textContent.trim());
+    if (!hs.length) return;
+    t.classList.add('has-labels');
+    t.querySelectorAll(':scope > tbody > tr, :scope > tfoot > tr').forEach(tr => {
+      let i = 0;
+      [...tr.children].forEach(td => {
+        const span = td.colSpan || 1;
+        const lb = span === 1 ? (hs[i] || '') : '';
+        if (td.getAttribute('data-label') !== lb) { if (lb) td.setAttribute('data-label', lb); else td.removeAttribute('data-label'); }
+        i += span;
+      });
+    });
+  });
+}
+let labelQueued = false;
+new MutationObserver(() => { if (labelQueued) return; labelQueued = true; requestAnimationFrame(() => { labelQueued = false; labelTables(); }); })
+  .observe(document.body, { childList: true, subtree: true, characterData: true });
 
 /* ================================================================== mount */
 const style = document.createElement('style');
