@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.29.0';
+const VERSION = '1.29.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1047,6 +1047,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.29.1', date: '01.10.26', items: ['iCount: מסמכים חדשים נמשכים בכל פתיחה של העסק (לכל היותר פעם ב-20 דקות) ולא רק פעם ביום. בלשונית המסמכים יש כפתור "↻ משוך מ-iCount" עם התוצאה, ושגיאה מוצגת במקום להיבלע. מסמך של היום תמיד בטווח.'] },
   { v: '1.29.0', date: '01.10.26', items: [
     'מסך הגדרות לכל עסק (⚙ בראש העסק): פרטי העסק, דפי סליקה (זד קרדיט ויופיי), iCount, חשבוניות מ-Gmail, החנות, רשות המסים, מיסים ומקדמות, הוצאות קבועות, משתמשים וגיבוי. בכל אחד רואים אם הוא מוגדר (✓), ומגדירים אותו באותו מקום.',
     'בלשונית המסמכים: הסבר והפניה להגדרת דפי סליקה כשהם עוד לא מוגדרים.'] },
@@ -2711,19 +2712,39 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     try { await DB.patch(`books/${book.id}/payreqs`, p.id, f); patch('payreqs', l => l.map(x => x.id === p.id ? { ...x, ...f } : x)); flash('הקישור בוטל'); }
     catch { flash('הביטול נכשל (אולי כבר שולם). רענן ונסה שוב.'); }
   };
-  /* iCount, once a day: the last weeks' new documents come in by themselves. */
+  /* iCount: new documents come in by themselves each time the business opens
+     (at most every 20 minutes), and on request. The result, or the error, is
+     shown, never swallowed. The range reaches tomorrow so today is always in. */
+  const [ic, setIc] = useState({ at: book.icountSyncAt || '', busy: false, err: '', msg: '' });
+  const icSync = async (manual) => {
+    if (ic.busy) return;
+    setIc(x => ({ ...x, busy: true, err: '', msg: '' }));
+    try {
+      const to = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+      const from = new Date(Date.now() - (manual ? 60 : 20) * 864e5).toISOString().slice(0, 10);
+      const r = await icountPull(book, from, to);
+      const s0 = await icountSave(cols, data, r.docs, book.id);
+      const at = new Date().toISOString();
+      await DB.patch('books', book.id, { icountSyncAt: at, icountErr: '' }).catch(() => {});
+      const msg = s0.n ? `נכנסו ${s0.n} מסמכים חדשים מ-iCount` : `iCount: ${r.docs.length} מסמכים ב-${manual ? 60 : 20} הימים האחרונים, כולם כבר כאן`;
+      setIc({ at, busy: false, err: '', msg });
+      if (s0.n || manual) flash(msg);
+      if (s0.n) onReload();
+    } catch (e) {
+      const m = String(e?.message || e);
+      const err = m === 'icount-not-linked' ? 'iCount לא מחובר לעסק הזה (⚙ הגדרות ← iCount)'
+        : m === 'owners only' || m === 'not allowed' ? 'השרת לא זיהה אותך כבעל העסק (ייתכן עומס זמני ב-Google). נסה שוב בעוד כמה דקות.'
+        : /auth|token|401|unauthori|invalid_(api|key|user)/i.test(m) ? 'iCount דחה את המפתח. צריך מפתח API חדש (⚙ הגדרות ← iCount).'
+        : 'המשיכה מ-iCount נכשלה · ' + m;
+      await DB.patch('books', book.id, { icountErr: err, icountErrAt: new Date().toISOString() }).catch(() => {});
+      setIc(x => ({ ...x, busy: false, err }));
+      if (manual) flash(err);
+    }
+  };
   useEffect(() => {
     if (!cloud || !server || role !== 'owner' || !book.icountAuto) return;
-    if (Date.now() - Date.parse(book.icountSyncAt || 0) < 12 * 3600e3) return;
-    (async () => {
-      try {
-        const to = todayIso(), from = new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 10);
-        const r = await icountPull(book, from, to);
-        const s0 = await icountSave(cols, data, r.docs, book.id);
-        await DB.patch('books', book.id, { icountSyncAt: new Date().toISOString() }).catch(() => {});
-        if (s0.n) { flash(`נכנסו ${s0.n} מסמכים חדשים מ-iCount`); onReload(); }
-      } catch (e) { console.warn('icount sync', e); }
-    })();
+    if (Date.now() - Date.parse(book.icountSyncAt || 0) < 20 * 60e3) return;
+    icSync(false);
   }, [book.id, !!server]);
   const payRefresh = async () => {
     const [p, d] = await Promise.all([cols.payreqs.list().catch(() => null), cols.documents.list().catch(() => null)]);
@@ -2829,7 +2850,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
                                   onLog={log} server={server} ro={ro} flash={flash}
                                   payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh}
-                                  onSetup={role === 'owner' ? () => { try { sessionStorage.setItem('tzbooks_bset', 'pay'); } catch {} setSub('bset'); } : null} />}
+                                  onSetup={role === 'owner' ? () => { try { sessionStorage.setItem('tzbooks_bset', 'pay'); } catch {} setSub('bset'); } : null}
+                                  icount={role === 'owner' && cloud && server && (book.icountAuto || book.icountSyncAt || data.documents?.some(d => d.source === 'icount-api')) ? { ...ic, err: ic.err || (!ic.msg && book.icountErr) || '', sync: () => icSync(true) } : null} />}
       {sub === 'ledger' && <LedgerTab book={book} data={data} ledger={ledger} pick={ledgerPick} />}
       {sub === 'items' && <ItemsTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role} />}
       {sub === 'customers' && <CustomersTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role}
@@ -4313,7 +4335,7 @@ function IssuedPanel({ d, book, busy, canShareFiles, canMail, onShare, onMail, o
 }
 
 function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
-                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh, onSetup }) {
+                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh, onSetup, icount = null }) {
   const [busyId, setBusyId] = useState('');
   const [payForm, setPayForm] = useState(false);
   const [form, setForm] = useState(null);
@@ -4419,6 +4441,10 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
         ))}
         {(payOk?.zcredit || payOk?.upay) && !ro && <button data-tour="docs-paynew" className="mg-btn" style={{ background: '#1f4e79' }} onClick={() => setPayForm(true)}>💳 דף סליקה</button>}
       </div>
+      {icount && <div data-tour="docs-icount" className={'mg-note' + (icount.err ? ' bad' : '')} style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 14 }}>
+        <span style={{ flex: 1, minWidth: 180 }}>🔗 <b>iCount</b> · {icount.busy ? 'מושך מסמכים…' : icount.err ? icount.err : icount.msg ? icount.msg : icount.at ? `עודכן ${new Date(icount.at).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'עוד לא נמשך'}</span>
+        <button className="mg-btn sm keep" disabled={icount.busy} onClick={icount.sync}>{icount.busy ? '…' : '↻ משוך מ-iCount'}</button>
+      </div>}
       <PayList book={book} list={payreqs} onCancel={onPayCancel} onRefresh={onPayRefresh} flash={flash} ro={ro} />
       {payOk && (payOk.zcredit || payOk.upay) && !payreqs.length && !ro && <div className="mg-note" style={{ marginBottom: 12, fontSize: 14 }}>💳 דפי סליקה מוכנים. "דף סליקה" למעלה שולח ללקוח קישור לתשלום בכרטיס, ואחרי התשלום מופקת לו חשבונית לבד.</div>}
       {onSetup && !ro && cloud && !(payOk && (payOk.zcredit || payOk.upay)) && <div className="mg-note" style={{ marginBottom: 12, fontSize: 14 }}>💳 רוצה לשלוח ללקוח קישור לתשלום בכרטיס, עם חשבונית אוטומטית? <button className="mg-linkish" onClick={onSetup}>הגדרת דפי סליקה (זד קרדיט או יופיי)</button></div>}
