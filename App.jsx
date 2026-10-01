@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.29.1';
+const VERSION = '1.29.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1047,6 +1047,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.29.2', date: '01.10.26', items: ['לשונית "💳 סליקה" קבועה בכל עסק: כל דפי הסליקה, דף חדש, וכשעוד לא מוגדר ספק סליקה, מה חסר וכפתור להגדרה.'] },
   { v: '1.29.1', date: '01.10.26', items: ['iCount: מסמכים חדשים נמשכים בכל פתיחה של העסק (לכל היותר פעם ב-20 דקות) ולא רק פעם ביום. בלשונית המסמכים יש כפתור "↻ משוך מ-iCount" עם התוצאה, ושגיאה מוצגת במקום להיבלע. מסמך של היום תמיד בטווח.'] },
   { v: '1.29.0', date: '01.10.26', items: [
     'מסך הגדרות לכל עסק (⚙ בראש העסק): פרטי העסק, דפי סליקה (זד קרדיט ויופיי), iCount, חשבוניות מ-Gmail, החנות, רשות המסים, מיסים ומקדמות, הוצאות קבועות, משתמשים וגיבוי. בכל אחד רואים אם הוא מוגדר (✓), ומגדירים אותו באותו מקום.',
@@ -1172,7 +1173,7 @@ const CHANGES = [
 
 const TOUR_CTX = {
   welcome: 'התחלה', all: 'כל העסקים', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
-  expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', bset: 'הגדרות העסק', pnl: 'רווח והפסד', tax: 'רשות המסים',
+  expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', bset: 'הגדרות העסק', paypages: 'דפי סליקה', pnl: 'רווח והפסד', tax: 'רשות המסים',
   items: 'פריטים', ledger: 'כרטסת', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
 const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'import'];
@@ -1263,6 +1264,9 @@ const TOURS = {
   vat: [
     { t: 'vat-period', title: 'תקופת הדיווח', text: 'חודשי או דו-חודשי, ובחירת התקופה. מכאן גם יוצא הדוח לרואה החשבון.', since: '1.0.0' },
     { t: 'vat-stats', title: 'לדיווח', text: 'עסקאות, מע״מ עסקאות, תשומות ומע״מ לתשלום. אלה המספרים שממלאים בדיווח.', since: '1.0.0' },
+  ],
+  paypages: [
+    { t: 'paypages', title: 'דפי סליקה', text: 'כל דפי הסליקה: ממתינים, שולמו, ודף חדש. אם עוד לא מוגדר ספק סליקה (זד קרדיט או יופיי), כאן כתוב מה חסר וכפתור להגדרה.', since: '1.29.2' },
   ],
   bset: [
     { t: 'bset', title: 'הגדרות העסק', text: 'כל מה שהעסק מחובר אליו, במקום אחד: ✓ מה מוגדר, ומה חסר. לחיצה על שורה פותחת אותה ומגדירה במקום.', since: '1.27.0' },
@@ -2585,6 +2589,37 @@ function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEd
   );
 }
 
+/* Payment pages, in a place of their own: the list, a new page, and when
+   none can be made yet, what is missing and where to set it up. */
+function PayPagesTab({ book, data, payOk, server, role, ro, flash, onCreated, onCancel, onRefresh, onSetup }) {
+  const list = data.payreqs || [];
+  const [form, setForm] = useState(false);
+  const onNew = () => setForm(true);
+  const ready = !!(payOk?.zcredit || payOk?.upay);
+  const paid = list.filter(p => p.status === 'paid'), open = list.filter(p => p.status === 'open');
+  return (
+    <div data-tour="paypages">
+      {ready ? <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        {!ro && <button className="mg-btn" style={{ background: '#1f4e79' }} onClick={onNew}>💳 דף סליקה חדש</button>}
+        <span style={{ fontSize: 14, color: 'var(--muted)' }}>דרך {[payOk.zcredit && 'זד קרדיט', payOk.upay && 'יופיי'].filter(Boolean).join(' או ')} · {open.length} ממתינים · {paid.length} שולמו{paid.length ? ` (${fmt(paid.reduce((a, p) => a + (Number(p.total) || 0), 0))})` : ''}</span>
+      </div> : <div className="mg-card" style={{ marginBottom: 14 }}>
+        <h3 style={{ marginTop: 0 }}>💳 דפי סליקה</h3>
+        <p style={{ marginTop: 0, fontSize: 15 }}>שולחים ללקוח קישור, הוא משלם בכרטיס אשראי, ומיד מופקת לו חשבונית מס קבלה ונשלחת אליו.</p>
+        <div className="mg-note warn" style={{ fontSize: 14 }}>
+          {!cloud ? 'דפי סליקה פועלים רק כשהמערכת מחוברת לענן.'
+            : !server ? 'דפי סליקה צריכים את השרת (ההתקנה מ-GitHub ל-Netlify).'
+            : !server.pay?.admin ? 'חסר בשרת מפתח שירות של Firebase (קובץ JSON חד-פעמי).'
+            : 'לעסק הזה עוד לא הוגדר ספק סליקה: מפתח זד קרדיט או אימייל של חשבון יופיי.'}</div>
+        {role === 'owner' && cloud && server && <button className="mg-btn" style={{ marginTop: 10 }} onClick={onSetup}>⚙ הגדרת דפי סליקה</button>}
+      </div>}
+      {list.length > 0 ? <PayList book={book} list={list} onCancel={onCancel} onRefresh={onRefresh} flash={flash} ro={ro} />
+        : ready && <div className="mg-empty">עוד אין דפי סליקה. "💳 דף סליקה חדש" יוצר קישור לתשלום ושולח אותו ללקוח בוואטסאפ או במייל.</div>}
+      {form && <PayForm book={book} payOk={payOk} docs={data.documents || []} customers={data.customers || []} items={data.items || []} flash={flash}
+                        onCreated={onCreated} onClose={() => setForm(false)} />}
+    </div>
+  );
+}
+
 function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings, user, onGlobal, onServer }) {
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
@@ -2763,9 +2798,9 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     patch('documents', list => list.map(x => x.id === d.id ? { ...x, printCount: n } : x));
   };
 
-  const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
+  const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ...(ro ? [] : [['paypages', '💳 סליקה' + ((data.payreqs || []).filter(p => p.status === 'open').length ? ` (${(data.payreqs || []).filter(p => p.status === 'open').length})` : '')]]), ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
     ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ...(ro ? [] : [['import', 'ייבוא']])]
-    .filter(([k]) => !clerk || ['docs', 'customers', 'items'].includes(k));
+    .filter(([k]) => !clerk || ['docs', 'paypages', 'customers', 'items'].includes(k));
 
   return (
     <div className={ro ? 'ro' : ''}>
@@ -2844,6 +2879,9 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         <BookSettings book={book} data={data} cols={cols} flash={flash} server={server} user={user} payOk={payOk} role={role}
           onEditBook={onEditBook} onStoreLogin={onStoreLogin} onReload={onReload} onLog={log} onServer={onServer}
           onGo={(k, o) => { if (o?.pay) openDoc(null, true); else setSub(k); }} onGlobal={onGlobal} /></>}
+      {sub === 'paypages' && <PayPagesTab book={book} data={data} payOk={payOk} server={server} role={role} ro={ro} flash={flash}
+        onCreated={payCreated} onCancel={payCancel} onRefresh={payRefresh}
+        onSetup={() => { try { sessionStorage.setItem('tzbooks_bset', 'pay'); } catch {} setSub('bset'); }} />}
       {sub === 'pay' && <AuthPayTab book={book} rows={[{ book, data }, ...siblings]} onLoad={onLoadSiblings} flash={flash} />}
       {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} taxRows={role === 'owner' ? taxRows : null} onLoadSiblings={onLoadSiblings} />}
       {sub === 'docs' && <DocsTab quick={quickDoc} book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
