@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.34.0';
+const VERSION = '1.34.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -732,14 +732,29 @@ input:focus,select:focus{border-color:var(--gold)}
 .coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr));gap:16px}
 .coach-p{margin:0 0 10px;font-size:14px;color:#5b5346;line-height:1.6}
 .coach-tbl{width:100%;border-collapse:collapse;font-size:14.5px}.coach-tbl th{text-align:right;font-size:12.5px;color:var(--muted);font-weight:700;padding:4px}
-.coach-tbl td{padding:4px;border-bottom:1px solid #f1e9da}.coach-tbl input{width:100%;min-width:0;padding:6px 8px}
+.coach-tbl td{padding:4px;border-bottom:1px solid #f1e9da}.coach-tbl input{width:100%;min-width:0;padding:6px 8px}.coach-tbl input[type=number]{direction:ltr;text-align:right}
 .coach-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:6px}.coach-sum div{display:flex;flex-direction:column;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:8px 10px}
 .cap-bar{height:8px;background:#efe7d6;border-radius:6px;overflow:hidden}.cap-bar i{display:block;height:100%;background:#7aa37f}.cap-bar i.over{background:#b3412f}
 .coach-rec{list-style:none;padding:0;margin:8px 0 0}.coach-rec li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f1e9da;font-size:14.5px}
 .coach-tw{overflow-x:auto;-webkit-overflow-scrolling:touch}.coach-tbl td{white-space:nowrap}
 @media (max-width:640px){.coach-goal .cg-top{flex-direction:column;align-items:stretch}.cg-big{font-size:34px}
   .cg-side{grid-template-columns:1fr 1fr;max-width:none;width:100%}.cg-side b{font-size:17px;white-space:nowrap}.cg-side span{font-size:12px}
-  .coach-tbl{font-size:14px}.coach-tbl input{padding:7px 6px;min-width:88px}.coach-tbl td.capbar{display:none}.coach-tbl th:last-child:empty{display:none}}
+  .coach-tw{overflow:visible}
+  .coach-tbl thead{display:none}.coach-tbl,.coach-tbl tbody{display:block;width:100%}
+  .coach-tbl td{border:0;padding:0;white-space:normal}.coach-tbl input{min-width:0;width:100%;padding:9px 8px}
+  .coach-tbl.caps tr,.coach-tbl.accs tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:10px 0;border-bottom:1px solid #f1e9da}
+  .coach-tbl.caps .c-name{order:0;flex:0 0 calc(100% - 128px);min-width:0;font-weight:700;font-size:15.5px}
+  .coach-tbl.caps .c-cap{order:1;flex:0 0 118px}
+  .coach-tbl.caps .c-now{order:2;flex:0 0 auto}.coach-tbl.caps .c-avg{order:3;flex:0 0 auto}
+  .coach-tbl.caps .c-now,.coach-tbl.caps .c-avg{font-size:13.5px;color:var(--muted);white-space:nowrap}
+  .coach-tbl.caps .c-now::before,.coach-tbl.caps .c-avg::before{content:attr(data-l) ' ';font-weight:400}
+  .coach-tbl.caps .c-now.out{color:#b3412f;font-weight:700}
+  .coach-tbl.caps .capbar{order:4;flex:1 1 100%;width:auto !important;display:block}
+  .coach-tbl.caps .capbar:empty{display:none}
+  .coach-tbl.caps tr > td:only-child{flex:1 1 100%}
+  .coach-tbl.accs td:first-child{order:0;flex:1 1 0;min-width:0}.coach-tbl.accs td:last-child{order:1;flex:0 0 auto}
+  .coach-tbl.accs td[data-l]{order:2;flex:1 1 40%;min-width:120px}
+  .coach-tbl.accs td[data-l]::before{content:attr(data-l);display:block;font-size:12px;color:var(--muted);margin-bottom:2px}}
 .rep-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 12px}.rep-nav b{font-size:16px;text-align:center}
 .rep-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .rep-tile{background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center}
@@ -1177,6 +1192,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.34.1', date: '01.10.26', items: ['המאמן בנייד: תקרות ההוצאה והחשבונות מוצגים בשורות כפולות, בלי חיתוך בצד.'] },
   { v: '1.34.0', date: '01.10.26', items: ['🎯 המאמן הפיננסי (בתפריט הצד): יעד הכנסה חודשי עם מדרגות (50, 100, 150 אלף), תחזית לסוף החודש וכמה צריך ליום עבודה, 12 חודשים מול היעד.', 'יציאה מהאוברדרפט: חשבונות, מסגרות, ריבית וחובות; כמה להחזיר בחודש כדי לצאת עד תאריך, או כמה זמן ייקח.', 'כמה להפריש החודש למס, ביטוח לאומי ומע״מ; תקרות הוצאה לכל קטגוריה; הערות המאמן מהנתונים; ופגישת חודש.'] },
   { v: '1.33.0', date: '01.10.26', items: ['דוחות עסק: יומי בערב, שבועי ביום שישי בבוקר (שישי עד חמישי) וחודשי ב-1 לחודש. הכנסות, הוצאות ורווח, מול התקופה הקודמת, החודש או השנה עד עכשיו, ומאיפה הגיעו ההכנסות ועל מה הלכו ההוצאות.', 'הדוח מגיע במייל (מייל אחד לכל העסקים) ונפתח גם כחלון קופץ כשנכנסים. כפתור 📊 דוחות בראש העסק פותח כל דוח בכל זמן. הגדרות: ⚙ ← דוחות.'] },
   { v: '1.32.0', date: '01.10.26', items: ['בנייד: מתג תצוגה מעל כל רשימה (כרטיסים, שורות או טבלה), כל מכשיר זוכר את הבחירה.', 'מסמכים: קיבוץ לתיקיות לפי חודש, לקוח או סוג, עם מספר המסמכים והסכום בכל תיקייה.', 'בנייד הפעולות של כל מסמך מתקפלות מאחורי ⋯, והכרטיס קטן בהרבה.'] },
@@ -2611,18 +2627,18 @@ function CoachView({ books, datas, loading, user }) {
     <div className="coach-grid">
       <div data-tour="coach-debt" className="mg-card"><h3 style={{ marginTop: 0 }}>🏦 יציאה מהאוברדרפט</h3>
         <p className="coach-p">חשבונות הבנק והחובות: יתרה (מינוס לאוברדרפט), מסגרת וריבית שנתית. מעדכנים מדי פעם מהאפליקציה של הבנק.</p>
-        <div className="coach-tw"><table className="coach-tbl"><thead><tr><th>חשבון</th><th>יתרה</th><th>מסגרת</th><th>ריבית %</th><th></th></tr></thead><tbody>
+        <div className="coach-tw"><table className="coach-tbl accs"><thead><tr><th>חשבון</th><th>יתרה</th><th>מסגרת</th><th>ריבית %</th><th></th></tr></thead><tbody>
           {accs.map((a, i) => <tr key={a.id}>
             <td><input value={a.name} placeholder="בנק / חשבון" onChange={e => save({ accounts: setAcc(accs, i, { name: e.target.value }) })} /></td>
-            <td><input type="number" value={num(a.balance)} onChange={e => save({ accounts: setAcc(accs, i, { balance: e.target.value, at: today }) })} /></td>
-            <td><input type="number" value={num(a.limit)} onChange={e => save({ accounts: setAcc(accs, i, { limit: e.target.value }) })} /></td>
-            <td><input type="number" step="0.1" value={num(a.rate)} onChange={e => save({ accounts: setAcc(accs, i, { rate: e.target.value }) })} /></td>
+            <td data-l="יתרה"><input type="number" value={num(a.balance)} onChange={e => save({ accounts: setAcc(accs, i, { balance: e.target.value, at: today }) })} /></td>
+            <td data-l="מסגרת"><input type="number" value={num(a.limit)} onChange={e => save({ accounts: setAcc(accs, i, { limit: e.target.value }) })} /></td>
+            <td data-l="ריבית %"><input type="number" step="0.1" value={num(a.rate)} onChange={e => save({ accounts: setAcc(accs, i, { rate: e.target.value }) })} /></td>
             <td><button className="mg-btn ghost sm" onClick={() => save({ accounts: accs.filter((_, j) => j !== i) })} aria-label="הסר">✕</button></td></tr>)}
           {debts.map((a, i) => <tr key={a.id}>
             <td><input value={a.name} placeholder="הלוואה / חוב" onChange={e => save({ debts: setAcc(debts, i, { name: e.target.value }) })} /></td>
-            <td><input type="number" value={num(a.balance)} placeholder="יתרה לסילוק" onChange={e => save({ debts: setAcc(debts, i, { balance: e.target.value }) })} /></td>
-            <td><input type="number" value={num(a.payment)} placeholder="החזר חודשי" onChange={e => save({ debts: setAcc(debts, i, { payment: e.target.value }) })} /></td>
-            <td><input type="number" step="0.1" value={num(a.rate)} onChange={e => save({ debts: setAcc(debts, i, { rate: e.target.value }) })} /></td>
+            <td data-l="יתרה לסילוק"><input type="number" value={num(a.balance)} placeholder="יתרה לסילוק" onChange={e => save({ debts: setAcc(debts, i, { balance: e.target.value }) })} /></td>
+            <td data-l="החזר חודשי"><input type="number" value={num(a.payment)} placeholder="החזר חודשי" onChange={e => save({ debts: setAcc(debts, i, { payment: e.target.value }) })} /></td>
+            <td data-l="ריבית %"><input type="number" step="0.1" value={num(a.rate)} onChange={e => save({ debts: setAcc(debts, i, { rate: e.target.value }) })} /></td>
             <td><button className="mg-btn ghost sm" onClick={() => save({ debts: debts.filter((_, j) => j !== i) })} aria-label="הסר">✕</button></td></tr>)}
         </tbody></table></div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
@@ -2655,10 +2671,10 @@ function CoachView({ books, datas, loading, user }) {
 
     <div data-tour="coach-caps" className="mg-card"><h3 style={{ marginTop: 0 }}>✂ תקרות הוצאה</h3>
       <p className="coach-p">כל קטגוריה: מה יצא החודש, הממוצע בשלושת החודשים הקודמים, ותקרה שקובעים יחד. מה שעובר תקרה מופיע אצל המאמן ובדוחות.</p>
-      <div className="coach-tw"><table className="coach-tbl"><thead><tr><th>קטגוריה</th><th>החודש</th><th>ממוצע</th><th>תקרה</th><th></th></tr></thead><tbody>
+      <div className="coach-tw"><table className="coach-tbl caps"><thead><tr><th>קטגוריה</th><th>החודש</th><th>ממוצע</th><th>תקרה</th><th></th></tr></thead><tbody>
         {catRows.map(r => { const p = r.cap ? Math.min(100, r.now / r.cap * 100) : 0; return <tr key={r.k}>
-          <td>{r.k}</td><td className={r.cap && r.now > r.cap ? 'out' : ''}>{fmtRound(r.now)}</td><td>{fmtRound(r.avg)}</td>
-          <td><input type="number" placeholder="ללא" value={num(c.caps?.[r.k])} onChange={e => save({ caps: { ...(c.caps || {}), [r.k]: e.target.value } })} /></td>
+          <td className="c-name">{r.k}</td><td className={'c-now' + (r.cap && r.now > r.cap ? ' out' : '')} data-l="החודש">{fmtRound(r.now)}</td><td className="c-avg" data-l="ממוצע">{fmtRound(r.avg)}</td>
+          <td className="c-cap"><input type="number" inputMode="numeric" aria-label={'תקרה ל' + r.k} placeholder="ללא תקרה" value={num(c.caps?.[r.k])} onChange={e => save({ caps: { ...(c.caps || {}), [r.k]: e.target.value } })} /></td>
           <td className="capbar" style={{ width: '28%' }}>{r.cap ? <div className="cap-bar"><i className={r.now > r.cap ? 'over' : ''} style={{ width: p + '%' }} /></div> : null}</td></tr>; })}
         {!catRows.length && <tr><td colSpan={5}><div className="mg-empty">עוד אין הוצאות בשלושת החודשים האחרונים.</div></td></tr>}
       </tbody></table></div>
