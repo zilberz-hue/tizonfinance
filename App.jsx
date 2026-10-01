@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.24.0';
+const VERSION = '1.24.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1045,6 +1045,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.24.1', date: '01.10.26', items: ['הדבקת הוצאות קבועות: שם כמו "מילניום" כבר לא נחתך.'] },
   { v: '1.24.0', date: '01.10.26', items: ['הוצאה קבועה משוערת (למשל ספק חומרי גלם בממוצע ₪5,000): כל חודש נרשמת הערכה "לבדיקה". כשהחשבונית בפועל מגיעה במייל, היא מחליפה את ההערכה במקום להיכפל. אפשר גם לעדכן את הסכום ידנית.'] },
   { v: '1.23.2', date: '01.10.26', items: ['נייד צר: כרטיסים ברשות המסים ובמסכים נוספים כבר לא נחתכים בצד. שום כרטיס לא רחב מהמסך.'] },
   { v: '1.23.1', date: '01.10.26', items: ['הוצאות קבועות: "חלק העסק (%)" להוצאות של קליניקה בתוך הבית (שכירות, ארנונה, חשמל, מים). רושמים את הסכום המלא, ונרשם רק החלק של העסק. בהדבקה: "ארנונה, 1100, 1, 25%".'] },
@@ -3113,7 +3114,9 @@ function parseRecurring(text) {
     const amounts = nums.filter(n => !(dayM && n.raw === dayM[1] && Math.abs(n.at - (line.indexOf(dayM[0]) + dayM[0].indexOf(dayM[1]))) < 2));
     const amount = amounts.length ? amounts[0].v : 0;
     const restDay = day ?? (amounts[1] && amounts[1].v >= 1 && amounts[1].v <= 31 && Number.isInteger(amounts[1].v) ? Math.min(28, amounts[1].v) : 1);
-    const name = line.replace(/(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?/g, ' ').replace(/ש["״]?ח|₪|nis|ils|לחודש|בחודש|יום|ב-|כל|ללא מע["״]?מ|פטור|כולל מע["״]?מ/gi, ' ')
+    /* Only whole words are taken out: "יום" must not cut "מילניום". */
+    const name = line.replace(/(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?/g, ' ').replace(/₪/g, ' ')
+      .replace(/(^|[\s,;|])(ש["״]?ח|nis|ils|לחודש|בחודש|יום|ב-|כל|ללא מע["״]?מ|פטור|כולל מע["״]?מ)(?=$|[\s,;|])/gi, '$1 ')
       .split(/[,;|\t]| - /)[0].replace(/\s+/g, ' ').trim() || 'הוצאה קבועה';
     const vatMode = /ללא מע|פטור|חו["״]?ל|abroad/i.test(line) ? 'none' : /רכב|דלק|ליסינג/.test(line) ? 'car' : 'full';
     const catTxt = line.split(/[,;|\t]/).slice(3).join(' ');
