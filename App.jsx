@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.34.1';
+const VERSION = '1.35.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -736,7 +736,16 @@ input:focus,select:focus{border-color:var(--gold)}
 .coach-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:6px}.coach-sum div{display:flex;flex-direction:column;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:8px 10px}
 .cap-bar{height:8px;background:#efe7d6;border-radius:6px;overflow:hidden}.cap-bar i{display:block;height:100%;background:#7aa37f}.cap-bar i.over{background:#b3412f}
 .coach-rec{list-style:none;padding:0;margin:8px 0 0}.coach-rec li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f1e9da;font-size:14.5px}
-.coach-tw{overflow-x:auto;-webkit-overflow-scrolling:touch}.coach-tbl td{white-space:nowrap}
+.coach-tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.coach-chat{display:flex;flex-direction:column;gap:8px;max-height:460px;overflow-y:auto;padding:4px 2px;margin-bottom:8px}
+.cm{max-width:88%;padding:10px 13px;border-radius:14px;font-size:15px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.cm.user{align-self:flex-start;background:#2f5d46;color:#fff;border-bottom-right-radius:4px}
+.cm.assistant{align-self:flex-end;background:#f6efe2;border-bottom-left-radius:4px;white-space:normal}
+.cm.thinking{color:var(--muted)}.cm .dots{display:inline-block;animation:cdots 1.2s infinite}@keyframes cdots{50%{opacity:.2}}
+.coach-sugg{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}@media (max-width:640px){.coach-sugg.ask{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}.coach-sugg.ask .mg-chipbtn{flex:0 0 auto;white-space:nowrap}}.coach-sugg .mg-chipbtn{font-size:13.5px;padding:6px 12px}
+.coach-in{display:flex;gap:8px;align-items:flex-end}.coach-in textarea{flex:1;min-width:0;resize:vertical}
+.coach-plan{margin-top:10px;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:10px 12px}.coach-plan summary{cursor:pointer}
+.ct{font-size:14.5px;line-height:1.65}.ct-h{font-weight:800;margin:8px 0 2px;color:#2f5d46}.ct-li{padding-inline-start:14px;text-indent:-12px}.ct-gap{height:6px}.coach-tbl td{white-space:nowrap}
 @media (max-width:640px){.coach-goal .cg-top{flex-direction:column;align-items:stretch}.cg-big{font-size:34px}
   .cg-side{grid-template-columns:1fr 1fr;max-width:none;width:100%}.cg-side b{font-size:17px;white-space:nowrap}.cg-side span{font-size:12px}
   .coach-tw{overflow:visible}
@@ -1192,6 +1201,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.35.0', date: '01.10.26', items: ['🤖 המאמן החכם (במסך המאמן): שיחה עם Claude על המספרים שלך, ושאלות מוכנות בלחיצה.', 'תוכניות 90 יום לפי תחום: הקליניקה, החנות, קורסים, Tizon Health, שיווק, אוברדרפט ותזרים, וקיצוץ הוצאות. נשמרות, מתעדכנות ומודפסות.', 'עובד עם מפתח API של Anthropic שנשמר רק בשרת.'] },
   { v: '1.34.1', date: '01.10.26', items: ['המאמן בנייד: תקרות ההוצאה והחשבונות מוצגים בשורות כפולות, בלי חיתוך בצד.'] },
   { v: '1.34.0', date: '01.10.26', items: ['🎯 המאמן הפיננסי (בתפריט הצד): יעד הכנסה חודשי עם מדרגות (50, 100, 150 אלף), תחזית לסוף החודש וכמה צריך ליום עבודה, 12 חודשים מול היעד.', 'יציאה מהאוברדרפט: חשבונות, מסגרות, ריבית וחובות; כמה להחזיר בחודש כדי לצאת עד תאריך, או כמה זמן ייקח.', 'כמה להפריש החודש למס, ביטוח לאומי ומע״מ; תקרות הוצאה לכל קטגוריה; הערות המאמן מהנתונים; ופגישת חודש.'] },
   { v: '1.33.0', date: '01.10.26', items: ['דוחות עסק: יומי בערב, שבועי ביום שישי בבוקר (שישי עד חמישי) וחודשי ב-1 לחודש. הכנסות, הוצאות ורווח, מול התקופה הקודמת, החודש או השנה עד עכשיו, ומאיפה הגיעו ההכנסות ועל מה הלכו ההוצאות.', 'הדוח מגיע במייל (מייל אחד לכל העסקים) ונפתח גם כחלון קופץ כשנכנסים. כפתור 📊 דוחות בראש העסק פותח כל דוח בכל זמן. הגדרות: ⚙ ← דוחות.'] },
@@ -1364,6 +1374,7 @@ const TOURS = {
     { t: 'coach-debt', title: 'יציאה מהאוברדרפט', text: 'יתרות, מסגרות וריבית. המאמן מחשב כמה להחזיר בחודש כדי לצאת עד תאריך, או כמה זמן ייקח בהחזר שבחרת.', since: '1.34.0' },
     { t: 'coach-reserve', title: 'להפריש', text: 'כמה לשים בצד החודש למס, ביטוח לאומי ומע״מ, ומה כבר הופרש.', since: '1.34.0' },
     { t: 'coach-caps', title: 'תקרות הוצאה', text: 'תקרה לכל קטגוריה מול מה שיצא החודש והממוצע, והוצאות קבועות לבדיקה.', since: '1.34.0' },
+    { t: 'coach-ai', title: 'המאמן החכם', text: 'שיחה עם Claude על המספרים שלך, ותוכניות 90 יום לפי תחום: קליניקה, חנות, קורסים, שיווק, אוברדרפט.', since: '1.35.0' },
     { t: 'coach-checkin', title: 'פגישת החודש', text: 'כמה שורות בתחילת כל חודש: מה עבד, מה לא, ומה עושים עכשיו.', since: '1.34.0' },
   ],
   dash: [
@@ -1956,7 +1967,7 @@ function App() {
         {cur === 'users' && books && <UsersView books={books} user={user} flash={flash} onSave={saveBook} />}
         {cur !== 'settings' && cur !== 'users' && cur !== 'help' && cur !== 'coach' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
 
-        {cur === 'coach' && books && books.length > 0 && <CoachView books={books} datas={datas} loading={loading} user={user} />}
+        {cur === 'coach' && books && books.length > 0 && <CoachView books={books} datas={datas} loading={loading} user={user} flash={flash} />}
         {cur === 'all' && books && books.length > 0 && (() => {
           /* The financial overview is for owners and viewers; someone who only
              issues documents sees their businesses, not the totals. */
@@ -2519,7 +2530,130 @@ function payoffMonths(bal, ratePct, pay) {
 function paymentFor(bal, ratePct, months) { const r = ratePct / 100 / 12; if (months <= 0) return bal; return r ? bal * r / (1 - Math.pow(1 + r, -months)) : bal / months; }
 const monthsUntil = (ym) => { if (!ym) return 0; const [a, b] = thisMonth().split('-').map(Number), [c, d] = ym.split('-').map(Number); return (c - a) * 12 + (d - b) + 1; };
 
-function CoachView({ books, datas, loading, user }) {
+/* The smart coach: a conversation with Claude about these numbers, and
+   written plans by area. The key and the conversation stay on the server
+   (netlify/coach-core.mjs); the page sends a summary of the numbers. */
+const COACH_FN = '/.netlify/functions/books-coach';
+async function coachCall(body, background) {
+  const idToken = await cloud.auth.currentUser.getIdToken();
+  const r = await fetch(background ? COACH_FN + '-background' : COACH_FN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, idToken }) });
+  if (background) { if (!r.ok && r.status !== 202) throw new Error('HTTP ' + r.status); return null; }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+  return j;
+}
+const COACH_ERR = { 'no-key': 'עוד אין מפתח API למאמן.', 'bad-key': 'Anthropic דחו את המפתח. בדוק שהעתקת אותו נכון ושיש בחשבון יתרה.', 'owners only': 'המאמן פתוח רק לבעלי עסק.',
+  'no-service-account': 'חסר מפתח שירות של Firebase בשרת.', 'key-format': 'המפתח צריך להתחיל ב-sk-ant-', model: 'המודל לא ענה כרגע. נסה שוב בעוד דקה.', timeout: 'התשובה מתעכבת. נסה לרענן בעוד כמה דקות.' };
+const coachErr = (e) => COACH_ERR[e] || COACH_ERR[String(e).split(':')[0]] || String(e || 'שגיאה');
+/* Headings, bullets and bold, as the model writes them; nothing else is markup. */
+function CoachText({ text }) {
+  const inl = (s) => String(s).split(/(\*\*[^*]+\*\*)/g).map((p, i) => /^\*\*[^*]+\*\*$/.test(p) ? <b key={i}>{p.slice(2, -2)}</b> : p);
+  return <div className="ct">{String(text || '').split('\n').map((l, i) => {
+    const t = l.trim(); if (!t) return <div key={i} className="ct-gap" />;
+    const h = t.match(/^#{1,4}\s+(.*)$/); if (h) return <div key={i} className="ct-h">{inl(h[1])}</div>;
+    const b = t.match(/^(?:[-*•]|\d+[.)])\s+(.*)$/); if (b) return <div key={i} className="ct-li">{/^\d/.test(t) ? t.match(/^\d+/)[0] + '. ' : '• '}{inl(b[1])}</div>;
+    return <div key={i}>{inl(t)}</div>; })}</div>;
+}
+const COACH_AREAS = [['clinic', '🩺 הקליניקה'], ['store', '🛒 החנות'], ['courses', '🎓 קורסים'], ['tizon', '🌿 Tizon Health'], ['marketing', '📣 שיווק'], ['debt', '🏦 אוברדרפט ותזרים'], ['costs', '✂ קיצוץ הוצאות']];
+const COACH_ASK = ['איך מגיעים ל-50 אלף כבר החודש?', 'מה לחתוך קודם?', 'מה לשלוח ללקוחות שלא חזרו?', 'איך יוצאים מהאוברדרפט הכי מהר?', 'מה 3 הפעולות החשובות לשבוע הזה?'];
+
+function SmartCoach({ summary, flash }) {
+  const [st, setSt] = useState(null);
+  const [err, setErr] = useState('');
+  const [key, setKey] = useState('');
+  const [q, setQ] = useState('');
+  const [wait, setWait] = useState('');           // 'chat' or an area while the coach thinks
+  const [chat, setChat] = useState([]);
+  const [plans, setPlans] = useState({});
+  const [note, setNote] = useState('');
+  const endRef = useRef(null);
+  const load = () => coachCall({ action: 'status' }).then(s => { setSt(s); setChat(s.chat || []); setPlans(s.plans || {}); setErr(''); }).catch(e => { setSt({ failed: true }); setErr(coachErr(e.message)); });
+  useEffect(() => { if (cloud) load(); }, []);
+  useEffect(() => { endRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [chat.length, wait]);
+  if (!cloud) return null;
+  const poll = async (id) => {
+    const until = Date.now() + 4 * 60e3;
+    while (Date.now() < until) {
+      await new Promise(r => setTimeout(r, 2500));
+      const j = await coachCall({ action: 'job', id }).catch(() => null);
+      if (j?.state === 'done' || j?.state === 'error') return j;
+    }
+    return { state: 'error', error: 'timeout' };
+  };
+  const send = async (text) => {
+    const t = String(text ?? q).trim(); if (!t || wait) return;
+    setQ(''); setWait('chat'); setErr('');
+    const now = new Date().toISOString();
+    setChat(c => [...c, { role: 'user', text: t, at: now }]);
+    const id = uid('job');
+    try {
+      await coachCall({ id, kind: 'chat', text: t, summary }, true);
+      const j = await poll(id);
+      if (j.state === 'done') setChat(c => [...c, { role: 'assistant', text: j.text, at: new Date().toISOString() }]);
+      else { setErr(coachErr(j.error)); setChat(c => c.slice(0, -1)); setQ(t); }
+    } catch (e) { setErr(coachErr(e.message)); setChat(c => c.slice(0, -1)); setQ(t); }
+    setWait('');
+  };
+  const plan = async (area) => {
+    if (wait) return; setWait(area); setErr('');
+    const id = uid('job');
+    try {
+      await coachCall({ id, kind: 'plan', area, summary, note }, true);
+      const j = await poll(id);
+      if (j.state === 'done') { setPlans(p => ({ ...p, [j.area]: j.plan })); flash('התוכנית מוכנה'); }
+      else setErr(coachErr(j.error));
+    } catch (e) { setErr(coachErr(e.message)); }
+    setWait('');
+  };
+  const saveKey = async (remove) => {
+    try { await coachCall({ action: 'set-key', key, remove }); setKey(''); flash(remove ? 'המפתח הוסר' : 'המפתח נשמר בשרת'); load(); }
+    catch (e) { setErr(coachErr(e.message)); }
+  };
+  const clear = async () => { if (!window.confirm('למחוק את השיחה עם המאמן? התוכניות נשארות.')) return; await coachCall({ action: 'clear' }).catch(() => {}); setChat([]); };
+  const delPlan = async (a) => { const r = await coachCall({ action: 'del-plan', area: a }).catch(() => null); if (r) setPlans(r.plans || {}); };
+
+  return (<div data-tour="coach-ai" className="mg-card coach-ai">
+    <h3 style={{ marginTop: 0 }}>🤖 המאמן החכם</h3>
+    {!st && <div className="mg-empty">מתחבר…</div>}
+    {st && !st.failed && !st.keyed && <div className="coach-key">
+      <p className="coach-p" style={{ marginTop: 0 }}>המאמן החכם עובד עם Claude של Anthropic. צריך מפתח API פעם אחת: נכנסים ל-<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a>, יוצרים מפתח (Create Key), מוסיפים יתרה קטנה בחיוב, ומדביקים כאן. המפתח נשמר רק בשרת שלך.</p>
+      <div style={row}><Field label="מפתח API"><input dir="ltr" type="password" autoComplete="off" value={key} placeholder="sk-ant-…" onChange={e => setKey(e.target.value.trim())} /></Field>
+        <button className="mg-btn" disabled={!key} onClick={() => saveKey(false)}>שמור</button></div>
+    </div>}
+    {err && <div className="mg-note bad" style={{ margin: '8px 0' }}>{err}</div>}
+    {st?.keyed && <>
+      <div className="coach-chat" aria-live="polite">
+        {!chat.length && <div className="coach-p">שאל אותי כל דבר על העסק. אני רואה את המספרים שלמעלה: היעד, הקצב, ההוצאות, ההפרשות והאוברדרפט.</div>}
+        {chat.map((m, i) => <div key={i} className={'cm ' + m.role}>{m.role === 'assistant' ? <CoachText text={m.text} /> : m.text}</div>)}
+        {wait === 'chat' && <div className="cm assistant thinking">המאמן חושב<span className="dots">…</span></div>}
+        <div ref={endRef} />
+      </div>
+      <div className="coach-sugg ask">{COACH_ASK.map(s => <button key={s} className="mg-chipbtn" disabled={!!wait} onClick={() => send(s)}>{s}</button>)}</div>
+      <div className="coach-in">
+        <textarea rows={2} value={q} placeholder="מה תרצה לשאול את המאמן?" onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+        <button className="mg-btn" disabled={!q.trim() || !!wait} onClick={() => send()}>{wait === 'chat' ? '…' : 'שלח'}</button>
+      </div>
+
+      <h4 style={{ margin: '18px 0 6px' }}>📋 תוכניות לפי תחום (90 יום)</h4>
+      <div className="coach-sugg">{COACH_AREAS.map(([a, l]) => <button key={a} className={'mg-chipbtn' + (plans[a] ? ' on' : '')} disabled={!!wait} onClick={() => plan(a)}>
+        {wait === a ? 'בונה…' : (plans[a] ? '↻ ' : '＋ ') + l}</button>)}</div>
+      <input value={note} onChange={e => setNote(e.target.value)} placeholder="הערה לתוכנית הבאה (לא חובה): למשל 'יש לי 10 שעות פנויות בשבוע'" style={{ width: '100%', marginTop: 6 }} />
+      {Object.entries(plans).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).map(([a, p]) => <details key={a} className="coach-plan">
+        <summary><b>{p.label}</b> <small>· {new Date(p.at).toLocaleDateString('he-IL')}</small></summary>
+        <CoachText text={p.text} />
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+          <button className="mg-btn ghost sm" onClick={() => printHTML(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${p.label}</title><style>body{font-family:Arial;margin:28px;line-height:1.7;font-size:14px;white-space:pre-wrap}</style></head><body><h2>${p.label}</h2>${String(p.text).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</body></html>`)}>🖨 הדפס</button>
+          <button className="mg-btn ghost sm" onClick={() => delPlan(a)}>מחק</button></div></details>)}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', fontSize: 13 }}>
+        {chat.length > 0 && <button className="mg-linkish" onClick={clear}>מחק את השיחה</button>}
+        <button className="mg-linkish" onClick={() => { if (window.confirm('להסיר את מפתח ה-API מהשרת?')) saveKey(true); }}>הסר מפתח API</button>
+        <span style={{ color: 'var(--muted)' }}>· מודל {st.model}</span></div>
+    </>}
+  </div>);
+}
+
+function CoachView({ books, datas, loading, user, flash }) {
   const [c, setC] = useState(coachGet);
   const save = (patch) => setC(x => { const n = { ...x, ...patch }; try { lsSet(COACH_KEY, n); } catch { /* ignore */ } return n; });
   const mine = books.filter(b => roleOf(b, user.email) === 'owner');
@@ -2591,6 +2725,22 @@ function CoachView({ books, datas, loading, user }) {
   const topTwo = Object.values(custM).sort((a, b) => b - a).slice(0, 2).reduce((a, v) => a + v, 0);
   if (cur.incGross > 3000 && topTwo / cur.incGross > 0.5) notes.push({ k: 'warn', t: `יותר מחצי מההכנסה החודש הגיע משני לקוחות. כדאי לפזר.` });
 
+  /* What the smart coach reads: the numbers on this screen, as text. */
+  const summary = [
+    `עסקים: ${mine.map(b => `${b.name} (${DEALERS[b.dealerType] || ''})`).join(', ')}. היום ${heDate(today)}.`,
+    `יעד הכנסה חודשי: ${fmtRound(goal)} (${c.basis === 'gross' ? 'כולל מע״מ' : 'לפני מע״מ'}); מדרגות: ${(c.ladder || []).join(', ')}. ימי עבודה בשבוע: ${c.workDays}.`,
+    `החודש עד היום: הכנסות ${fmtRound(got)}, הוצאות ${fmtRound(cur.expGross)}, רווח ${fmtRound(cur.profit)}. תחזית לסוף החודש ${fmtRound(forecast)}; נשארו ${daysLeft} ימי עבודה.`,
+    `12 חודשים אחרונים (הכנסה / הוצאה / רווח): ${hist.map(h => `${h.m}: ${Math.round(h.v)} / ${Math.round(h.t.expGross)} / ${Math.round(h.t.profit)}`).join('; ')}.`,
+    `רווח ממוצע 3 חודשים: ${fmtRound(avgProfit3)}. מתחילת השנה: ${fmtRound(ytd)}; מס+ביטוח לאומי צפוי ${Math.round(tf.rate * 100)}%.`,
+    `הוצאות לפי קטגוריה (החודש / ממוצע 3 חודשים / תקרה): ${catRows.map(r => `${r.k}: ${Math.round(r.now)} / ${Math.round(r.avg)} / ${r.cap || 'אין'}`).join('; ') || 'אין'}.`,
+    `הוצאות קבועות בחודש: ${fmtRound(recTotal)}: ${recurring.map(r => `${r.name || r.desc} ${Math.round(recAmt(r))}${r.estimate ? ' (הערכה)' : ''}`).join(', ') || 'אין'}.`,
+    `חשבונות: ${accs.map(a => `${a.name || 'חשבון'} יתרה ${a.balance || '?'} מסגרת ${a.limit || '?'} ריבית ${a.rate || '?'}%`).join('; ') || 'לא הוזנו'}. חובות: ${debts.map(d => `${d.name || 'חוב'} ${d.balance || '?'} החזר ${d.payment || '?'} ריבית ${d.rate || '?'}%`).join('; ') || 'אין'}.`,
+    `סה״כ חוב ${fmtRound(owed)}, ריבית בחודש ${fmtRound(interest)}${c.payoffBy ? `, יעד יציאה ${c.payoffBy}` : ''}${c.payExtra ? `, החזר אפשרי ${c.payExtra} בחודש` : ''}.`,
+    `להפריש החודש: ${fmtRound(reserveNeed)} (מס+ב״ל ${fmtRound(taxMonthly)}, מע״מ ${fmtRound(vatMonth)}); הופרש ${fmtRound(reserved)}.`,
+    `לקוחות קבועים שלא חזרו מעל חודשיים: ${lapsed.length}${lapsed.length ? ' (' + lapsed.slice(0, 12).join(', ') + ')' : ''}.`,
+    `הערות המאמן: ${notes.map(n => n.t).join(' | ') || 'אין'}.`,
+    c.checkins?.[ym] ? `סיכום החודש שכתבתי: ${c.checkins[ym]}` : '',
+  ].filter(Boolean).join('\n');
   const num = (v) => v === '' || v == null ? '' : v;
   const setAcc = (list, i, f) => list.map((x, j) => j === i ? { ...x, ...f } : x);
   const maxBar = Math.max(goal, ...hist.map(h => h.v), 1);
@@ -2623,6 +2773,8 @@ function CoachView({ books, datas, loading, user }) {
 
     <div data-tour="coach-notes" className="mg-card"><h3 style={{ marginTop: 0 }}>💡 מה המאמן רואה</h3>
       {notes.length ? <ul className="coach-notes">{notes.map((n, i) => <li key={i} className={n.k}>{n.t}</li>)}</ul> : <div className="mg-empty">אין הערות כרגע. הכול בתלם.</div>}</div>
+
+    {ready.length > 0 && <SmartCoach summary={summary} flash={flash} />}
 
     <div className="coach-grid">
       <div data-tour="coach-debt" className="mg-card"><h3 style={{ marginTop: 0 }}>🏦 יציאה מהאוברדרפט</h3>
