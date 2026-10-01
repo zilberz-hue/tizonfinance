@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.30.1';
+const VERSION = '1.31.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -702,6 +702,12 @@ input:focus,select:focus{border-color:var(--gold)}
 .seg{display:flex;background:var(--soft);border-radius:12px;padding:4px;gap:4px}
 .seg button{flex:1;border:0;background:none;padding:9px;border-radius:9px;cursor:pointer;font-weight:700;color:var(--muted)}
 .seg button.on{background:#fff;color:#6e4d22;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.exp-ranges{display:flex;flex-wrap:wrap;gap:6px}
+.mg-chipbtn{border:1px solid var(--line,#e6dcc8);background:#fff;border-radius:999px;padding:7px 14px;font:inherit;font-size:14px;font-weight:700;color:#5b5346;cursor:pointer}
+.mg-chipbtn.on{background:#6e4d22;border-color:#6e4d22;color:#fff}
+.exp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:16px}
+.exp-card{display:flex;flex-direction:column}.exp-card h3{margin:4px 0 6px}.exp-card p{margin:0 0 12px;font-size:14px;color:#5b5346;line-height:1.6;flex:1}
+.exp-ic{font-size:28px;line-height:1}
 .login-foot{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
 .login h1{margin:0;font-family:'Frank Ruhl Libre',serif;color:var(--gold);text-align:center;font-size:24px}
 .tour{position:fixed;inset:0;z-index:70}
@@ -1092,6 +1098,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.31.0', date: '01.10.26', items: ['לשונית ייצוא חדשה תחת כלים: Excel מלא עם גיליון לכל רשימה (מסמכים, תקבולים, הכנסות, הוצאות, מע״מ לפי חודש, פקודות יומן, מאזן בוחן, לקוחות, ספקים, פריטים, בנק), חבילת ZIP לרואה החשבון, מבנה אחיד, CSV לכל רשימה וגיבוי של העסק. בחירת תקופה אחת לכולם.'] },
   { v: '1.30.1', date: '01.10.26', items: ['במחשב: העמודה הימנית צרה וקומפקטית יותר, עם לוגו קטן, וכפתור » שמכווץ אותה לפס צר של אייקונים (העסקים כעיגולים עם האות הראשונה). המערכת זוכרת את הבחירה.'] },
   { v: '1.30.0', date: '01.10.26', items: [
     'במחשב: הלשוניות של העסק עברו לסרגל צד קבוע, בקבוצות: עבודה יומית, כספים, דוחות ומיסים. בנייד ובטאבלט הן נשארות למעלה.',
@@ -1223,9 +1230,9 @@ const CHANGES = [
 const TOUR_CTX = {
   welcome: 'התחלה', all: 'כל העסקים', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
   expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', bset: 'הגדרות העסק', paypages: 'דפי סליקה', pnl: 'רווח והפסד', tax: 'רשות המסים',
-  items: 'פריטים', ledger: 'כרטסת', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
+  items: 'פריטים', ledger: 'כרטסת', export: 'ייצוא', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
-const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'import'];
+const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'export', 'import'];
 const WRITERS = ['owner', 'clerk'];
 
 const TOURS = {
@@ -1332,6 +1339,14 @@ const TOURS = {
     { t: 'tax-export', title: 'מבנה אחיד', text: 'INI.TXT ו-BKMVDATA.TXT לפי הוראה 1.31: הקובץ שמבקר מס מבקש, וגם מה שמעבירים לרואה החשבון.', since: '1.3.0' },
     { t: 'tax-register', title: 'רישום התוכנה', text: 'חמשת השלבים לרישום התוכנה ברשות המסים, והמקום לרשום את מספר הרישום שמתקבל.', since: '1.3.0' },
     { t: 'tax-log', title: 'יומן פעולות', text: 'כל הפקה, הדפסה, שליחה וייצוא נרשמים כאן, ואי אפשר למחוק.', since: '1.3.0' },
+  ],
+  export: [
+    { t: 'exp-range', title: 'תקופה', text: 'בוחרים פעם אחת את התקופה (החודש, דו-חודש, שנה, הכול או טווח), וכל הייצואים כאן לפיה.', since: '1.31.0' },
+    { t: 'exp-excel', title: 'Excel מלא', text: 'קובץ אחד עם גיליון לכל רשימה, כולל פקודות יומן ומאזן בוחן.', since: '1.31.0' },
+    { t: 'exp-pack', title: 'חבילה לרואה החשבון', text: 'ZIP אחד: Excel, CSV לכל רשימה ומבנה אחיד. שולחים אותו כמו שהוא.', since: '1.31.0' },
+    { t: 'exp-unified', title: 'מבנה אחיד', text: 'הקובץ הרשמי של רשות המסים, שכל תוכנה רשומה יודעת לקלוט.', since: '1.31.0' },
+    { t: 'exp-csv', title: 'CSV', text: 'כל רשימה בנפרד, לגוגל שיטס או לתוכנה אחרת.', since: '1.31.0' },
+    { t: 'exp-backup', title: 'גיבוי', text: 'כל הרשומות של העסק בקובץ שאפשר לשחזר ממנו.', since: '1.31.0' },
   ],
   import: [
     { t: 'imp-icount-live', title: 'חיבור ישיר ל-iCount', text: 'מפתח API מ-iCount, והמסמכים נמשכים לכאן בלי קבצים. אפשר גם שמסמכים חדשים ייכנסו לבד כל יום.', since: '1.15.0' },
@@ -2870,9 +2885,9 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
 
   const TAB_GROUP = { docs: 'עבודה יומית', paypages: 'עבודה יומית', customers: 'עבודה יומית', items: 'עבודה יומית',
     income: 'כספים', expenses: 'כספים', suppliers: 'כספים', bank: 'כספים', ledger: 'כספים',
-    vat: 'דוחות ומיסים', pay: 'דוחות ומיסים', pnl: 'דוחות ומיסים', tax: 'דוחות ומיסים', import: 'כלים' };
+    vat: 'דוחות ומיסים', pay: 'דוחות ומיסים', pnl: 'דוחות ומיסים', tax: 'דוחות ומיסים', export: 'כלים', import: 'כלים' };
   const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ...(ro ? [] : [['paypages', '💳 סליקה' + ((data.payreqs || []).filter(p => p.status === 'open').length ? ` (${(data.payreqs || []).filter(p => p.status === 'open').length})` : '')]]), ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
-    ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ...(ro ? [] : [['import', 'ייבוא']])]
+    ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ['export', 'ייצוא'], ...(ro ? [] : [['import', 'ייבוא']])]
     .filter(([k]) => !clerk || ['docs', 'paypages', 'customers', 'items'].includes(k));
 
   return (
@@ -2976,6 +2991,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
                                             onLedger={clerk ? null : (c) => { setLedgerPick({ kind: 'cust', id: c.id, n: Date.now() }); setSub('ledger'); }}
                                             onReload={onReload} onStoreLogin={onStoreLogin} />}
       {sub === 'tax' && <TaxTab book={book} docs={data.documents || []} log={data.log || []} ro={ro} onLog={log} flash={flash} ledger={ledger} />}
+      {sub === 'export' && <ExportTab book={book} data={data} ledger={ledger} flash={flash} onLog={ro ? null : log} onSub={setSub} user={user} />}
       {sub === 'import' && <ImportTab book={book} data={data} cols={cols} flash={flash} onDone={onReload} onDeleteBook={onDeleteBook} onLog={log} server={server} />}
 
       {edit?.kind === 'income' && <IncomeForm rec={edit.rec} rate={rate} onClose={() => setEdit(null)}
@@ -5167,6 +5183,198 @@ async function makeArchive(books, month, email) {
   return { zip: zipSync(files), lines };
 }
 
+/* ------------------------------------------------------ the export tab
+   Everything out, the way every accounting program offers it: one Excel
+   workbook with a sheet per list, the unified file, a package for the
+   accountant, and CSV of any single list. Nothing here writes anywhere. */
+const EXP_RANGES = [['month', 'החודש'], ['prev', 'חודש קודם'], ['bi', 'דו-חודש קודם'], ['quarter', 'רבעון קודם'], ['year', 'השנה'], ['lastyear', 'שנה שעברה'], ['all', 'הכול'], ['custom', 'טווח אחר']];
+function expRange(k) {
+  const m = thisMonth(), y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7));
+  const end = (mm) => { const [a, b] = mm.split('-').map(Number); return `${mm}-${pad(new Date(a, b, 0).getDate())}`; };
+  if (k === 'month') return [m + '-01', todayIso()];
+  if (k === 'prev') { const p = addMonths(m, -1); return [p + '-01', end(p)]; }
+  if (k === 'bi') { const e = addMonths(m, mo % 2 ? -1 : -2); return [addMonths(e, -1) + '-01', end(e)]; }
+  if (k === 'quarter') { const e = addMonths(m, -(((mo - 1) % 3) + 1)); return [addMonths(e, -2) + '-01', end(e)]; }
+  if (k === 'year') return [`${y}-01-01`, todayIso()];
+  if (k === 'lastyear') return [`${y - 1}-01-01`, `${y - 1}-12-31`];
+  if (k === 'all') return ['2000-01-01', '2099-12-31'];
+  return null;
+}
+const SERIES_LABEL = { live: 'אמיתי', import: 'iCount', test: 'ניסיון' };
+/* Every sheet as rows (first row the headings), for Excel and for CSV alike. */
+function exportSheets(book, data, ledger, from, to, withTest) {
+  const inR = (d) => { const x = String(d || '').slice(0, 10); return x >= from && x <= to; };
+  const supName = (id) => (data.suppliers || []).find(s => s.id === id)?.name || '';
+  const docs = (data.documents || []).filter(d => inR(d.date) && (d.series !== 'test' || withTest))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
+  const inc = ledger.income.filter(i => inR(i.date)).slice().reverse();
+  const out = ledger.outgo.filter(e => inR(e.date)).slice().reverse();
+  const S = {};
+  S.docs = { name: 'מסמכים', rows: [['תאריך', 'סוג', 'מספר', 'סדרה', 'לקוח', 'ח.פ. / ת.ז.', 'לפני מע״מ', 'מע״מ', 'סה״כ', 'ניכוי במקור', 'אמצעי תשלום', 'בגין', 'מספר הקצאה', 'מבוטל'],
+    ...docs.map(d => [d.date, DOC_TYPES[d.type]?.label || d.type, docNum(d), SERIES_LABEL[d.series] || d.series || '', d.customer?.name || '', d.customer?.taxId || '',
+      r2(d.net ?? (d.total - (d.vat || 0))), r2(d.vat || 0), r2(d.total), r2(d.withholding || 0) || '', (d.payments || []).map(p => p.kind).join(', '), d.refTitle || '',
+      d.allocationNo || '', d.cancelled ? 'כן' : ''])] };
+  S.lines = { name: 'שורות מסמכים', rows: [['תאריך', 'סוג', 'מספר', 'לקוח', 'תיאור', 'כמות', 'מחיר', 'מחיר כולל מע״מ', 'סה״כ שורה'],
+    ...docs.flatMap(d => (d.lines || []).map(l => [d.date, DOC_TYPES[d.type]?.short || d.type, docNum(d), d.customer?.name || '', l.desc || '', Number(l.qty) || 0,
+      Number(l.price) || 0, d.incl ? 'כן' : 'לא', r2((Number(l.qty) || 0) * (Number(l.price) || 0))]))] };
+  S.pays = { name: 'תקבולים', rows: [['תאריך מסמך', 'מסמך', 'לקוח', 'אמצעי', 'תאריך פירעון', 'פרטים', 'סכום'],
+    ...docs.flatMap(d => (d.payments || []).map(p => [d.date, `${DOC_TYPES[d.type]?.short || ''} ${docNum(d)}`, d.customer?.name || '', p.kind || '', p.date || '', p.details || '', r2(p.amount)]))] };
+  S.income = { name: 'הכנסות', rows: [['תאריך', 'תיאור', 'לקוח', 'קטגוריה', 'אמצעי תשלום', 'מסמך', 'לפני מע״מ', 'מע״מ', 'סה״כ', 'מקור'],
+    ...inc.map(i => [i.date, i.desc || '', i.customer || '', i.cat || '', i.pay || '', i.docNo || '', r2(i.gross - i.vat), r2(i.vat), r2(i.gross),
+      i.src === 'shop' ? 'חנות' : i.src === 'doc' ? 'מסמך' : 'ידני'])] };
+  S.expenses = { name: 'הוצאות', rows: [['תאריך', 'ספק', 'ח.פ. ספק', 'תיאור', 'קטגוריה', 'אמצעי תשלום', 'מסמך', 'לפני מע״מ', 'מע״מ מוכר', 'סה״כ', 'הערכה'],
+    ...out.map(e => { const s = (data.suppliers || []).find(x => x.id === e.supplierId); return [e.date, s?.name || e.supplierName || '', s?.taxId || '', e.desc || '', e.cat || '',
+      e.pay || '', e.docNo || '', r2(e.gross - e.vat), r2(e.vat), r2(e.gross), e.estimate ? 'כן' : '']; })] };
+  /* VAT and profit month by month. */
+  const months = [...new Set([...inc, ...out].map(x => String(x.date || '').slice(0, 7)).filter(Boolean))].sort();
+  const vrows = months.map(m => { const t = totals(ledger, m, m); return [m, r2(t.incNet), r2(t.incVat), r2(t.expNet), r2(t.expVat), r2(t.vatDue), r2(t.profit)]; });
+  const sum = (i) => r2(vrows.reduce((a, r) => a + r[i], 0));
+  S.vat = { name: 'מע״מ ורווח לפי חודש', rows: [['חודש', 'עסקאות לפני מע״מ', 'מע״מ עסקאות', 'הוצאות לפני מע״מ', 'מע״מ תשומות', 'מע״מ לתשלום', 'רווח'],
+    ...vrows, ...(vrows.length ? [['סה״כ', sum(1), sum(2), sum(3), sum(4), sum(5), sum(6)]] : [])] };
+  const j = buildJournal(book, data.documents || [], ledger, from, to);
+  const accName = Object.fromEntries(j.accounts.map(a => [a.key, a.name]));
+  S.journal = { name: 'פקודות יומן', rows: [['פקודה', 'שורה', 'תאריך', 'אסמכתא', 'פרטים', 'חשבון', 'שם חשבון', 'חובה', 'זכות'],
+    ...j.tx.map(t => [t.n, t.line, t.date, t.ref, t.desc, t.acc, accName[t.acc] || '', t.side === 1 ? t.amt : '', t.side === 2 ? t.amt : ''])] };
+  const tbr = j.accounts.map(a => [a.key, a.name, a.tbName, r2(a.dr), r2(a.cr), r2(a.dr - a.cr)]).filter(r => r[3] || r[4]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  S.tb = { name: 'מאזן בוחן', rows: [['חשבון', 'שם', 'קבוצה', 'חובה', 'זכות', 'יתרה'], ...tbr,
+    ['', 'סה״כ', '', r2(tbr.reduce((a, r) => a + r[3], 0)), r2(tbr.reduce((a, r) => a + r[4], 0)), r2(tbr.reduce((a, r) => a + r[5], 0))]] };
+  S.customers = { name: 'לקוחות', rows: [CUST_FIELDS.map(k => CUST_LABELS[k]), ...(data.customers || []).filter(c => !c.mergedInto)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'he')).map(c => CUST_FIELDS.map(k => c[k] || ''))] };
+  S.suppliers = { name: 'ספקים', rows: [['שם', 'ח.פ. / ע.מ.', 'טלפון', 'אימייל', 'קטגוריה', 'סה״כ בתקופה'],
+    ...(data.suppliers || []).map(s => [s.name || '', s.taxId || '', s.phone || '', s.email || '', s.cat || '', r2(out.filter(e => e.supplierId === s.id).reduce((a, e) => a + e.gross, 0))])] };
+  S.items = { name: 'פריטים', rows: [['שם הפריט', 'מק״ט', 'מחיר', 'כולל מע״מ', 'יחידה', 'קטגוריה', 'תיאור נוסף', 'פעיל'],
+    ...(data.items || []).map(x => [x.name || '', x.sku || '', Number(x.price) || 0, x.incl ? 'כן' : 'לא', x.unit || '', x.category || '', x.desc || '', x.active === false ? 'לא' : 'כן'])] };
+  S.bank = { name: 'בנק', rows: [['תאריך', 'תיאור', 'סכום', 'אסמכתא', 'הותאם', 'הוסתר'],
+    ...(data.banktx || []).filter(b => inR(b.date)).sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(b => [b.date, b.desc || '', Number(b.amount) || 0, b.ref || '', b.matchId ? 'כן' : '', b.ignored ? 'כן' : ''])] };
+  const t = totals(ledger, from.slice(0, 7), to.slice(0, 7));
+  S.summary = { name: 'סיכום', rows: [['', ''], ['עסק', book.legalName || book.name], ['מספר עוסק', book.taxId || ''], ['סוג עוסק', DEALERS[book.dealerType] || ''],
+    ['תקופה', from === '2000-01-01' ? 'הכול' : `${heDate(from)} עד ${heDate(to)}`], ['הופק', new Date().toLocaleString('he-IL', { timeZone: IL_TZ })], ['', ''],
+    ['הכנסות לפני מע״מ', r2(t.incNet)], ['מע״מ עסקאות', r2(t.incVat)], ['הוצאות לפני מע״מ', r2(t.expNet)], ['מע״מ תשומות', r2(t.expVat)],
+    ['מע״מ לתשלום', r2(t.vatDue)], ['רווח', r2(t.profit)], ['', ''],
+    ['מסמכים', docs.length], ['הכנסות', inc.length], ['הוצאות', out.length], ['פקודות יומן', j.tx.length ? j.tx[j.tx.length - 1].n : 0],
+    ['', ''], ['Tizon Books ' + VERSION, '']] };
+  return S;
+}
+const SHEET_ORDER = ['summary', 'docs', 'lines', 'pays', 'income', 'expenses', 'vat', 'journal', 'tb', 'customers', 'suppliers', 'items', 'bank'];
+async function sheetsToXlsx(S, keys) {
+  const X = await import('xlsx');
+  const wb = X.utils.book_new();
+  const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  for (const k of keys) {
+    const rows = S[k].rows.map((r, i) => i ? r.map(v => isDate(v) ? new Date(v + 'T12:00:00') : v) : r);
+    const ws = X.utils.aoa_to_sheet(rows, { cellDates: true, dateNF: 'dd/mm/yyyy' });
+    ws['!cols'] = S[k].rows[0].map((_, c) => ({ wch: Math.min(48, Math.max(8, ...S[k].rows.slice(0, 400).map(r => String(r[c] ?? '').length + 2))) }));
+    if (S[k].rows.length > 1 && k !== 'summary') ws['!autofilter'] = { ref: X.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 0, c: S[k].rows[0].length - 1 } }) };
+    ws['!views'] = [{ RTL: true }];
+    X.utils.book_append_sheet(wb, ws, S[k].name.slice(0, 31));
+  }
+  wb.Workbook = { Views: [{ RTL: true }] };
+  return new Uint8Array(X.write(wb, { type: 'array', bookType: 'xlsx', cellDates: true }));
+}
+
+function ExportTab({ book, data, ledger, flash, onLog, onSub, user }) {
+  const [rk, setRk] = useState('year');
+  const [cf, setCf] = useState(`${thisMonth().slice(0, 4)}-01-01`);
+  const [ct, setCt] = useState(todayIso());
+  const [withTest, setWithTest] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [one, setOne] = useState('docs');
+  const [from, to] = expRange(rk) || [cf, ct];
+  const S = useMemo(() => exportSheets(book, data, ledger, from, to, withTest), [book, data, ledger, from, to, withTest]);
+  /* File names in plain Latin letters: every browser and mail program keeps them as they are. */
+  const safe = 'Tizon-' + ((digitsOf(book.taxId) || 'books') + '-' + String(book.id || '').slice(0, 6)).replace(/[^\w-]/g, '');
+  const tag = rk === 'all' ? 'all' : `${from}_${to}`;
+  const osek = digitsOf(book.taxId), osekOk = osek.length === 9;
+  const liveDocs = (data.documents || []).filter(d => d.series === 'live' && d.date >= from && d.date <= to);
+  const n = (k) => Math.max(0, S[k].rows.length - 1);
+  const go = async (what, fn) => { setBusy(what); try { await fn(); } catch (e) { console.error(e); flash('הייצוא נכשל: ' + (e.message || e)); } setBusy(''); };
+
+  const excel = () => go('xlsx', async () => {
+    saveBytes(`${safe}-${tag}.xlsx`, await sheetsToXlsx(S, SHEET_ORDER), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    flash('קובץ Excel ירד');
+  });
+  const unified = () => go('of', async () => {
+    const { zipSync } = await import('fflate');
+    const u = buildUnified(book, liveDocs, lsGet(SOFT_KEY, book.software || {}), from, to, { ledger });
+    saveBytes(`OPENFRMT-${osek}-${from}_${to}.zip`, zipSync({ [`${u.dir}/INI.TXT`]: u.ini, [`${u.dir}/BKMVDATA.TXT`]: u.data }), 'application/zip');
+    await onLog?.({ action: 'export-unified', title: `${from} עד ${to} · ${liveDocs.length} מסמכים`, series: 'live' });
+    flash(`מבנה אחיד ירד · ${u.counts.total} רשומות`);
+  });
+  const pack = () => go('pack', async () => {
+    const { zipSync, strToU8 } = await import('fflate');
+    const files = { [`${safe}-${tag}.xlsx`]: await sheetsToXlsx(S, SHEET_ORDER) };
+    const csvU8 = (rows) => strToU8('﻿' + rows.map(r => r.map(c => { const s = String(c ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\r\n'));
+    for (const k of SHEET_ORDER) if (k !== 'summary' && n(k)) files[`csv/${k}-${S[k].name}.csv`] = csvU8(S[k].rows);
+    let ofLine = 'מבנה אחיד: לא הופק (חסר מספר עוסק בן 9 ספרות)';
+    if (osekOk) {
+      const u = buildUnified(book, liveDocs, lsGet(SOFT_KEY, book.software || {}), from, to, { ledger });
+      files[`${u.dir}/INI.TXT`] = u.ini; files[`${u.dir}/BKMVDATA.TXT`] = u.data;
+      ofLine = `מבנה אחיד: ${u.dir} · ${u.counts.total} רשומות`;
+    }
+    const sm = S.summary.rows.filter(r => r[0]).map(r => `${r[0]}: ${typeof r[1] === 'number' && /מע״מ|לפני|רווח/.test(r[0]) ? fmt(r[1]) : r[1]}`);
+    files['README.txt'] = strToU8([`חבילה לרואה החשבון · ${book.legalName || book.name}`, '', ...sm, '', ofLine, '',
+      'בתוך החבילה: קובץ Excel עם גיליון לכל רשימה, אותן רשימות כ-CSV, וקבצי המבנה האחיד (INI.TXT + BKMVDATA.TXT).'].join('\r\n'));
+    saveBytes(`accountant-${safe}-${tag}.zip`, zipSync(files), 'application/zip');
+    await onLog?.({ action: 'export-pack', title: `${from} עד ${to}` });
+    flash('החבילה ירדה');
+  });
+  const csvOne = () => downloadCSV(`${one}-${safe}-${tag}.csv`, S[one].rows);
+  const backup = () => go('json', async () => {
+    const all = await exportAll(user?.email);
+    all.books = all.books.filter(b => b.id === book.id);
+    saveBytes(`backup-${safe}-${todayIso()}.json`, new TextEncoder().encode(JSON.stringify(all)), 'application/json');
+    flash('הגיבוי ירד');
+  });
+
+  return (<>
+    <div data-tour="exp-range" className="mg-card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginTop: 0 }}>⬇ ייצוא נתונים</h3>
+      <div className="exp-ranges">{EXP_RANGES.map(([k, l]) => <button key={k} className={'mg-chipbtn' + (rk === k ? ' on' : '')} onClick={() => setRk(k)}>{l}</button>)}</div>
+      {rk === 'custom' && <div style={{ ...row, marginTop: 10 }}>
+        <Field label="מתאריך"><input type="date" value={cf} onChange={e => setCf(e.target.value)} /></Field>
+        <Field label="עד תאריך"><input type="date" value={ct} onChange={e => setCt(e.target.value)} /></Field></div>}
+      <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 10 }}>
+        {rk === 'all' ? 'כל התקופה' : `${heDate(from)} עד ${heDate(to)}`} · {n('docs')} מסמכים · {n('income')} הכנסות · {n('expenses')} הוצאות</div>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, fontSize: 14 }}>
+        <input type="checkbox" style={{ width: 'auto' }} checked={withTest} onChange={e => setWithTest(e.target.checked)} /> לכלול מסמכי ניסיון</label>
+    </div>
+
+    <div className="exp-grid">
+      <div data-tour="exp-excel" className="mg-card exp-card">
+        <div className="exp-ic">📊</div><h3>Excel מלא</h3>
+        <p>קובץ אחד, גיליון לכל רשימה: סיכום, מסמכים ושורותיהם, תקבולים, הכנסות, הוצאות, מע״מ ורווח לפי חודש, פקודות יומן, מאזן בוחן, לקוחות, ספקים, פריטים ובנק. מימין לשמאל, עם סינון בכותרות.</p>
+        <button className="mg-btn keep" disabled={!!busy} onClick={excel}>{busy === 'xlsx' ? 'מכין…' : '⬇ הורד Excel'}</button>
+      </div>
+      <div data-tour="exp-pack" className="mg-card exp-card">
+        <div className="exp-ic">🗂</div><h3>חבילה לרואה החשבון</h3>
+        <p>קובץ ZIP אחד לשליחה: ה-Excel, כל רשימה גם כ-CSV, וקבצי מבנה אחיד עם פקודות היומן. את זה שולחים לששון בסוף תקופה.</p>
+        <button className="mg-btn keep" disabled={!!busy} onClick={pack}>{busy === 'pack' ? 'אורז…' : '⬇ הורד חבילה'}</button>
+      </div>
+      <div data-tour="exp-unified" className="mg-card exp-card">
+        <div className="exp-ic">🏛</div><h3>מבנה אחיד</h3>
+        <p>INI.TXT ו-BKMVDATA.TXT לפי הוראה 1.31, כולל פקודות יומן (B100/B110). הקובץ שמבקר מס מבקש, וגם תוכנות אחרות (iCount, חשבשבת, ריווחית) יודעות לקלוט אותו.</p>
+        {!osekOk && <div className="mg-note bad" style={{ marginBottom: 8 }}>חסר מספר עוסק בן 9 ספרות בהגדרות העסק.</div>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="mg-btn keep" disabled={!!busy || !osekOk} onClick={unified}>{busy === 'of' ? 'מפיק…' : `⬇ הפק (${liveDocs.length} מסמכים)`}</button>
+          <button className="mg-btn ghost sm" onClick={() => onSub('tax')}>פלט סיכום ורישום ←</button></div>
+      </div>
+      <div data-tour="exp-csv" className="mg-card exp-card">
+        <div className="exp-ic">📄</div><h3>רשימה אחת כ-CSV</h3>
+        <p>לכל תוכנה, לגוגל שיטס או לייבוא במקום אחר. נפתח בעברית תקינה גם ב-Excel.</p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={one} onChange={e => setOne(e.target.value)} style={{ flex: '1 1 160px', width: 'auto' }}>
+            {SHEET_ORDER.filter(k => k !== 'summary').map(k => <option key={k} value={k}>{S[k].name} ({n(k)})</option>)}</select>
+          <button className="mg-btn keep" disabled={!n(one)} onClick={csvOne}>⬇ CSV</button></div>
+      </div>
+      <div data-tour="exp-backup" className="mg-card exp-card">
+        <div className="exp-ic">💾</div><h3>גיבוי מלא של העסק</h3>
+        <p>כל הרשומות של העסק, בלי קשר לתקופה, בקובץ JSON שאפשר לשחזר ממנו (גיבוי וענן ← שחזור).</p>
+        <button className="mg-btn ghost keep" disabled={!!busy} onClick={backup}>{busy === 'json' ? 'מכין…' : '⬇ הורד גיבוי'}</button>
+      </div>
+    </div>
+  </>);
+}
+
 /* ------------------------------------------------------ the tax tab */
 function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
   const [withJournal, setWithJournal] = useState(false);
@@ -5276,7 +5484,7 @@ function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
     </div>
   );
 }
-const LOG_ACTIONS = { allocation: 'מספר הקצאה', archive: 'ארכיון חודשי', 'import-icount': 'ייבוא מ-iCount', issue: 'הפקה', print: 'הדפסה', pdf: 'הורדת PDF', send: 'שליחה חתומה', 'export-unified': 'ייצוא מבנה אחיד', sign: 'PDF חתום' };
+const LOG_ACTIONS = { allocation: 'מספר הקצאה', archive: 'ארכיון חודשי', 'import-icount': 'ייבוא מ-iCount', issue: 'הפקה', print: 'הדפסה', pdf: 'הורדת PDF', send: 'שליחה חתומה', 'export-unified': 'ייצוא מבנה אחיד', 'export-pack': 'חבילה לרואה חשבון', sign: 'PDF חתום' };
 
 /* ======================================================= reading a unified file */
 /* The same format the tax tab writes, read the other way — so any registered
