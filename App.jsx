@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.28.0';
+const VERSION = '1.28.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1047,6 +1047,8 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.28.1', date: '01.10.26', items: [
+    'יופיי: התיאור שנשלח לעמוד התשלום הוא שורה אחת בלי מרכאות. שורות נפרדות שיבשו את כפתור התשלום בעמוד של יופיי.'] },
   { v: '1.28.0', date: '01.10.26', items: [
     'יופיי בלי מפתח API: מספיק האימייל של חשבון יופיי. הלקוח משלם בטופס של יופיי עם הסכום של הדף.',
     'כשיופיי מדווח שהתשלום עבר מקבלים מייל, ובדפי הסליקה מופיע "אישור והפקת חשבונית": לחיצה אחת מפיקה ושולחת אותה.',

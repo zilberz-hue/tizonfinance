@@ -127,8 +127,11 @@ async function upCall(creds, request, fetchImpl = fetch) {
   try { return JSON.parse(t); } catch { return null; }
 }
 var upDesc = (pay) => {
-  const lines = (pay.lines || []).map((l) => `\u2022 ${String(l.desc || "").slice(0, 80)}${Number(l.qty) > 1 ? " \xD7 " + l.qty : ""}`);
-  return [`${String(pay.title || "").slice(0, 80)} \xB7 ${pay.id}`, ...lines].join("\n").slice(0, 480);
+  /* One line, without quotes: uPay's page carries the description in its own
+     script, and a line break there stops its pay button from answering. */
+  const clean = (v) => String(v || "").replace(/[\r\n\t]+/g, " ").replace(/['"`\\<>{}]/g, "").replace(/\s+/g, " ").trim();
+  const lines = (pay.lines || []).map((l) => `${clean(l.desc).slice(0, 60)}${Number(l.qty) > 1 ? " x" + l.qty : ""}`);
+  return clean([`${clean(pay.title).slice(0, 60)} ${pay.id}`, ...lines].join(" | ")).slice(0, 190);
 };
 async function upSession({ creds, pay, base, secret, fetchImpl = fetch }) {
   const fn = `${base}/.netlify/functions/books-mail`;
