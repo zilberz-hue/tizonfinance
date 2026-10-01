@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.33.0';
+const VERSION = '1.34.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -49,7 +49,7 @@ const lsSet = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED
    send them twice). They are also kept in this browser, so everything keeps
    working offline. The device lock (PIN) follows too, so every device asks
    for the same code. The store is linked for every device on the server. */
-const SYNCED = ['tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin', 'tzbooks_taxprofile'];
+const SYNCED = ['tzbooks_coach', 'tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin', 'tzbooks_taxprofile'];
 /* Removed on one device, removed on all: kept in the cloud as false. */
 const lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } if (SYNCED.includes(k)) prefPush(k, false); };
 let prefUid = null, prefQueue = {}, prefTimer = null, prefErr = '';
@@ -713,6 +713,33 @@ input:focus,select:focus{border-color:var(--gold)}
 .seg button{flex:1;border:0;background:none;padding:9px;border-radius:9px;cursor:pointer;font-weight:700;color:var(--muted)}
 .seg button.on{background:#fff;color:#6e4d22;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 .exp-ranges{display:flex;flex-wrap:wrap;gap:6px}
+.coach{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.coach > *,.coach-grid > *{min-width:0}.coach .mg-h{margin-bottom:0}
+.coach-goal .cg-top{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:space-between}
+.coach-goal .lb{font-size:13.5px;color:var(--muted)}.cg-big{font-size:40px;font-weight:900;color:#2f5d46;direction:ltr;unicode-bidi:isolate;line-height:1.15}
+.cg-side{display:grid;grid-template-columns:repeat(2,minmax(130px,1fr));gap:8px 16px;flex:1;max-width:460px}
+.cg-side div{display:flex;flex-direction:column;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.cg-side span,.coach-sum span{font-size:12.5px;color:var(--muted)}.cg-side b,.coach-sum b{font-size:18px;direction:ltr;unicode-bidi:isolate;text-align:right}
+.coach .in{color:#2f7d5b}.coach .out{color:#b3412f}
+.cg-bar{position:relative;height:14px;background:#efe7d6;border-radius:8px;margin:14px 0 6px;overflow:visible}.cg-bar i{display:block;height:100%;border-radius:8px;background:linear-gradient(90deg,#7aa37f,#2f5d46);transition:width .4s}
+.cg-fc{position:absolute;top:-4px;width:3px;height:22px;background:#c4a36e;border-radius:2px}
+.cg-hist{position:relative;display:grid;grid-template-columns:repeat(12,1fr);gap:4px;height:110px;align-items:end;margin-top:12px}
+.cg-hist div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}.cg-hist i{display:block;width:70%;max-width:26px;background:#c9b48c;border-radius:4px 4px 0 0;max-height:82%}
+.cg-hist i.hit{background:#2f7d5b}.cg-hist small{font-size:11px;color:var(--muted);margin-top:3px}
+.cg-line{position:absolute;inset-inline:0;border-top:2px dashed #b3412f;font-size:11px;color:#b3412f;text-align:left;line-height:1;pointer-events:none}
+.coach-ladder{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.coach-notes{margin:0;padding:0;list-style:none;display:grid;gap:8px}.coach-notes li{padding:10px 12px;border-radius:10px;background:#f6efe2;font-size:15px;line-height:1.55;border-inline-start:4px solid #c4a36e}
+.coach-notes li.ok{border-color:#2f7d5b;background:#eef6ef}.coach-notes li.bad{border-color:#b3412f;background:#fbeeea}.coach-notes li.idea{border-color:#1f4e79;background:#edf3f9}
+.coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr));gap:16px}
+.coach-p{margin:0 0 10px;font-size:14px;color:#5b5346;line-height:1.6}
+.coach-tbl{width:100%;border-collapse:collapse;font-size:14.5px}.coach-tbl th{text-align:right;font-size:12.5px;color:var(--muted);font-weight:700;padding:4px}
+.coach-tbl td{padding:4px;border-bottom:1px solid #f1e9da}.coach-tbl input{width:100%;min-width:0;padding:6px 8px}
+.coach-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:6px}.coach-sum div{display:flex;flex-direction:column;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.cap-bar{height:8px;background:#efe7d6;border-radius:6px;overflow:hidden}.cap-bar i{display:block;height:100%;background:#7aa37f}.cap-bar i.over{background:#b3412f}
+.coach-rec{list-style:none;padding:0;margin:8px 0 0}.coach-rec li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #f1e9da;font-size:14.5px}
+.coach-tw{overflow-x:auto;-webkit-overflow-scrolling:touch}.coach-tbl td{white-space:nowrap}
+@media (max-width:640px){.coach-goal .cg-top{flex-direction:column;align-items:stretch}.cg-big{font-size:34px}
+  .cg-side{grid-template-columns:1fr 1fr;max-width:none;width:100%}.cg-side b{font-size:17px;white-space:nowrap}.cg-side span{font-size:12px}
+  .coach-tbl{font-size:14px}.coach-tbl input{padding:7px 6px;min-width:88px}.coach-tbl td.capbar{display:none}.coach-tbl th:last-child:empty{display:none}}
 .rep-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 12px}.rep-nav b{font-size:16px;text-align:center}
 .rep-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .rep-tile{background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center}
@@ -1150,6 +1177,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.34.0', date: '01.10.26', items: ['🎯 המאמן הפיננסי (בתפריט הצד): יעד הכנסה חודשי עם מדרגות (50, 100, 150 אלף), תחזית לסוף החודש וכמה צריך ליום עבודה, 12 חודשים מול היעד.', 'יציאה מהאוברדרפט: חשבונות, מסגרות, ריבית וחובות; כמה להחזיר בחודש כדי לצאת עד תאריך, או כמה זמן ייקח.', 'כמה להפריש החודש למס, ביטוח לאומי ומע״מ; תקרות הוצאה לכל קטגוריה; הערות המאמן מהנתונים; ופגישת חודש.'] },
   { v: '1.33.0', date: '01.10.26', items: ['דוחות עסק: יומי בערב, שבועי ביום שישי בבוקר (שישי עד חמישי) וחודשי ב-1 לחודש. הכנסות, הוצאות ורווח, מול התקופה הקודמת, החודש או השנה עד עכשיו, ומאיפה הגיעו ההכנסות ועל מה הלכו ההוצאות.', 'הדוח מגיע במייל (מייל אחד לכל העסקים) ונפתח גם כחלון קופץ כשנכנסים. כפתור 📊 דוחות בראש העסק פותח כל דוח בכל זמן. הגדרות: ⚙ ← דוחות.'] },
   { v: '1.32.0', date: '01.10.26', items: ['בנייד: מתג תצוגה מעל כל רשימה (כרטיסים, שורות או טבלה), כל מכשיר זוכר את הבחירה.', 'מסמכים: קיבוץ לתיקיות לפי חודש, לקוח או סוג, עם מספר המסמכים והסכום בכל תיקייה.', 'בנייד הפעולות של כל מסמך מתקפלות מאחורי ⋯, והכרטיס קטן בהרבה.'] },
   { v: '1.31.1', date: '01.10.26', items: ['תיקון: דף סליקה שממתין לתשלום כבר לא קורא את כל המסמכים מהענן כל 20 שניות (זה מה שגמר את המכסה היומית של Firebase). עכשיו נבדקים רק הדפים הממתינים, כל 30 שניות, ורק בחצי השעה הראשונה.', 'כשהמכסה היומית של מסד הנתונים נגמרת, מוצגת הודעה ברורה בעברית במקום resource-exhausted.'] },
@@ -1283,7 +1311,7 @@ const CHANGES = [
 ];
 
 const TOUR_CTX = {
-  welcome: 'התחלה', all: 'כל העסקים', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
+  welcome: 'התחלה', all: 'כל העסקים', coach: 'המאמן הפיננסי', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
   expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', bset: 'הגדרות העסק', paypages: 'דפי סליקה', pnl: 'רווח והפסד', tax: 'רשות המסים',
   items: 'פריטים', ledger: 'כרטסת', export: 'ייצוא', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
@@ -1313,6 +1341,14 @@ const TOURS = {
     { t: 'side-settings', title: 'גיבוי וענן', text: 'גיבוי, ענן, חתימה דיגיטלית, חיבור לחנות ורשות המסים.', since: '1.0.0' },
     { t: 'side-help', title: 'המדריך', text: 'כל ההדרכות במקום אחד, ורשימת השינויים בכל גרסה.', since: '1.8.0' },
     { t: 'help-btn', title: 'עזרה בכל מסך', text: 'הכפתור הזה מפעיל את ההדרכה של המסך שאתה נמצא בו. אחרי כל עדכון ההדרכה מציגה רק את מה שחדש.', since: '1.8.0' },
+  ],
+  coach: [
+    { t: 'coach-goal', title: 'היעד', text: 'כמה נכנס החודש מול היעד, תחזית לסוף החודש, כמה צריך ליום עבודה, ו-12 החודשים האחרונים מול הקו.', since: '1.34.0' },
+    { t: 'coach-notes', title: 'מה המאמן רואה', text: 'הערות מהנתונים עצמם: קצב, הוצאות שעלו, ריבית, הפרשות ולקוחות קבועים שלא חזרו.', since: '1.34.0' },
+    { t: 'coach-debt', title: 'יציאה מהאוברדרפט', text: 'יתרות, מסגרות וריבית. המאמן מחשב כמה להחזיר בחודש כדי לצאת עד תאריך, או כמה זמן ייקח בהחזר שבחרת.', since: '1.34.0' },
+    { t: 'coach-reserve', title: 'להפריש', text: 'כמה לשים בצד החודש למס, ביטוח לאומי ומע״מ, ומה כבר הופרש.', since: '1.34.0' },
+    { t: 'coach-caps', title: 'תקרות הוצאה', text: 'תקרה לכל קטגוריה מול מה שיצא החודש והממוצע, והוצאות קבועות לבדיקה.', since: '1.34.0' },
+    { t: 'coach-checkin', title: 'פגישת החודש', text: 'כמה שורות בתחילת כל חודש: מה עבד, מה לא, ומה עושים עכשיו.', since: '1.34.0' },
   ],
   dash: [
     { t: 'hdr-reports', title: 'דוחות', text: 'הכנסות והוצאות של היום, השבוע או החודש, מול התקופה הקודמת. הדוח נפתח גם לבד בערב, ביום שישי וב-1 לחודש, ונשלח במייל.', since: '1.33.0' },
@@ -1673,7 +1709,7 @@ function App() {
     try {
       const b = sortBooks(await withTimeout(listBooks(user.email)));
       setBooks(b); setBooksErr('');
-      if (!['all', 'settings', 'users'].includes(cur) && !b.some(x => x.id === cur)) setCur('all');
+      if (!['all', 'settings', 'users', 'coach'].includes(cur) && !b.some(x => x.id === cur)) setCur('all');
     } catch (e) {
       setBooks([]);
       setBooksErr(String(e?.code || e?.message || '').includes('permission')
@@ -1755,7 +1791,7 @@ function App() {
   };
   useEffect(() => {
     if (!books) return;
-    if (cur === 'all') books.forEach(b => ensure(b));
+    if (cur === 'all' || cur === 'coach') books.forEach(b => ensure(b));
     else { const b = books.find(x => x.id === cur); if (b) ensure(b); }
   }, [cur, books]);
 
@@ -1801,6 +1837,7 @@ function App() {
     : cur === 'settings' || cur === 'users' || cur === 'help' ? cur
     : !books.length ? 'welcome'
     : cur === 'all' ? 'all'
+    : cur === 'coach' ? 'coach'
     : tourBook && datas[tourBook.id] && BOOK_CTX.includes(bookTab) ? bookTab : null;
   const tourBusy = !!(tour || news || bookForm || storeLogin);
   useEffect(() => {
@@ -1843,7 +1880,7 @@ function App() {
       {/* Phones and small tablets: a top bar, and the menu as a drawer. */}
       <header className="topbar">
         <button className="tb-menu" aria-label="תפריט" onClick={() => setNavOpen(true)}><span /><span /><span /></button>
-        <b className="tb-title">{book ? book.name : ({ all: 'כל העסקים', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך' })[cur] || 'Tizon Books'}</b>
+        <b className="tb-title">{book ? book.name : ({ all: 'כל העסקים', coach: 'המאמן הפיננסי', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך' })[cur] || 'Tizon Books'}</b>
         <img className="tb-mark" src={MARK} alt="Tizon" />
       </header>
       {navOpen && <div className="side-dim" onClick={() => setNavOpen(false)} />}
@@ -1855,6 +1892,8 @@ function App() {
         </div>
         <button className={'bk' + (cur === 'all' ? ' on' : '')} onClick={() => setCur('all')} title="כל העסקים">
           <span className="ic">▦</span><span className="lbl">כל העסקים</span></button>
+        {(books || []).some(b => roleOf(b, user.email) === 'owner') && <button data-tour="side-coach" className={'bk' + (cur === 'coach' ? ' on' : '')} onClick={() => setCur('coach')} title="המאמן הפיננסי">
+          <span className="ic">🎯</span><span className="lbl">המאמן הפיננסי</span></button>}
         <div data-tour="side-books" className="sec">העסקים</div>
         {(books || []).map(b => (
           <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '')} onClick={() => setCur(b.id)} title={b.name}>
@@ -1899,8 +1938,9 @@ function App() {
 
         {cur === 'help' && <HelpView role={tourRole} clerkOnly={tourRole === 'clerk'} onStart={startTour} flash={flash} />}
         {cur === 'users' && books && <UsersView books={books} user={user} flash={flash} onSave={saveBook} />}
-        {cur !== 'settings' && cur !== 'users' && cur !== 'help' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
+        {cur !== 'settings' && cur !== 'users' && cur !== 'help' && cur !== 'coach' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
 
+        {cur === 'coach' && books && books.length > 0 && <CoachView books={books} datas={datas} loading={loading} user={user} />}
         {cur === 'all' && books && books.length > 0 && (() => {
           /* The financial overview is for owners and viewers; someone who only
              issues documents sees their businesses, not the totals. */
@@ -2435,6 +2475,209 @@ function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreCha
   );
 }
 /* ============================================================ all businesses */
+/* ================================================================ the coach
+   Goals for the person behind the businesses, measured on the books
+   themselves: income per month (the next rung of a ladder: 50, 100, 150
+   thousand), caps on spending by category, money set aside for tax and VAT,
+   and the way out of an overdraft. Everything typed here follows the person
+   to every device (prefs). Nothing here writes to the books. */
+const COACH_KEY = 'tzbooks_coach';
+const COACH_DEF = { incomeGoal: 50000, ladder: [50000, 100000, 150000], basis: 'net', workDays: 5, caps: {}, accounts: [], debts: [], reserved: {}, checkins: {}, payoffBy: '', payExtra: '' };
+const coachGet = () => ({ ...COACH_DEF, ...(lsGet(COACH_KEY, {}) || {}) });
+/* Working days of a month (Sunday to Thursday, or to Friday with six). */
+function workDaysOf(ym, perWeek, uptoIso) {
+  const [y, m] = ym.split('-').map(Number); const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  let all = 0, done = 0;
+  for (let d = 1; d <= last; d++) {
+    const iso = `${ym}-${pad(d)}`, w = new Date(iso + 'T12:00:00Z').getUTCDay();
+    if (w === 6 || (w === 5 && perWeek < 6)) continue;
+    all++; if (uptoIso && iso <= uptoIso) done++;
+  }
+  return { all, done };
+}
+/* Months to clear a debt at a payment, and the payment that clears it by a date. */
+function payoffMonths(bal, ratePct, pay) {
+  const r = ratePct / 100 / 12; if (bal <= 0) return 0; if (pay <= bal * r) return Infinity;
+  return r ? Math.ceil(-Math.log(1 - bal * r / pay) / Math.log(1 + r)) : Math.ceil(bal / pay);
+}
+function paymentFor(bal, ratePct, months) { const r = ratePct / 100 / 12; if (months <= 0) return bal; return r ? bal * r / (1 - Math.pow(1 + r, -months)) : bal / months; }
+const monthsUntil = (ym) => { if (!ym) return 0; const [a, b] = thisMonth().split('-').map(Number), [c, d] = ym.split('-').map(Number); return (c - a) * 12 + (d - b) + 1; };
+
+function CoachView({ books, datas, loading, user }) {
+  const [c, setC] = useState(coachGet);
+  const save = (patch) => setC(x => { const n = { ...x, ...patch }; try { lsSet(COACH_KEY, n); } catch { /* ignore */ } return n; });
+  const mine = books.filter(b => roleOf(b, user.email) === 'owner');
+  const ready = mine.filter(b => datas[b.id] && !datas[b.id].histPending);
+  const pending = mine.length - ready.length;
+  const today = todayIso(), ym = thisMonth();
+  const L = useMemo(() => ready.map(b => ({ b, d: datas[b.id], L: buildLedger(b, datas[b.id]) })), [ready.map(b => b.id).join(), ...ready.map(b => datas[b.id])]);
+  const val = (t) => c.basis === 'gross' ? t.incGross : t.incNet;
+  const monthT = (m) => { const t = { incGross: 0, incNet: 0, incVat: 0, expGross: 0, expNet: 0, expVat: 0, profit: 0, vatDue: 0 };
+    L.forEach(x => { const s = totals(x.L, m, m); Object.keys(t).forEach(k => { t[k] += s[k] || 0; }); }); return t; };
+  const cur = monthT(ym);
+  const months12 = Array.from({ length: 12 }, (_, i) => addMonths(ym, i - 11));
+  const hist = months12.map(m => ({ m, v: val(monthT(m)), t: monthT(m) }));
+  const goal = Number(c.incomeGoal) || 0;
+  const wd = workDaysOf(ym, Number(c.workDays) || 5, today);
+  const got = val(cur), left = Math.max(0, goal - got), daysLeft = Math.max(0, wd.all - wd.done);
+  const forecast = wd.done ? got / wd.done * wd.all : 0;
+  const pctGoal = goal ? Math.min(100, got / goal * 100) : 0;
+  const nextRung = (c.ladder || []).map(Number).filter(Boolean).sort((a, b) => a - b).find(x => x > Math.max(...hist.slice(0, -1).map(h => h.v), 0)) || goal;
+
+  /* Spending by category: this month against the cap and against the average of the three months before. */
+  const cats = {};
+  L.forEach(x => x.L.outgo.forEach(e => { const m = String(e.date || '').slice(0, 7), k = e.cat || 'אחר';
+    if (m === ym) (cats[k] = cats[k] || { now: 0, avg: 0 }).now += Number(e.gross) || 0;
+    else if (m >= addMonths(ym, -3) && m < ym) (cats[k] = cats[k] || { now: 0, avg: 0 }).avg += (Number(e.gross) || 0) / 3; }));
+  const catRows = Object.entries(cats).map(([k, v]) => ({ k, now: r2(v.now), avg: r2(v.avg), cap: Number(c.caps?.[k]) || 0 })).sort((a, b) => Math.max(b.now, b.avg) - Math.max(a.now, a.avg));
+  const recurring = ready.flatMap(b => (datas[b.id].recurring || []).filter(r => r.active !== false).map(r => ({ ...r, book: b.name })));
+  const recAmt = (r) => r2((Number(r.gross) || 0) * Math.min(100, Math.max(1, Number(r.share) || 100)) / 100);
+  const recTotal = r2(recurring.reduce((a, r) => a + recAmt(r), 0));
+
+  /* Setting aside: income tax and national insurance on this year's pace, and this month's VAT. */
+  const prof = lsGet(TAX_PROFILE_KEY, {}) || {};
+  const ytd = L.reduce((a, x) => a + totals(x.L, ym.slice(0, 4) + '-01', ym).profit, 0);
+  const share = Math.max(0.08, yearShare());
+  const tf = taxForecast(ytd / share, { points: Number(prof.points) || 2.25 });
+  const taxMonthly = r2(tf.total / 12), vatMonth = r2(Math.max(0, cur.vatDue));
+  const reserveNeed = r2(taxMonthly + vatMonth), reserved = Number(c.reserved?.[ym]) || 0;
+
+  /* The overdraft and other debts. */
+  const accs = c.accounts || [], debts = c.debts || [];
+  const od = accs.filter(a => Number(a.balance) < 0).map(a => ({ ...a, owe: -Number(a.balance) }));
+  const owed = r2(od.reduce((a, x) => a + x.owe, 0) + debts.reduce((a, x) => a + (Number(x.balance) || 0), 0));
+  const interest = r2(od.reduce((a, x) => a + x.owe * (Number(x.rate) || 0) / 100 / 12, 0) + debts.reduce((a, x) => a + (Number(x.balance) || 0) * (Number(x.rate) || 0) / 100 / 12, 0));
+  const avgRate = owed ? (interest * 12 / owed) * 100 : 0;
+  const avgProfit3 = r2([1, 2, 3].reduce((a, k) => a + monthT(addMonths(ym, -k)).profit, 0) / 3);
+  const free = r2(avgProfit3 - taxMonthly);   // what the business leaves, after tax, on the last three months
+  const extra = Number(c.payExtra) || 0;
+  const byDate = monthsUntil(c.payoffBy), needPay = byDate > 0 ? r2(paymentFor(owed, avgRate, byDate)) : 0;
+  const atExtra = extra ? payoffMonths(owed, avgRate, extra) : null;
+
+  /* What the coach notices. */
+  const notes = [];
+  if (goal && wd.done) notes.push(forecast >= goal ? { k: 'ok', t: `בקצב הנוכחי החודש ייסגר בכ-${fmtRound(forecast)}, מעל היעד. להמשיך כך.` }
+    : { k: 'warn', t: `בקצב הנוכחי החודש ייסגר בכ-${fmtRound(forecast)}. כדי להגיע ל-${fmtRound(goal)} צריך ${fmtRound(daysLeft ? left / daysLeft : left)} ליום עבודה ב-${daysLeft} הימים שנשארו.` });
+  const over = catRows.filter(r => r.cap && r.now > r.cap);
+  over.forEach(r => notes.push({ k: 'bad', t: `${r.k}: ${fmtRound(r.now)} החודש, מעל התקרה (${fmtRound(r.cap)}).` }));
+  catRows.filter(r => !r.cap && r.avg > 300 && r.now > r.avg * 1.3).slice(0, 2).forEach(r => notes.push({ k: 'warn', t: `${r.k} עלה ל-${fmtRound(r.now)} לעומת ממוצע ${fmtRound(r.avg)} בשלושת החודשים הקודמים.` }));
+  if (interest > 0) notes.push({ k: 'bad', t: `האוברדרפט והחובות עולים כ-${fmtRound(interest)} ריבית בחודש (${fmtRound(interest * 12)} בשנה). זה הכסף הראשון לחסוך.` });
+  if (reserveNeed > reserved) notes.push({ k: 'warn', t: `להפריש החודש ${fmtRound(reserveNeed)} למס, ביטוח לאומי ומע״מ; סומן כמופרש ${fmtRound(reserved)}.` });
+  /* Customers who came regularly and stopped. */
+  const lastSeen = {}, cnt = {};
+  ready.forEach(b => (datas[b.id].documents || []).filter(d => d.series !== 'test' && d.customer?.name && ['305', '320', '400'].includes(d.type)).forEach(d => {
+    const k = d.customer.name.trim(); cnt[k] = (cnt[k] || 0) + 1; if (!lastSeen[k] || d.date > lastSeen[k]) lastSeen[k] = d.date; }));
+  const lapsed = Object.keys(cnt).filter(k => cnt[k] >= 3 && lastSeen[k] < addDaysIso(today, -60) && lastSeen[k] >= addDaysIso(today, -365)).sort((a, b) => cnt[b] - cnt[a]);
+  if (lapsed.length) notes.push({ k: 'idea', t: `${lapsed.length} לקוחות קבועים (3 ביקורים ומעלה) לא חזרו יותר מחודשיים: ${lapsed.slice(0, 6).join(', ')}${lapsed.length > 6 ? '…' : ''}. הודעה אישית אליהם היא הכנסה הכי קרובה.` });
+  const custM = {}; L.forEach(x => x.L.income.filter(i => String(i.date || '').slice(0, 7) === ym).forEach(i => {
+    const k = i.customer || (i.src === 'doc' || i.src === 'shop' ? String(i.desc || '').split(' · ').slice(-1)[0] : ''); if (!k) return;
+    custM[k] = (custM[k] || 0) + (Number(i.gross) || 0); }));
+  const topTwo = Object.values(custM).sort((a, b) => b - a).slice(0, 2).reduce((a, v) => a + v, 0);
+  if (cur.incGross > 3000 && topTwo / cur.incGross > 0.5) notes.push({ k: 'warn', t: `יותר מחצי מההכנסה החודש הגיע משני לקוחות. כדאי לפזר.` });
+
+  const num = (v) => v === '' || v == null ? '' : v;
+  const setAcc = (list, i, f) => list.map((x, j) => j === i ? { ...x, ...f } : x);
+  const maxBar = Math.max(goal, ...hist.map(h => h.v), 1);
+  return (<div className="coach">
+    <div className="mg-h" style={{ '--h1': '#2f5d46', '--h2': '#7aa37f' }}><div><h2>🎯 המאמן הפיננסי</h2>
+      <div className="sub">{mine.map(b => b.name).join(' + ')} · יעד {fmtRound(goal)} בחודש {c.basis === 'gross' ? '(כולל מע״מ)' : '(לפני מע״מ)'}</div></div></div>
+    {pending > 0 && <div className="mg-note" style={{ marginBottom: 12 }}>⏳ טוען את הנתונים של {pending} עסקים…</div>}
+
+    <div data-tour="coach-goal" className="mg-card coach-goal">
+      <div className="cg-top"><div><div className="lb">החודש עד היום</div><div className="cg-big">{fmtRound(got)}</div>
+        <div className="lb">מתוך {fmtRound(goal)} · {Math.round(pctGoal)}%</div></div>
+        <div className="cg-side"><div><span>תחזית לסוף החודש</span><b className={forecast >= goal ? 'in' : 'out'}>{fmtRound(forecast)}</b></div>
+          <div><span>חסר ליעד</span><b>{fmtRound(left)}</b></div>
+          <div><span>ליום עבודה ({daysLeft} נשארו)</span><b>{fmtRound(daysLeft ? left / daysLeft : left)}</b></div>
+          <div><span>רווח החודש</span><b className={cur.profit >= 0 ? 'in' : 'out'}>{fmtRound(cur.profit)}</b></div></div></div>
+      <div className="cg-bar"><i style={{ width: pctGoal + '%' }} /><span className="cg-fc" style={{ insetInlineStart: Math.min(100, goal ? forecast / goal * 100 : 0) + '%' }} title="תחזית" /></div>
+      <div className="cg-hist" aria-label="12 החודשים האחרונים">{hist.map(h => <div key={h.m} title={`${monthName(h.m)}: ${fmtRound(h.v)}`}>
+        <i className={h.v >= goal && goal ? 'hit' : ''} style={{ height: Math.max(2, h.v / maxBar * 100) + '%' }} /><small>{h.m.slice(5)}</small></div>)}
+        {goal > 0 && <span className="cg-line" style={{ bottom: `calc(${goal / maxBar * 100}% * .82 + 18px)` }}>יעד</span>}</div>
+      <div style={{ ...row, marginTop: 12 }}>
+        <Field label="יעד הכנסה חודשי"><input type="number" inputMode="numeric" value={num(c.incomeGoal)} onChange={e => save({ incomeGoal: e.target.value })} /></Field>
+        <Field label="המדרגות הבאות"><input value={(c.ladder || []).join(', ')} onChange={e => save({ ladder: e.target.value.split(/[,\s]+/).map(Number).filter(Boolean) })} /></Field>
+        <Field label="נמדד"><select value={c.basis} onChange={e => save({ basis: e.target.value })}><option value="net">לפני מע״מ</option><option value="gross">כולל מע״מ</option></select></Field>
+        <Field label="ימי עבודה בשבוע"><select value={c.workDays} onChange={e => save({ workDays: Number(e.target.value) })}><option value={5}>5 (א׳–ה׳)</option><option value={6}>6 (א׳–ו׳)</option></select></Field>
+      </div>
+      <div className="coach-ladder">{(c.ladder || []).map(Number).filter(Boolean).sort((a, b) => a - b).map(x => {
+        const hits = hist.filter(h => h.v >= x).length;
+        return <span key={x} className={'mg-chip ' + (hits ? 'ok' : x === nextRung ? 'warn' : '')}>{fmtRound(x)} {hits ? `✓ ${hits} חודשים` : x === nextRung ? '← המדרגה הבאה' : ''}</span>; })}</div>
+    </div>
+
+    <div data-tour="coach-notes" className="mg-card"><h3 style={{ marginTop: 0 }}>💡 מה המאמן רואה</h3>
+      {notes.length ? <ul className="coach-notes">{notes.map((n, i) => <li key={i} className={n.k}>{n.t}</li>)}</ul> : <div className="mg-empty">אין הערות כרגע. הכול בתלם.</div>}</div>
+
+    <div className="coach-grid">
+      <div data-tour="coach-debt" className="mg-card"><h3 style={{ marginTop: 0 }}>🏦 יציאה מהאוברדרפט</h3>
+        <p className="coach-p">חשבונות הבנק והחובות: יתרה (מינוס לאוברדרפט), מסגרת וריבית שנתית. מעדכנים מדי פעם מהאפליקציה של הבנק.</p>
+        <div className="coach-tw"><table className="coach-tbl"><thead><tr><th>חשבון</th><th>יתרה</th><th>מסגרת</th><th>ריבית %</th><th></th></tr></thead><tbody>
+          {accs.map((a, i) => <tr key={a.id}>
+            <td><input value={a.name} placeholder="בנק / חשבון" onChange={e => save({ accounts: setAcc(accs, i, { name: e.target.value }) })} /></td>
+            <td><input type="number" value={num(a.balance)} onChange={e => save({ accounts: setAcc(accs, i, { balance: e.target.value, at: today }) })} /></td>
+            <td><input type="number" value={num(a.limit)} onChange={e => save({ accounts: setAcc(accs, i, { limit: e.target.value }) })} /></td>
+            <td><input type="number" step="0.1" value={num(a.rate)} onChange={e => save({ accounts: setAcc(accs, i, { rate: e.target.value }) })} /></td>
+            <td><button className="mg-btn ghost sm" onClick={() => save({ accounts: accs.filter((_, j) => j !== i) })} aria-label="הסר">✕</button></td></tr>)}
+          {debts.map((a, i) => <tr key={a.id}>
+            <td><input value={a.name} placeholder="הלוואה / חוב" onChange={e => save({ debts: setAcc(debts, i, { name: e.target.value }) })} /></td>
+            <td><input type="number" value={num(a.balance)} placeholder="יתרה לסילוק" onChange={e => save({ debts: setAcc(debts, i, { balance: e.target.value }) })} /></td>
+            <td><input type="number" value={num(a.payment)} placeholder="החזר חודשי" onChange={e => save({ debts: setAcc(debts, i, { payment: e.target.value }) })} /></td>
+            <td><input type="number" step="0.1" value={num(a.rate)} onChange={e => save({ debts: setAcc(debts, i, { rate: e.target.value }) })} /></td>
+            <td><button className="mg-btn ghost sm" onClick={() => save({ debts: debts.filter((_, j) => j !== i) })} aria-label="הסר">✕</button></td></tr>)}
+        </tbody></table></div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+          <button className="mg-btn ghost sm" onClick={() => save({ accounts: [...accs, { id: uid('acc'), name: '', balance: '', limit: '', rate: '' }] })}>＋ חשבון בנק</button>
+          <button className="mg-btn ghost sm" onClick={() => save({ debts: [...debts, { id: uid('debt'), name: '', balance: '', payment: '', rate: '' }] })}>＋ הלוואה / חוב</button></div>
+        {owed > 0 ? <div className="coach-sum">
+          <div><span>סה״כ חוב</span><b className="out">{fmtRound(owed)}</b></div>
+          <div><span>ריבית בחודש</span><b className="out">{fmtRound(interest)}</b></div>
+          <div><span>רווח ממוצע (3 חודשים) אחרי מס</span><b>{fmtRound(free)}</b></div></div> : <div className="mg-empty">עוד לא הוזנו חשבונות במינוס או חובות.</div>}
+        {owed > 0 && <div style={{ ...row, marginTop: 8 }}>
+          <Field label="לצאת עד חודש"><input type="month" value={c.payoffBy} onChange={e => save({ payoffBy: e.target.value })} /></Field>
+          <Field label="או: כמה אפשר להחזיר בחודש"><input type="number" value={num(c.payExtra)} onChange={e => save({ payExtra: e.target.value })} /></Field></div>}
+        {owed > 0 && (needPay > 0 || atExtra != null) && <div className="mg-note" style={{ marginTop: 8 }}>
+          {needPay > 0 && <div>כדי לצאת עד {monthName(c.payoffBy)}: <b>{fmtRound(needPay)} בחודש</b> ({byDate} חודשים){free > 0 ? (needPay <= free ? ' · זה בתוך הרווח הממוצע ✓' : ` · זה ${fmtRound(needPay - free)} מעל הרווח הממוצע, אז צריך להגדיל הכנסה או לקצץ`) : ''}.</div>}
+          {atExtra != null && <div>בהחזר של {fmtRound(extra)} בחודש: {atExtra === Infinity ? 'לא מכסה את הריבית; החוב לא יירד.' : <><b>{atExtra} חודשים</b>, עד {monthName(addMonths(ym, atExtra - 1))}.</>}</div>}
+        </div>}
+      </div>
+
+      <div data-tour="coach-reserve" className="mg-card"><h3 style={{ marginTop: 0 }}>🛡 להפריש החודש</h3>
+        <p className="coach-p">כסף שלא שלך: מס הכנסה וביטוח לאומי לפי קצב השנה, ומע״מ של החודש. מעבירים לחשבון נפרד ומסמנים כאן.</p>
+        <div className="coach-sum">
+          <div><span>מס הכנסה + ביטוח לאומי</span><b>{fmtRound(taxMonthly)}</b></div>
+          <div><span>מע״מ החודש</span><b>{fmtRound(vatMonth)}</b></div>
+          <div><span>סה״כ להפריש</span><b className="out">{fmtRound(reserveNeed)}</b></div></div>
+        <div style={{ ...row, marginTop: 8 }}><Field label={`הופרש ב${monthName(ym)}`}><input type="number" value={num(c.reserved?.[ym])} onChange={e => save({ reserved: { ...(c.reserved || {}), [ym]: e.target.value } })} /></Field>
+          <span className={'mg-chip ' + (reserved >= reserveNeed && reserveNeed ? 'ok' : 'warn')} style={{ alignSelf: 'center' }}>{reserved >= reserveNeed && reserveNeed ? '✓ הופרש' : `חסר ${fmtRound(Math.max(0, reserveNeed - reserved))}`}</span></div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 6 }}>לפי רווח של {fmtRound(ytd)} מתחילת השנה, בקצב שנתי של {fmtRound(ytd / share)} (שיעור מס כולל {Math.round(tf.rate * 100)}%).</div>
+      </div>
+    </div>
+
+    <div data-tour="coach-caps" className="mg-card"><h3 style={{ marginTop: 0 }}>✂ תקרות הוצאה</h3>
+      <p className="coach-p">כל קטגוריה: מה יצא החודש, הממוצע בשלושת החודשים הקודמים, ותקרה שקובעים יחד. מה שעובר תקרה מופיע אצל המאמן ובדוחות.</p>
+      <div className="coach-tw"><table className="coach-tbl"><thead><tr><th>קטגוריה</th><th>החודש</th><th>ממוצע</th><th>תקרה</th><th></th></tr></thead><tbody>
+        {catRows.map(r => { const p = r.cap ? Math.min(100, r.now / r.cap * 100) : 0; return <tr key={r.k}>
+          <td>{r.k}</td><td className={r.cap && r.now > r.cap ? 'out' : ''}>{fmtRound(r.now)}</td><td>{fmtRound(r.avg)}</td>
+          <td><input type="number" placeholder="ללא" value={num(c.caps?.[r.k])} onChange={e => save({ caps: { ...(c.caps || {}), [r.k]: e.target.value } })} /></td>
+          <td className="capbar" style={{ width: '28%' }}>{r.cap ? <div className="cap-bar"><i className={r.now > r.cap ? 'over' : ''} style={{ width: p + '%' }} /></div> : null}</td></tr>; })}
+        {!catRows.length && <tr><td colSpan={5}><div className="mg-empty">עוד אין הוצאות בשלושת החודשים האחרונים.</div></td></tr>}
+      </tbody></table></div>
+      {recurring.length > 0 && <details style={{ marginTop: 10 }}><summary><b>הוצאות קבועות: {fmtRound(recTotal)} בחודש</b> · לעבור עליהן ולסמן מה לבטל או להוריד</summary>
+        <ul className="coach-rec">{[...recurring].sort((a, b) => recAmt(b) - recAmt(a)).map(r => <li key={r.book + r.id}>
+          <span>{r.name || r.desc}{r.share && Number(r.share) !== 100 ? ` (${r.share}% לעסק)` : ''}{r.estimate ? ' · הערכה' : ''} · <small>{r.book}</small></span><b>{fmtRound(recAmt(r))}</b></li>)}</ul></details>}
+    </div>
+
+    <div data-tour="coach-checkin" className="mg-card"><h3 style={{ marginTop: 0 }}>📝 פגישת החודש</h3>
+      <p className="coach-p">מה עבד, מה לא, ומה עושים החודש. כמה שורות בכל תחילת חודש.</p>
+      <textarea rows={4} style={{ width: '100%' }} value={c.checkins?.[ym] || ''} placeholder={'לדוגמה: לשלוח הודעה ל-10 לקוחות שלא חזרו · לבטל מנוי X · להעלות מחיר טיפול ל-…'}
+        onChange={e => save({ checkins: { ...(c.checkins || {}), [ym]: e.target.value } })} />
+      {Object.entries(c.checkins || {}).filter(([m, t]) => m !== ym && t).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6).map(([m, t]) =>
+        <details key={m} style={{ marginTop: 6 }}><summary>{monthName(m)}</summary><div style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{t}</div></details>)}
+    </div>
+    <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '4px 2px 20px' }}>המאמן עוזר לנהל את העסק: יעדים, הוצאות, הפרשות ותזרים. הוא לא ייעוץ השקעות, ובהחלטות על הלוואות כדאי לבדוק גם עם הבנק או רואה החשבון.</div>
+  </div>);
+}
+
 function AllView({ books, datas, loading, onOpen, onStoreLogin }) {
   const [mode, setMode] = useState('month');
   const [month, setMonth] = useState(thisMonth());
