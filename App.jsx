@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.22.0';
+const VERSION = '1.23.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -226,7 +226,7 @@ async function storeRead(tenant, name) {
   return s.docs.map(d => ({ ...d.data(), id: d.id }));
 }
 
-const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive'];
+const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive', 'recurring'];
 
 /* History imported from iCount is kept packed: a few hundred documents to a
    record in books/{book}/archive, instead of one record each. Thousands of
@@ -1043,6 +1043,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.23.0', date: '01.10.26', items: [
+    'הוצאות קבועות (בלשונית הוצאות): שכירות, טלפון, ביטוח, רואה חשבון וכו׳. מגדירים פעם אחת, וכל חודש ההוצאה נרשמת לבד ביום שלה, עם מע״מ לקיזוז, ונכנסת לרווח והפסד, למע״מ ולצפי המס.',
+    'הדבקת רשימה: שורה לכל הוצאה ("שכירות, 4500, 1"), והמערכת מזהה שם, סכום, יום וקטגוריה.'] },
   { v: '1.22.0', date: '01.10.26', items: [
     'צפי מס הכנסה לפי ההכנסות וההוצאות: מס לפי מדרגות 2026 פחות נקודות זיכוי, ביטוח לאומי ומס בריאות לעצמאי, כמה להפריש כל חודש וכמה נותר לשלם אחרי מקדמות. כל העסקים באותו מספר עוסק מחושבים יחד. חברה מחושבת לפי מס חברות 23%.',
     'בלשונית רווח והפסד: הפירוט המלא ("איך זה חושב?"), נקודות זיכוי, מקדמות וניכויי פנסיה. בסקירה: אריח עם הצפי לשנה.'] },
@@ -1215,6 +1218,7 @@ const TOURS = {
   ],
   expenses: [
     { t: 'exp-inbox', title: 'חשבוניות מהמייל', text: 'חשבוניות ספקים שהגיעו ל-Gmail ממתינות כאן. "רשום כהוצאה" קורא את הקובץ וממלא סכום, מע״מ, תאריך וספק. בפעם הראשונה: "חבר את Gmail".', since: '1.19.0' },
+    { t: 'exp-recurring', title: 'הוצאות קבועות', text: 'מגדירים פעם אחת (או מדביקים רשימה), וכל חודש ההוצאה נרשמת לבד ביום שלה. אפשר להשהות או לעצור בכל רגע.', since: '1.23.0' },
     { t: 'exp-filters', title: 'הוצאות', text: 'סינון לפי חודש וקטגוריה, וייצוא לאקסל.', since: '1.0.0' },
     { t: 'exp-table', title: 'הרשימה', text: 'כל הוצאה עם ספק, קטגוריה ומע״מ מוכר. הסכומים נכנסים לדוח המע״מ ולרווח והפסד.', since: '1.0.0' },
   ],
@@ -2435,6 +2439,26 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
   const [quickDoc, setQuickDoc] = useState(null);
+  /* Fixed expenses due by today are recorded (owners only; each month's id is fixed, so never twice). */
+  const recRunning = useRef(false);
+  useEffect(() => {
+    if (role !== 'owner' || recRunning.current || !(data.recurring || []).length) return;
+    const due = recurringDue(data.recurring);
+    if (!due.length) return;
+    recRunning.current = true;
+    (async () => {
+      const have = new Set((data.expenses || []).map(e => e.id));
+      let n = 0;
+      for (const { rule, month } of due) {
+        const e = recExpense(rule, month, rate);
+        if (!have.has(e.id)) { if (await save('expenses', e)) n++; else break; }
+        const r = clean({ ...rule, lastMonth: month, updatedAt: new Date().toISOString() });
+        try { await withTimeout(cols.recurring.put(r.id, r), 12000); patch('recurring', l => l.map(x => x.id === r.id ? r : x)); rule.lastMonth = month; } catch { break; }
+      }
+      if (n) flash(`נרשמו ${n} הוצאות קבועות`);
+      recRunning.current = false;
+    })();
+  }, [data.recurring, role]);
   /* Income tax is per person: every business under the same tax id counts together. */
   const taxRows = useMemo(() => {
     const y = todayIso().slice(0, 4), to = thisMonth();
@@ -2610,6 +2634,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
                                taxTile={role === 'owner' ? <div role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => setSub('pnl')}><TaxForecast compact book={book} rows={taxRows} /></div> : null} />}
       {sub === 'income' && <IncomeList income={ledger.income} linked={!!book.tenant} onDoc={ro ? null : () => openDoc()} onManual={role === 'owner' ? () => setEdit({ kind: 'income', rec: null }) : null}
         onEdit={(r) => setEdit({ kind: 'income', rec: r })} onDel={(r) => remove('incomes', r.id, 'ההכנסה')} />}
+      {sub === 'expenses' && role === 'owner' && <RecurringCard book={book} data={data} rate={rate} cols={cols} patch={patch} flash={flash} suppliers={suppliers} />}
       {sub === 'expenses' && !ro && <InboxCard book={book} server={server} role={role} flash={flash} refreshKey={inboxTick}
         onRecord={(it, g, reload) => {
           const sup = matchSupplier(suppliers, { ...g, from: it.from, fromName: it.fromName });
@@ -3043,6 +3068,138 @@ function InboxCard({ book, server, role, onRecord, flash, refreshKey }) {
   );
 }
 
+
+/* ===================================================== fixed monthly expenses */
+/* Rent, phone, insurance, the accountant: set once, recorded every month on
+   their day. Each month's expense has a fixed id (the rule and the month), so
+   two devices, or opening the business twice, never record it twice. */
+const REC_BACK = 12;           // at most a year is caught up at once
+const recCat = (t) => {
+  const s = String(t || '');
+  const hit = EXP_CATS.find(c => s.includes(c) || c.split(' ')[0] && s.includes(c.split(' ')[0]));
+  if (hit) return hit;
+  if (/שכיר|ארנונה|חשמל|מים|ועד/.test(s)) return 'שכירות';
+  if (/טלפון|סלולר|אינטרנט|מנוי|תוכנ|זום|גוגל|anthropic|claude|adobe|canva/i.test(s)) return 'תוכנה ומנויים';
+  if (/ביטוח/.test(s)) return 'ביטוח';
+  if (/רכב|דלק|ליסינג|חניה/.test(s)) return 'רכב ונסיעות';
+  if (/רו["״]?ח|רואה חשבון|הנה["״]?ח|יועץ מס/.test(s)) return 'הנהלת חשבונות';
+  if (/פרסום|שיווק|פייסבוק|גוגל אדס|ads/i.test(s)) return 'שיווק ופרסום';
+  if (/סליקה|עמלה|בנק/.test(s)) return 'עמלות סליקה';
+  return 'אחר';
+};
+/* "שכירות, 3500, 1" · "טלפון 89 ש״ח ב-10 לחודש" · one fixed expense a line. */
+function parseRecurring(text) {
+  return String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean).map(line => {
+    const nums = [...line.matchAll(/(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?/g)].map(m => ({ v: Number(m[1].replace(/,/g, '') + (m[2] ? '.' + m[2] : '')), raw: m[0], at: m.index }));
+    const dayM = line.match(/(?:ב-?|יום\s*|day\s*)(\d{1,2})(?:\s*(?:לחודש|בחודש))?/) || line.match(/(\d{1,2})\s*(?:לחודש|בחודש)/);
+    const day = dayM ? Math.min(28, Math.max(1, Number(dayM[1]))) : null;
+    const amounts = nums.filter(n => !(dayM && n.raw === dayM[1] && Math.abs(n.at - (line.indexOf(dayM[0]) + dayM[0].indexOf(dayM[1]))) < 2));
+    const amount = amounts.length ? amounts[0].v : 0;
+    const restDay = day ?? (amounts[1] && amounts[1].v >= 1 && amounts[1].v <= 31 && Number.isInteger(amounts[1].v) ? Math.min(28, amounts[1].v) : 1);
+    const name = line.replace(/(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?/g, ' ').replace(/ש["״]?ח|₪|nis|ils|לחודש|בחודש|יום|ב-|כל|ללא מע["״]?מ|פטור|כולל מע["״]?מ/gi, ' ')
+      .split(/[,;|\t]| - /)[0].replace(/\s+/g, ' ').trim() || 'הוצאה קבועה';
+    const vatMode = /ללא מע|פטור|חו["״]?ל|abroad/i.test(line) ? 'none' : /רכב|דלק|ליסינג/.test(line) ? 'car' : 'full';
+    const catTxt = line.split(/[,;|\t]/).slice(3).join(' ');
+    const cat = catTxt && recCat(catTxt) !== 'אחר' ? recCat(catTxt) : recCat(line);
+    return { name, gross: amount, day: restDay, cat, vatMode, ok: amount > 0 };
+  });
+}
+function recVat(gross, mode, rate) { return rate === 0 ? 0 : mode === 'full' ? vatOf(gross, rate) : mode === 'car' ? r2(vatOf(gross, rate) * 2 / 3) : 0; }
+/* What is due now: every month from the rule's start (or the month after the
+   last one recorded) through this one, when its day has come. */
+function recurringDue(rules, today = todayIso()) {
+  const ym = today.slice(0, 7), d = Number(today.slice(8, 10)), out = [];
+  for (const r of rules) {
+    if (r.active === false || !(Number(r.gross) > 0)) continue;
+    let m = r.lastMonth ? addMonths(r.lastMonth, 1) : (r.from || ym);
+    const floor = addMonths(ym, -REC_BACK + 1); if (m < floor) m = floor;
+    for (; m <= ym; m = addMonths(m, 1)) {
+      if (r.until && m > r.until) break;
+      if (m === ym && d < (Number(r.day) || 1)) break;
+      out.push({ rule: r, month: m });
+    }
+  }
+  return out;
+}
+function recExpense(r, month, rate) {
+  const day = String(Math.min(28, Math.max(1, Number(r.day) || 1))).padStart(2, '0');
+  const gross = r2(r.gross);
+  return clean({ id: `rec_${r.id}_${month}`, date: `${month}-${day}`, desc: r.name, cat: r.cat || 'אחר', supplierId: r.supplierId || '',
+                 pay: r.pay || 'הוראת קבע', gross, vatMode: r.vatMode || 'full', vatManual: '', vat: recVat(gross, r.vatMode || 'full', rate),
+                 docNo: '', recurring: r.id, src: 'recurring', createdAt: new Date().toISOString() });
+}
+
+function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
+  const list = (data.recurring || []).slice().sort((a, b) => (Number(a.day) || 0) - (Number(b.day) || 0));
+  const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState(null);
+  const [paste, setPaste] = useState(null);
+  const monthly = list.filter(r => r.active !== false).reduce((a, r) => a + (Number(r.gross) || 0), 0);
+  const saveRule = async (r) => {
+    const rec = clean({ ...r, gross: r2(r.gross), day: Math.min(28, Math.max(1, Number(r.day) || 1)), updatedAt: new Date().toISOString() });
+    try { await withTimeout(cols.recurring.put(rec.id, rec), 12000); patch('recurring', l => [...l.filter(x => x.id !== rec.id), rec]); return true; }
+    catch { flash('השמירה נכשלה'); return false; }
+  };
+  const del = async (r) => {
+    if (!window.confirm(`להפסיק את "${r.name}"? הוצאות שכבר נרשמו נשארות.`)) return;
+    try { await cols.recurring.del(r.id); patch('recurring', l => l.filter(x => x.id !== r.id)); } catch { flash('המחיקה נכשלה'); }
+  };
+  const parsed = paste !== null ? parseRecurring(paste) : [];
+  const addParsed = async () => {
+    const good = parsed.filter(x => x.ok); let n = 0;
+    for (const x of good) if (await saveRule({ id: uid('rec'), ...x, from: thisMonth(), active: true, pay: 'הוראת קבע' })) n++;
+    flash(`נוספו ${n} הוצאות קבועות. החודש נרשם לבד בכל אחת, ביום שלה.`); setPaste(null);
+  };
+  return (
+    <div data-tour="exp-recurring" className="mg-card" style={{ marginBottom: 14, padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <b style={{ flex: 1 }}>🔁 הוצאות קבועות {list.length ? <span className="mg-chip">{list.length} · {fmt(monthly)} בחודש</span> : ''}</b>
+        {list.length > 0 && <button className="mg-btn ghost sm" onClick={() => setOpen(o => !o)}>{open ? 'הסתר' : 'הצג'}</button>}
+        <button className="mg-btn ghost sm" onClick={() => setEdit({ id: uid('rec'), name: '', gross: '', day: 1, cat: 'אחר', vatMode: rate > 0 ? 'full' : 'none', pay: 'הוראת קבע', from: thisMonth(), active: true })}>＋ הוספה</button>
+        <button className="mg-btn ghost sm" onClick={() => setPaste('')}>📋 הדבקת רשימה</button>
+      </div>
+      {!list.length && <div style={{ fontSize: 14, marginTop: 6 }}>שכירות, טלפון, ביטוח, רואה חשבון: מגדירים פעם אחת, וכל חודש ההוצאה נרשמת לבד ביום שלה.</div>}
+      {open && list.map(r => (
+        <div key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--line)', padding: '8px 0', opacity: r.active === false ? .5 : 1 }}>
+          <div style={{ flex: '1 1 180px' }}><b>{r.name}</b> <span style={{ color: 'var(--muted)', fontSize: 13 }}>· ב-{r.day} לחודש · {r.cat}{r.vatMode === 'none' ? ' · ללא מע״מ' : r.vatMode === 'car' ? ' · רכב 2/3' : ''}{r.active === false ? ' · מושהית' : ''}</span></div>
+          <b dir="ltr">{fmt(r.gross)}</b>
+          <button className="mg-btn ghost sm" onClick={() => setEdit(r)}>✎</button>
+          <button className="mg-btn ghost sm" onClick={() => saveRule({ ...r, active: r.active === false })}>{r.active === false ? 'הפעל' : 'השהה'}</button>
+          <button className="mg-btn ghost sm" onClick={() => del(r)}>🗑</button>
+        </div>))}
+      {edit && <Box title={list.some(x => x.id === edit.id) ? 'עריכת הוצאה קבועה' : 'הוצאה קבועה חדשה'} onClose={() => setEdit(null)}
+                    footer={<><button className="mg-btn" disabled={!String(edit.name).trim() || !(Number(edit.gross) > 0)} onClick={async () => { if (await saveRule(edit)) setEdit(null); }}>שמור</button>
+                              <button className="mg-btn ghost" onClick={() => setEdit(null)}>ביטול</button></>}>
+        <div style={grid}>
+          <Field label="שם"><input value={edit.name} onChange={e => setEdit(x => ({ ...x, name: e.target.value, cat: x.cat === 'אחר' ? recCat(e.target.value) : x.cat }))} placeholder="שכירות קליניקה" /></Field>
+          <Field label="סכום לחודש כולל מע״מ (₪)"><input inputMode="decimal" value={edit.gross} onChange={e => setEdit(x => ({ ...x, gross: e.target.value }))} /></Field>
+          <Field label="יום בחודש"><input inputMode="numeric" value={edit.day} onChange={e => setEdit(x => ({ ...x, day: e.target.value }))} /></Field>
+          <Field label="קטגוריה"><select value={edit.cat} onChange={e => setEdit(x => ({ ...x, cat: e.target.value }))}>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+          <Field label="ספק"><select value={edit.supplierId || ''} onChange={e => setEdit(x => ({ ...x, supplierId: e.target.value }))}>
+            <option value="">— ללא —</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+          <Field label="אמצעי תשלום"><select value={edit.pay || 'הוראת קבע'} onChange={e => setEdit(x => ({ ...x, pay: e.target.value }))}>{PAY_METHODS.map(c => <option key={c}>{c}</option>)}</select></Field>
+          {rate > 0 && <Field label="מע״מ לקיזוז"><select value={edit.vatMode} onChange={e => setEdit(x => ({ ...x, vatMode: e.target.value }))}>
+            <option value="full">מלא ({rate}%)</option><option value="car">רכב פרטי (2/3)</option><option value="none">ללא (ספק פטור / חו״ל)</option></select></Field>}
+          <Field label="מחודש"><input type="month" value={edit.from || thisMonth()} onChange={e => setEdit(x => ({ ...x, from: e.target.value, lastMonth: '' }))} /></Field>
+          <Field label="עד חודש (לא חובה)"><input type="month" value={edit.until || ''} onChange={e => setEdit(x => ({ ...x, until: e.target.value }))} /></Field>
+        </div>
+        <div className="mg-note" style={{ marginTop: 10, fontSize: 13 }}>ההוצאה נרשמת לבד כל חודש ביום שנקבע, כשפותחים את העסק. אם "מחודש" הוא חודש שעבר, החודשים שעברו יירשמו מיד (עד שנה אחורה).</div>
+      </Box>}
+      {paste !== null && <Box title="הדבקת רשימת הוצאות קבועות" onClose={() => setPaste(null)} wide
+                    footer={<><button className="mg-btn" disabled={!parsed.some(x => x.ok)} onClick={addParsed}>הוסף {parsed.filter(x => x.ok).length} הוצאות</button>
+                              <button className="mg-btn ghost" onClick={() => setPaste(null)}>ביטול</button></>}>
+        <div style={{ fontSize: 14, marginBottom: 6 }}>שורה לכל הוצאה: <b>שם, סכום, יום בחודש</b>. למשל:</div>
+        <div dir="rtl" style={{ fontSize: 13, color: 'var(--muted)', background: 'var(--soft)', borderRadius: 8, padding: '6px 10px', marginBottom: 8, whiteSpace: 'pre-line' }}>{'שכירות קליניקה, 4500, 1\nטלפון סלולרי, 89, 10\nביטוח מקצועי, 250, 15\nרואה חשבון, 590, 5\nClaude מנוי, 75, 20, ללא מע״מ'}</div>
+        <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={7} style={{ width: '100%' }} placeholder="הדבק או הקלד כאן…" autoFocus />
+        {parsed.length > 0 && <div style={{ marginTop: 10 }}>{parsed.map((x, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, padding: '4px 0', borderBottom: '1px dashed var(--line)', color: x.ok ? undefined : 'var(--bad)', fontSize: 14 }}>
+            <span style={{ flex: 1 }}>{x.ok ? '✓' : '✗'} <b>{x.name}</b> · ב-{x.day} לחודש · {x.cat}{x.vatMode === 'none' ? ' · ללא מע״מ' : x.vatMode === 'car' ? ' · רכב' : ''}</span>
+            <b dir="ltr">{x.ok ? fmt(x.gross) : 'חסר סכום'}</b></div>))}</div>}
+      </Box>}
+    </div>
+  );
+}
+
 function ExpenseList({ outgo, supName, onEdit, onDel, onFile }) {
   const [month, setMonth] = useState('');
   const [cat, setCat] = useState('');
@@ -3067,9 +3224,9 @@ function ExpenseList({ outgo, supName, onEdit, onDel, onFile }) {
             <tr key={e.id}>
               <td>{heDate(e.date)}</td>
               <td>{supName(e.supplierId) || e.supplierName || '—'}</td>
-              <td>{e.desc}{e.review && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>לבדיקה</span>}</td>
+              <td>{e.desc}{e.review && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>לבדיקה</span>}{e.recurring && <span className="mg-chip" style={{ marginInlineStart: 6 }}>🔁 קבועה</span>}</td>
               <td><span className="mg-chip">{e.cat}</span></td>
-              <td>{e.docNo || (e.hasDoc ? 'יש' : <span style={{ color: 'var(--warn)' }}>חסר</span>)}
+              <td>{e.docNo || (e.hasDoc ? 'יש' : e.recurring ? <span style={{ color: 'var(--muted)' }}>—</span> : <span style={{ color: 'var(--warn)' }}>חסר</span>)}
                 {e.file?.inboxId && onFile && <button className="mg-btn ghost sm" style={{ marginInlineStart: 6 }} title="החשבונית" onClick={() => onFile(e)}>📎</button>}</td>
               <td>{fmt(e.gross - e.vat)}</td><td>{fmt(e.vat)}</td><td><b>{fmt(e.gross)}</b></td>
               <td><div style={{ display: 'flex', gap: 4 }}>
