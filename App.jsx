@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.31.0';
+const VERSION = '1.31.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -115,6 +115,7 @@ const local = {
     try { lsSet(LOCAL_KEY, o); } catch { throw new Error('האחסון בדפדפן מלא. עבור לענן או מחק נתונים ישנים.'); }
   },
   async del(path, id) { const o = lsGet(LOCAL_KEY, {}); delete o[path + '/' + id]; lsSet(LOCAL_KEY, o); },
+  async get(path, id) { const o = lsGet(LOCAL_KEY, {}); const v = o[path + '/' + id]; return v ? { ...v, id } : null; },
   async books() { return this.list('books'); },
   async patch(path, id, fields) { const o = lsGet(LOCAL_KEY, {}); o[path + '/' + id] = { ...(o[path + '/' + id] || {}), ...fields }; lsSet(LOCAL_KEY, o); },
   /* The next number and the document, written together. */
@@ -133,6 +134,8 @@ const remote = {
   async list(path) { const s = await getDocs(collection(cloud.db, ...path.split('/'))); return s.docs.map(d => ({ ...d.data(), id: d.id })); },
   put: (path, id, data) => setDoc(doc(cloud.db, ...path.split('/'), id), data),
   del: (path, id) => deleteDoc(doc(cloud.db, ...path.split('/'), id)),
+  /* One record: one read, where a list reads every record in the collection. */
+  async get(path, id) { const s = await getDoc(doc(cloud.db, ...path.split('/'), id)); return s.exists() ? { ...s.data(), id } : null; },
   patch: (path, id, fields) => updateDoc(doc(cloud.db, ...path.split('/'), id), fields),
   /* In one transaction, so two devices can never take the same number and a
      failed write never leaves a gap. */
@@ -164,6 +167,12 @@ const remote = {
   },
 };
 const DB = cloud ? remote : local;
+/* Firestore's errors, in words. resource-exhausted is the free plan's daily quota. */
+const dbErr = (e) => { const c = e?.code || '';
+  if (/resource-exhausted/.test(c) || /quota/i.test(e?.message || '')) return 'המכסה היומית של מסד הנתונים (Firebase) נגמרה. היא מתחדשת כל יום ב-10:00 בבוקר; עד אז אי אפשר לשמור. כדי שזה לא יקרה: Firebase ← תוכנית Blaze (תשלום לפי שימוש, בפועל אגורות).';
+  if (/unavailable|deadline/.test(c)) return 'אין חיבור למסד הנתונים כרגע. בדוק את האינטרנט ונסה שוב.';
+  if (/permission/.test(c)) return 'אין הרשאה לשמור כאן (בדוק שאתה מחובר כבעל העסק).';
+  return c || e?.message || ''; };
 
 /* ------------------------------------------------------------ the store */
 /* The store's own Firebase. Signed in with the same user as the store's
@@ -294,6 +303,7 @@ async function archiveMigrate(book, data, onStep) {
 }
 const bookCol = (bookId, name) => ({
   list: () => DB.list(`books/${bookId}/${name}`),
+  get: (id) => DB.get(`books/${bookId}/${name}`, id),
   put: (id, data) => DB.put(`books/${bookId}/${name}`, id, data),
   del: (id) => DB.del(`books/${bookId}/${name}`, id),
 });
@@ -1098,6 +1108,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.31.1', date: '01.10.26', items: ['תיקון: דף סליקה שממתין לתשלום כבר לא קורא את כל המסמכים מהענן כל 20 שניות (זה מה שגמר את המכסה היומית של Firebase). עכשיו נבדקים רק הדפים הממתינים, כל 30 שניות, ורק בחצי השעה הראשונה.', 'כשהמכסה היומית של מסד הנתונים נגמרת, מוצגת הודעה ברורה בעברית במקום resource-exhausted.'] },
   { v: '1.31.0', date: '01.10.26', items: ['לשונית ייצוא חדשה תחת כלים: Excel מלא עם גיליון לכל רשימה (מסמכים, תקבולים, הכנסות, הוצאות, מע״מ לפי חודש, פקודות יומן, מאזן בוחן, לקוחות, ספקים, פריטים, בנק), חבילת ZIP לרואה החשבון, מבנה אחיד, CSV לכל רשימה וגיבוי של העסק. בחירת תקופה אחת לכולם.'] },
   { v: '1.30.1', date: '01.10.26', items: ['במחשב: העמודה הימנית צרה וקומפקטית יותר, עם לוגו קטן, וכפתור » שמכווץ אותה לפס צר של אייקונים (העסקים כעיגולים עם האות הראשונה). המערכת זוכרת את הבחירה.'] },
   { v: '1.30.0', date: '01.10.26', items: [
@@ -2866,9 +2877,25 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     if (Date.now() - Date.parse(book.icountSyncAt || 0) < 20 * 60e3) return;
     icSync(false);
   }, [book.id, !!server]);
-  const payRefresh = async () => {
-    const [p, d] = await Promise.all([cols.payreqs.list().catch(() => null), cols.documents.list().catch(() => null)]);
-    if (p) patch('payreqs', () => p); if (d) patch('documents', () => d);
+  /* Payment pages: the automatic check reads only the pages still waiting, one
+     record each, and a page that was paid brings only its own invoice. Never
+     the whole collection: with many documents that alone used up the free
+     daily quota of the database within hours. */
+  const payRefresh = async (a) => {
+    const auto = a === true;
+    const mine = data.payreqs || [];
+    const fresh = auto ? mine.filter(p => p.status === 'open' && Date.now() - Date.parse(p.createdAt || 0) < 2 * 86400000)
+                       : null;
+    const got = auto ? (await Promise.all(fresh.map(p => cols.payreqs.get(p.id).catch(() => null)))).filter(Boolean)
+                     : await cols.payreqs.list().catch(() => null);
+    if (!got) return;
+    const changed = got.filter(p => { const o = mine.find(x => x.id === p.id); return !o || o.status !== p.status || o.docId !== p.docId; });
+    if (!changed.length && auto) return;
+    patch('payreqs', l => auto ? l.map(x => got.find(g => g.id === x.id) || x) : got);
+    const have = new Set((data.documents || []).map(d => d.id));
+    const need = got.filter(p => p.docId && !have.has(p.docId)).map(p => p.docId);
+    const docs = (await Promise.all(need.map(id => cols.documents.get(id).catch(() => null)))).filter(Boolean);
+    if (docs.length) patch('documents', l => [...l.filter(d => !docs.some(x => x.id === d.id)), ...docs]);
   };
   const sentDoc = async (d, to) => {
     const n = (d.printCount || 0) + 1, at = new Date().toISOString();
@@ -4813,7 +4840,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
       refId: ref?.id || '', refTitle: ref ? docTitle(ref) : '',
       printCount: 0, createdAt: new Date().toISOString(),
     };
-    try { await onIssue(rec); } catch (e) { setErr('ההפקה נכשלה · ' + (e?.code || e?.message || '')); }
+    try { await onIssue(rec); } catch (e) { setErr('ההפקה נכשלה · ' + dbErr(e)); }
     setBusy(false);
   };
 
@@ -6903,17 +6930,19 @@ function PayList({ book, list, onCancel, onRefresh, flash, ro, onEdit }) {
     setBusy('');
   };
   /* While something is waiting to be paid, look again now and then. */
+  const fresh = list.filter(p => p.status === 'open' && Date.now() - Date.parse(p.createdAt || 0) < 2 * 86400000).length;
   useEffect(() => {
-    if (!open) return;
-    const t = setInterval(() => { if (document.visibilityState === 'visible') onRefresh(); }, 20000);
+    if (!fresh) return;
+    const until = Date.now() + 30 * 60e3;
+    const t = setInterval(() => { if (Date.now() > until) return clearInterval(t); if (document.visibilityState === 'visible') onRefresh(true); }, 30000);
     return () => clearInterval(t);
-  }, [open]);
+  }, [fresh]);
   if (!list.length) return null;
   return (
     <div data-tour="docs-pay" className="mg-card" style={{ marginBottom: 14, padding: '12px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0, flex: 1 }}>דפי סליקה {open ? <span className="mg-chip warn">{open} ממתינים</span> : null}</h3>
-        <button className="mg-btn ghost sm keep" onClick={onRefresh}>↻ רענון</button>
+        <button className="mg-btn ghost sm keep" onClick={() => onRefresh()}>↻ רענון</button>
         {sorted.length > shown.length || all ? <button className="mg-btn ghost sm keep" onClick={() => setAll(!all)}>{all ? 'רק אחרונים' : `הכול (${list.length})`}</button> : null}
       </div>
       <div className="mg-tblwrap"><table className="mg-tbl">
