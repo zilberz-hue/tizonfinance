@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.23.0';
+const VERSION = '1.23.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1043,6 +1043,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.23.1', date: '01.10.26', items: ['הוצאות קבועות: "חלק העסק (%)" להוצאות של קליניקה בתוך הבית (שכירות, ארנונה, חשמל, מים). רושמים את הסכום המלא, ונרשם רק החלק של העסק. בהדבקה: "ארנונה, 1100, 1, 25%".'] },
   { v: '1.23.0', date: '01.10.26', items: [
     'הוצאות קבועות (בלשונית הוצאות): שכירות, טלפון, ביטוח, רואה חשבון וכו׳. מגדירים פעם אחת, וכל חודש ההוצאה נרשמת לבד ביום שלה, עם מע״מ לקיזוז, ונכנסת לרווח והפסד, למע״מ ולצפי המס.',
     'הדבקת רשימה: שורה לכל הוצאה ("שכירות, 4500, 1"), והמערכת מזהה שם, סכום, יום וקטגוריה.'] },
@@ -3089,7 +3090,11 @@ const recCat = (t) => {
 };
 /* "שכירות, 3500, 1" · "טלפון 89 ש״ח ב-10 לחודש" · one fixed expense a line. */
 function parseRecurring(text) {
-  return String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean).map(line => {
+  return String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean).map(raw => {
+    /* "25%" is the business's share of a home expense, not an amount. */
+    const shareM = raw.match(/(\d{1,3}(?:\.\d+)?)\s*%/);
+    const share = shareM ? Math.min(100, Math.max(1, Number(shareM[1]))) : 100;
+    const line = shareM ? raw.replace(shareM[0], ' ') : raw;
     const nums = [...line.matchAll(/(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?/g)].map(m => ({ v: Number(m[1].replace(/,/g, '') + (m[2] ? '.' + m[2] : '')), raw: m[0], at: m.index }));
     const dayM = line.match(/(?:ב-?|יום\s*|day\s*)(\d{1,2})(?:\s*(?:לחודש|בחודש))?/) || line.match(/(\d{1,2})\s*(?:לחודש|בחודש)/);
     const day = dayM ? Math.min(28, Math.max(1, Number(dayM[1]))) : null;
@@ -3101,7 +3106,7 @@ function parseRecurring(text) {
     const vatMode = /ללא מע|פטור|חו["״]?ל|abroad/i.test(line) ? 'none' : /רכב|דלק|ליסינג/.test(line) ? 'car' : 'full';
     const catTxt = line.split(/[,;|\t]/).slice(3).join(' ');
     const cat = catTxt && recCat(catTxt) !== 'אחר' ? recCat(catTxt) : recCat(line);
-    return { name, gross: amount, day: restDay, cat, vatMode, ok: amount > 0 };
+    return { name, gross: amount, day: restDay, cat, vatMode, share, ok: amount > 0 };
   });
 }
 function recVat(gross, mode, rate) { return rate === 0 ? 0 : mode === 'full' ? vatOf(gross, rate) : mode === 'car' ? r2(vatOf(gross, rate) * 2 / 3) : 0; }
@@ -3123,8 +3128,9 @@ function recurringDue(rules, today = todayIso()) {
 }
 function recExpense(r, month, rate) {
   const day = String(Math.min(28, Math.max(1, Number(r.day) || 1))).padStart(2, '0');
-  const gross = r2(r.gross);
-  return clean({ id: `rec_${r.id}_${month}`, date: `${month}-${day}`, desc: r.name, cat: r.cat || 'אחר', supplierId: r.supplierId || '',
+  const share = Math.min(100, Math.max(1, Number(r.share) || 100));
+  const gross = r2(Number(r.gross) * share / 100);
+  return clean({ id: `rec_${r.id}_${month}`, date: `${month}-${day}`, desc: r.name + (share < 100 ? ` (${share}% לעסק)` : ''), cat: r.cat || 'אחר', supplierId: r.supplierId || '',
                  pay: r.pay || 'הוראת קבע', gross, vatMode: r.vatMode || 'full', vatManual: '', vat: recVat(gross, r.vatMode || 'full', rate),
                  docNo: '', recurring: r.id, src: 'recurring', createdAt: new Date().toISOString() });
 }
@@ -3134,7 +3140,8 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [paste, setPaste] = useState(null);
-  const monthly = list.filter(r => r.active !== false).reduce((a, r) => a + (Number(r.gross) || 0), 0);
+  const part = (r) => (Number(r.gross) || 0) * Math.min(100, Math.max(1, Number(r.share) || 100)) / 100;
+  const monthly = list.filter(r => r.active !== false).reduce((a, r) => a + part(r), 0);
   const saveRule = async (r) => {
     const rec = clean({ ...r, gross: r2(r.gross), day: Math.min(28, Math.max(1, Number(r.day) || 1)), updatedAt: new Date().toISOString() });
     try { await withTimeout(cols.recurring.put(rec.id, rec), 12000); patch('recurring', l => [...l.filter(x => x.id !== rec.id), rec]); return true; }
@@ -3161,8 +3168,8 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
       {!list.length && <div style={{ fontSize: 14, marginTop: 6 }}>שכירות, טלפון, ביטוח, רואה חשבון: מגדירים פעם אחת, וכל חודש ההוצאה נרשמת לבד ביום שלה.</div>}
       {open && list.map(r => (
         <div key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--line)', padding: '8px 0', opacity: r.active === false ? .5 : 1 }}>
-          <div style={{ flex: '1 1 180px' }}><b>{r.name}</b> <span style={{ color: 'var(--muted)', fontSize: 13 }}>· ב-{r.day} לחודש · {r.cat}{r.vatMode === 'none' ? ' · ללא מע״מ' : r.vatMode === 'car' ? ' · רכב 2/3' : ''}{r.active === false ? ' · מושהית' : ''}</span></div>
-          <b dir="ltr">{fmt(r.gross)}</b>
+          <div style={{ flex: '1 1 180px' }}><b>{r.name}</b> <span style={{ color: 'var(--muted)', fontSize: 13 }}>· ב-{r.day} לחודש · {r.cat}{r.vatMode === 'none' ? ' · ללא מע״מ' : r.vatMode === 'car' ? ' · רכב 2/3' : ''}{Number(r.share) > 0 && Number(r.share) < 100 ? ` · ${r.share}% לעסק מתוך ${fmt(r.gross)}` : ''}{r.active === false ? ' · מושהית' : ''}</span></div>
+          <b dir="ltr">{fmt(part(r))}</b>
           <button className="mg-btn ghost sm" onClick={() => setEdit(r)}>✎</button>
           <button className="mg-btn ghost sm" onClick={() => saveRule({ ...r, active: r.active === false })}>{r.active === false ? 'הפעל' : 'השהה'}</button>
           <button className="mg-btn ghost sm" onClick={() => del(r)}>🗑</button>
@@ -3174,6 +3181,7 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
           <Field label="שם"><input value={edit.name} onChange={e => setEdit(x => ({ ...x, name: e.target.value, cat: x.cat === 'אחר' ? recCat(e.target.value) : x.cat }))} placeholder="שכירות קליניקה" /></Field>
           <Field label="סכום לחודש כולל מע״מ (₪)"><input inputMode="decimal" value={edit.gross} onChange={e => setEdit(x => ({ ...x, gross: e.target.value }))} /></Field>
           <Field label="יום בחודש"><input inputMode="numeric" value={edit.day} onChange={e => setEdit(x => ({ ...x, day: e.target.value }))} /></Field>
+          <Field label="חלק העסק (%)"><input inputMode="decimal" value={edit.share ?? 100} onChange={e => setEdit(x => ({ ...x, share: e.target.value }))} /></Field>
           <Field label="קטגוריה"><select value={edit.cat} onChange={e => setEdit(x => ({ ...x, cat: e.target.value }))}>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
           <Field label="ספק"><select value={edit.supplierId || ''} onChange={e => setEdit(x => ({ ...x, supplierId: e.target.value }))}>
             <option value="">— ללא —</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
@@ -3183,7 +3191,7 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
           <Field label="מחודש"><input type="month" value={edit.from || thisMonth()} onChange={e => setEdit(x => ({ ...x, from: e.target.value, lastMonth: '' }))} /></Field>
           <Field label="עד חודש (לא חובה)"><input type="month" value={edit.until || ''} onChange={e => setEdit(x => ({ ...x, until: e.target.value }))} /></Field>
         </div>
-        <div className="mg-note" style={{ marginTop: 10, fontSize: 13 }}>ההוצאה נרשמת לבד כל חודש ביום שנקבע, כשפותחים את העסק. אם "מחודש" הוא חודש שעבר, החודשים שעברו יירשמו מיד (עד שנה אחורה).</div>
+        <div className="mg-note" style={{ marginTop: 10, fontSize: 13 }}>קליניקה בתוך הבית: רושמים את הסכום המלא ואת חלק העסק (למשל 25%), ונרשם רק החלק של העסק. ההוצאה נרשמת לבד כל חודש ביום שנקבע, כשפותחים את העסק. אם "מחודש" הוא חודש שעבר, החודשים שעברו יירשמו מיד (עד שנה אחורה).</div>
       </Box>}
       {paste !== null && <Box title="הדבקת רשימת הוצאות קבועות" onClose={() => setPaste(null)} wide
                     footer={<><button className="mg-btn" disabled={!parsed.some(x => x.ok)} onClick={addParsed}>הוסף {parsed.filter(x => x.ok).length} הוצאות</button>
@@ -3193,8 +3201,8 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
         <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={7} style={{ width: '100%' }} placeholder="הדבק או הקלד כאן…" autoFocus />
         {parsed.length > 0 && <div style={{ marginTop: 10 }}>{parsed.map((x, i) => (
           <div key={i} style={{ display: 'flex', gap: 8, padding: '4px 0', borderBottom: '1px dashed var(--line)', color: x.ok ? undefined : 'var(--bad)', fontSize: 14 }}>
-            <span style={{ flex: 1 }}>{x.ok ? '✓' : '✗'} <b>{x.name}</b> · ב-{x.day} לחודש · {x.cat}{x.vatMode === 'none' ? ' · ללא מע״מ' : x.vatMode === 'car' ? ' · רכב' : ''}</span>
-            <b dir="ltr">{x.ok ? fmt(x.gross) : 'חסר סכום'}</b></div>))}</div>}
+            <span style={{ flex: 1 }}>{x.ok ? '✓' : '✗'} <b>{x.name}</b> · ב-{x.day} לחודש · {x.cat}{x.vatMode === 'none' ? ' · ללא מע״מ' : x.vatMode === 'car' ? ' · רכב' : ''}{x.share < 100 ? ` · ${x.share}% לעסק מתוך ${fmt(x.gross)}` : ''}</span>
+            <b dir="ltr">{x.ok ? fmt(x.gross * x.share / 100) : 'חסר סכום'}</b></div>))}</div>}
       </Box>}
     </div>
   );
