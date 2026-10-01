@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.23.2';
+const VERSION = '1.24.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1045,6 +1045,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.24.0', date: '01.10.26', items: ['הוצאה קבועה משוערת (למשל ספק חומרי גלם בממוצע ₪5,000): כל חודש נרשמת הערכה "לבדיקה". כשהחשבונית בפועל מגיעה במייל, היא מחליפה את ההערכה במקום להיכפל. אפשר גם לעדכן את הסכום ידנית.'] },
   { v: '1.23.2', date: '01.10.26', items: ['נייד צר: כרטיסים ברשות המסים ובמסכים נוספים כבר לא נחתכים בצד. שום כרטיס לא רחב מהמסך.'] },
   { v: '1.23.1', date: '01.10.26', items: ['הוצאות קבועות: "חלק העסק (%)" להוצאות של קליניקה בתוך הבית (שכירות, ארנונה, חשמל, מים). רושמים את הסכום המלא, ונרשם רק החלק של העסק. בהדבקה: "ארנונה, 1100, 1, 25%".'] },
   { v: '1.23.0', date: '01.10.26', items: [
@@ -2646,6 +2647,13 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
                       gross: g.gross ? String(g.gross) : '', docNo: g.docNo || '', pay: PAY_METHODS[0],
                       ...(g.vatMode ? { vatMode: g.vatMode } : {}), ...(g.vatManual ? { vatManual: String(g.vatManual) } : {}),
                       file: { inboxId: it.id, name: it.name, mime: it.mime } };
+          /* This month's estimate from the same supplier (a fixed expense marked as an estimate) is replaced, not doubled. */
+          const tok = (x) => nameToks(x).filter(t => t.length > 2);
+          const est = (data.expenses || []).find(e => e.estimate && String(e.date || '').slice(0, 7) === String(f.date).slice(0, 7) && (
+            (sup && e.supplierId === sup.id) || tok(e.desc).some(t => tok(it.fromName || '').includes(t) || tok(sup?.name || '').includes(t))));
+          if (est) { setEdit({ kind: 'expense', rec: { ...est, ...f, id: est.id, recurring: est.recurring, supplierId: f.supplierId || est.supplierId, cat: est.cat, desc: est.desc, estimate: true,
+                                                         gross: f.gross || String(est.gross) },
+                               init: { f: {}, read: !!(g.gross || g.date || g.docNo), replaces: est }, inboxId: it.id }); return; }
           setEdit({ kind: 'expense', rec: null, init: { f, read: !!(g.gross || g.date || g.docNo), foreign: g.foreign || '', newSup: sup ? '' : (it.fromName || ''), supTax: g.taxId || '', supEmail: it.from || '' }, inboxId: it.id });
         }} />}
       {sub === 'expenses' && <ExpenseList outgo={ledger.outgo} supName={supName} onFile={openExpFile}
@@ -3082,6 +3090,7 @@ const recCat = (t) => {
   const s = String(t || '');
   const hit = EXP_CATS.find(c => s.includes(c) || c.split(' ')[0] && s.includes(c.split(' ')[0]));
   if (hit) return hit;
+  if (/צמח|חומרי גלם|חומר גלם|מלאי|פורמול|תמצית|שמנים/.test(s)) return 'מלאי וחומרי גלם';
   if (/שכיר|ארנונה|חשמל|מים|ועד/.test(s)) return 'שכירות';
   if (/טלפון|סלולר|אינטרנט|מנוי|תוכנ|זום|גוגל|anthropic|claude|adobe|canva/i.test(s)) return 'תוכנה ומנויים';
   if (/ביטוח/.test(s)) return 'ביטוח';
@@ -3109,7 +3118,9 @@ function parseRecurring(text) {
     const vatMode = /ללא מע|פטור|חו["״]?ל|abroad/i.test(line) ? 'none' : /רכב|דלק|ליסינג/.test(line) ? 'car' : 'full';
     const catTxt = line.split(/[,;|\t]/).slice(3).join(' ');
     const cat = catTxt && recCat(catTxt) !== 'אחר' ? recCat(catTxt) : recCat(line);
-    return { name, gross: amount, day: restDay, cat, vatMode, share, ok: amount > 0 };
+    /* "ממוצע", "משוער", "הערכה": an estimate, replaced by the real invoice when it comes. */
+    const estimate = /ממוצע|משוער|הערכה|בערך|כ-?\s*\d/.test(line);
+    return { name: name.replace(/\s*(ממוצע|משוער|הערכה|בערך)\s*/g, ' ').trim() || name, gross: amount, day: restDay, cat, vatMode, share, estimate, ok: amount > 0 };
   });
 }
 function recVat(gross, mode, rate) { return rate === 0 ? 0 : mode === 'full' ? vatOf(gross, rate) : mode === 'car' ? r2(vatOf(gross, rate) * 2 / 3) : 0; }
@@ -3133,9 +3144,10 @@ function recExpense(r, month, rate) {
   const day = String(Math.min(28, Math.max(1, Number(r.day) || 1))).padStart(2, '0');
   const share = Math.min(100, Math.max(1, Number(r.share) || 100));
   const gross = r2(Number(r.gross) * share / 100);
-  return clean({ id: `rec_${r.id}_${month}`, date: `${month}-${day}`, desc: r.name + (share < 100 ? ` (${share}% לעסק)` : ''), cat: r.cat || 'אחר', supplierId: r.supplierId || '',
+  return clean({ id: `rec_${r.id}_${month}`, date: `${month}-${day}`, desc: r.name + (share < 100 ? ` (${share}% לעסק)` : '') + (r.estimate ? ' (הערכה)' : ''), cat: r.cat || 'אחר', supplierId: r.supplierId || '',
                  pay: r.pay || 'הוראת קבע', gross, vatMode: r.vatMode || 'full', vatManual: '', vat: recVat(gross, r.vatMode || 'full', rate),
-                 docNo: '', recurring: r.id, src: 'recurring', createdAt: new Date().toISOString() });
+                 docNo: '', recurring: r.id, src: 'recurring', createdAt: new Date().toISOString(),
+                 ...(r.estimate ? { estimate: true, review: true } : {}) });
 }
 
 function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
@@ -3171,7 +3183,7 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
       {!list.length && <div style={{ fontSize: 14, marginTop: 6 }}>שכירות, טלפון, ביטוח, רואה חשבון: מגדירים פעם אחת, וכל חודש ההוצאה נרשמת לבד ביום שלה.</div>}
       {open && list.map(r => (
         <div key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--line)', padding: '8px 0', opacity: r.active === false ? .5 : 1 }}>
-          <div style={{ flex: '1 1 180px' }}><b>{r.name}</b> <span style={{ color: 'var(--muted)', fontSize: 13 }}>· ב-{r.day} לחודש · {r.cat}{r.vatMode === 'none' ? ' · ללא מע״מ' : r.vatMode === 'car' ? ' · רכב 2/3' : ''}{Number(r.share) > 0 && Number(r.share) < 100 ? ` · ${r.share}% לעסק מתוך ${fmt(r.gross)}` : ''}{r.active === false ? ' · מושהית' : ''}</span></div>
+          <div style={{ flex: '1 1 180px' }}><b>{r.name}</b> <span style={{ color: 'var(--muted)', fontSize: 13 }}>· ב-{r.day} לחודש · {r.cat}{r.vatMode === 'none' ? ' · ללא מע״מ' : r.vatMode === 'car' ? ' · רכב 2/3' : ''}{Number(r.share) > 0 && Number(r.share) < 100 ? ` · ${r.share}% לעסק מתוך ${fmt(r.gross)}` : ''}{r.estimate ? ' · משוער' : ''}{r.active === false ? ' · מושהית' : ''}</span></div>
           <b dir="ltr">{fmt(part(r))}</b>
           <button className="mg-btn ghost sm" onClick={() => setEdit(r)}>✎</button>
           <button className="mg-btn ghost sm" onClick={() => saveRule({ ...r, active: r.active === false })}>{r.active === false ? 'הפעל' : 'השהה'}</button>
@@ -3185,6 +3197,9 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
           <Field label="סכום לחודש כולל מע״מ (₪)"><input inputMode="decimal" value={edit.gross} onChange={e => setEdit(x => ({ ...x, gross: e.target.value }))} /></Field>
           <Field label="יום בחודש"><input inputMode="numeric" value={edit.day} onChange={e => setEdit(x => ({ ...x, day: e.target.value }))} /></Field>
           <Field label="חלק העסק (%)"><input inputMode="decimal" value={edit.share ?? 100} onChange={e => setEdit(x => ({ ...x, share: e.target.value }))} /></Field>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, gridColumn: '1 / -1' }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={!!edit.estimate} onChange={e => setEdit(x => ({ ...x, estimate: e.target.checked }))} />
+            סכום משוער (ממוצע). כל חודש נרשמת הערכה "לבדיקה", והחשבונית בפועל מחליפה אותה.</label>
           <Field label="קטגוריה"><select value={edit.cat} onChange={e => setEdit(x => ({ ...x, cat: e.target.value }))}>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
           <Field label="ספק"><select value={edit.supplierId || ''} onChange={e => setEdit(x => ({ ...x, supplierId: e.target.value }))}>
             <option value="">— ללא —</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
@@ -3204,7 +3219,7 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
         <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={7} style={{ width: '100%' }} placeholder="הדבק או הקלד כאן…" autoFocus />
         {parsed.length > 0 && <div style={{ marginTop: 10 }}>{parsed.map((x, i) => (
           <div key={i} style={{ display: 'flex', gap: 8, padding: '4px 0', borderBottom: '1px dashed var(--line)', color: x.ok ? undefined : 'var(--bad)', fontSize: 14 }}>
-            <span style={{ flex: 1 }}>{x.ok ? '✓' : '✗'} <b>{x.name}</b> · ב-{x.day} לחודש · {x.cat}{x.vatMode === 'none' ? ' · ללא מע״מ' : x.vatMode === 'car' ? ' · רכב' : ''}{x.share < 100 ? ` · ${x.share}% לעסק מתוך ${fmt(x.gross)}` : ''}</span>
+            <span style={{ flex: 1 }}>{x.ok ? '✓' : '✗'} <b>{x.name}</b> · ב-{x.day} לחודש · {x.cat}{x.vatMode === 'none' ? ' · ללא מע״מ' : x.vatMode === 'car' ? ' · רכב' : ''}{x.share < 100 ? ` · ${x.share}% לעסק מתוך ${fmt(x.gross)}` : ''}{x.estimate ? ' · משוער' : ''}</span>
             <b dir="ltr">{x.ok ? fmt(x.gross * x.share / 100) : 'חסר סכום'}</b></div>))}</div>}
       </Box>}
     </div>
@@ -3280,8 +3295,9 @@ function ExpenseForm({ rec, init, rate, suppliers, onSave, onClose, onNewSupplie
   return (
     <Box title={rec ? 'עריכת הוצאה' : init ? 'רישום חשבונית שהגיעה במייל' : 'הוצאה חדשה'} onClose={onClose} wide
          footer={<><button className="mg-btn" disabled={!ok}
-                           onClick={() => onSave({ ...f, gross: g, vat, desc: String(f.desc).trim(), hasDoc: !!f.docNo || !!f.hasDoc || !!f.file, review: false })}>שמור</button>
+                           onClick={() => onSave({ ...f, gross: g, vat, desc: f.estimate ? String(f.desc).replace(/\s*\(הערכה\)/, '').trim() : String(f.desc).trim(), hasDoc: !!f.docNo || !!f.hasDoc || !!f.file, review: false, estimate: false })}>שמור</button>
                    <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      {init?.replaces && <div className="mg-note warn" style={{ marginBottom: 8 }}>החשבונית מחליפה את ההערכה של החודש ({fmt(init.replaces.gross)}). בדוק את הסכום בפועל ושמור.</div>}
       {init && <div className="mg-note" style={{ marginBottom: 12 }}>
         {init.read ? <>מה שנקרא מהקובץ כבר מולא. <b>בדוק את הסכום, המע״מ והתאריך</b> לפני השמירה.</> : <>לא הצלחתי לקרוא טקסט מהקובץ (למשל תמונה או סריקה). מלא את הסכום לפי החשבונית.</>}
         {init.foreign && <div style={{ marginTop: 6, color: 'var(--warn)', fontWeight: 700 }}>⚠ החשבונית ב-{init.foreign}. הסכום שנקרא ({init.f.gross}) אינו בשקלים: הזן את הסכום בשקלים כפי שחויב בכרטיס. מע״מ: ללא (ספק מחו״ל).</div>}
