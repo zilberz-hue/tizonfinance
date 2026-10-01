@@ -422,6 +422,9 @@ function donePage({ pay, book, cancel }) {
   } else if (pay.status === "paid") {
     head = "\u05D4\u05EA\u05E9\u05DC\u05D5\u05DD \u05D4\u05EA\u05E7\u05D1\u05DC, \u05EA\u05D5\u05D3\u05D4!";
     body = `${esc(pay.docNo ? (LABEL[pay.docType] || "\u05D4\u05DE\u05E1\u05DE\u05DA") + " " + pay.docNo : "\u05D4\u05DE\u05E1\u05DE\u05DA")} ${pay.customer?.email ? `\u05E0\u05E9\u05DC\u05D7\u05D4 \u05DC\u05DB\u05EA\u05D5\u05D1\u05EA ${esc(pay.customer.email)}` : "\u05D4\u05D5\u05E4\u05E7\u05D4"}.`;
+  } else if (pay.status === "open" && pay.upReport) {
+    head = "\u05D4\u05EA\u05E9\u05DC\u05D5\u05DD \u05D4\u05EA\u05E7\u05D1\u05DC, \u05EA\u05D5\u05D3\u05D4!";
+    body = "\u05D4\u05D7\u05E9\u05D1\u05D5\u05E0\u05D9\u05EA \u05EA\u05D9\u05E9\u05DC\u05D7 \u05D0\u05DC\u05D9\u05DA \u05D1\u05E7\u05E8\u05D5\u05D1.";
   } else if (pay.status === "open") {
     head = "\u05DE\u05E2\u05D3\u05DB\u05E0\u05D9\u05DD \u05D0\u05EA \u05D4\u05EA\u05E9\u05DC\u05D5\u05DD\u2026";
     body = "\u05E8\u05E7 \u05E8\u05D2\u05E2, \u05D4\u05D3\u05E3 \u05D9\u05EA\u05E2\u05D3\u05DB\u05DF \u05DC\u05D1\u05D3.";
@@ -1175,7 +1178,7 @@ async function mayUseStore(email, tenant, idToken) {
 }
 var upCredsOf = async (book) => {
   const v = await secrets().get("up:" + book, { type: "json" }).catch(() => null);
-  return v && v.email && v.key ? { email: v.email, key: v.key } : null;
+  return v && v.email ? { email: v.email, key: v.key || "" } : null;
 };
 var zcKeyOf = async (book) => (await secrets().get("zc:" + book, { type: "json" }).catch(() => null))?.key || "";
 var baseOf = (url) => env("URL") || url.origin;
@@ -1284,7 +1287,7 @@ var books_mail_default = async (req) => {
       const pay = await db.get(`books/${b}/payreqs/${p}`);
       if (!pay || !k || pay.linkKey !== k) return html(404, donePage({}));
       const book = await db.get(`books/${b}`);
-      if (pay.status !== "open") return html(200, donePage({ pay, book }));
+      if (pay.status !== "open" || pay.upReport) return html(200, donePage({ pay, book }));
       const up = pay.provider === "upay";
       const key = up ? null : await zcKeyOf(b);
       const ucreds = up ? await upCredsOf(b) : null;
@@ -1293,6 +1296,23 @@ var books_mail_default = async (req) => {
       if (!secret) {
         secret = token(24);
         await secrets().set(`pay:${b}:${p}`, secret);
+      }
+      if (up && !ucreds.key) {
+        /* No API key: uPay's own payment form (the "payment button" every
+           account has), with this page's sum, posted for the customer. */
+        const fnb = `${baseOf(url)}/.netlify/functions/books-mail`;
+        const backU = `${fnb}?${new URLSearchParams({ action: "pay-up", b, p, t: secret })}`;
+        const fields = { email: ucreds.email, amount: r2(pay.total).toFixed(2), returnurl: backU, ipnurl: backU + "&ipn=1",
+          paymentdetails: upDesc({ ...pay, id: p }), productdescription: upDesc({ ...pay, id: p }),
+          maxpayments: String(Math.max(1, Math.min(36, Number(pay.maxPayments) || 1))), livesystem: "1", commissionreduction: "",
+          createinvoiceandreceipt: "0", createinvoice: "0", createreceipt: "0", refername: "UPAY", lang: "HE", currency: "NIS" };
+        const escA = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+        await db.update(`books/${b}/payreqs/${p}`, { openedAt: (/* @__PURE__ */ new Date()).toISOString(), opens: (Number(pay.opens) || 0) + 1 }).catch(() => {
+        });
+        return html(200, `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>\u05DE\u05E2\u05D1\u05E8 \u05DC\u05EA\u05E9\u05DC\u05D5\u05DD</title></head>
+<body style="font-family:Assistant,Arial,sans-serif;text-align:center;padding:60px 20px;background:#f7f3ea;color:#6e4d22"><h2>\u05E2\u05D5\u05D1\u05E8\u05D9\u05DD \u05DC\u05E2\u05DE\u05D5\u05D3 \u05D4\u05EA\u05E9\u05DC\u05D5\u05DD \u05D4\u05DE\u05D0\u05D5\u05D1\u05D8\u05D7\u2026</h2>
+<form id="f" action="https://app.upay.co.il/API6/clientsecure/redirectpage.php" method="post">${Object.entries(fields).map(([n, v]) => `<input type="hidden" name="${escA(n)}" value="${escA(v)}">`).join("")}<noscript><button type="submit">\u05DC\u05D4\u05DE\u05E9\u05DA</button></noscript></form>
+<script>document.getElementById('f').submit();</script></body></html>`);
       }
       if (up) {
         let su;
@@ -1338,6 +1358,23 @@ var books_mail_default = async (req) => {
       if (!pay) return done(true);
       if (pay.status === "paid") return done(false);
       const ucreds = await upCredsOf(b);
+      if (ucreds && !ucreds.key) {
+        /* Nothing to ask uPay with: the report is kept on the page, the owner
+           is told, and the invoice waits for their confirmation. */
+        if (!pay.upReport) {
+          const amt = Number(q.amount);
+          await db.update(`books/${b}/payreqs/${p}`, { upReport: { trx, amount: Number.isFinite(amt) ? r2(amt) : null, at: (/* @__PURE__ */ new Date()).toISOString() } }).catch(() => {
+          });
+          await (mailOverride || mailReady() ? sendMail : null)?.({
+            to: pay.createdBy,
+            subject: `Tizon Books \xB7 \u05D9\u05D5\u05E4\u05D9\u05D9 \u05D3\u05D9\u05D5\u05D5\u05D7 \u05E2\u05DC \u05EA\u05E9\u05DC\u05D5\u05DD \xB7 ${pay.customer?.name || ""}`,
+            text: `\u05D9\u05D5\u05E4\u05D9\u05D9 \u05D3\u05D9\u05D5\u05D5\u05D7 \u05E2\u05DC \u05EA\u05E9\u05DC\u05D5\u05DD \u05D1\u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4 \u05E9\u05DC ${pay.customer?.name || ""} (${money(pay.total)}, \u05E2\u05E1\u05E7\u05D4 ${trx}).
+\u05DC\u05D1\u05D3\u05D5\u05E7 \u05D1\u05DE\u05DE\u05E9\u05E7 \u05E9\u05DC \u05D9\u05D5\u05E4\u05D9\u05D9, \u05D5\u05D0\u05D6 \u05D1-Tizon Books \u05DC\u05DC\u05D7\u05D5\u05E5 "\u05D0\u05D9\u05E9\u05D5\u05E8 \u05D5\u05D4\u05E4\u05E7\u05EA \u05D7\u05E9\u05D1\u05D5\u05E0\u05D9\u05EA" \u05DC\u05D9\u05D3 \u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4.`
+          }).catch(() => {
+          });
+        }
+        return done(false);
+      }
       const cbBody = ucreds ? await upVerify({ creds: ucreds, pay, trx, fetchImpl: fetchOverride || fetch }).catch(() => null) : null;
       if (!cbBody) {
         await db.update(`books/${b}/payreqs/${p}`, { lastError: { at: (/* @__PURE__ */ new Date()).toISOString(), body: `uPay ${trx}: not confirmed` } }).catch(() => {
@@ -1568,7 +1605,7 @@ var books_mail_default = async (req) => {
       adminCache = null;
       return json(200, { ok: true, project: j.project_id, account: j.client_email });
     }
-    if (["pay-create", "pay-status", "zc-key", "up-key"].includes(body.action)) {
+    if (["pay-create", "pay-status", "zc-key", "up-key", "pay-confirm"].includes(body.action)) {
       const db = await adminDb();
       const bookId = String(body.book || "");
       const book = /^[\w-]{1,80}$/.test(bookId) ? await db.get(`books/${bookId}`) : null;
@@ -1577,7 +1614,7 @@ var books_mail_default = async (req) => {
       if (body.action === "pay-status") {
         if (!role) return json(403, { error: "role" });
         const uc = await upCredsOf(bookId);
-        return json(200, { admin: true, zcredit: !!await zcKeyOf(bookId), upay: !!uc, upayEmail: uc ? uc.email : "", mail: mailReady() || !!mailOverride, sign: (await signState()).sign });
+        return json(200, { admin: true, zcredit: !!await zcKeyOf(bookId), upay: !!uc, upayEmail: uc ? uc.email : "", upayKey: !!(uc && uc.key), mail: mailReady() || !!mailOverride, sign: (await signState()).sign });
       }
       if (body.action === "zc-key") {
         if (role !== "owner") return json(403, { error: "owners only" });
@@ -1597,9 +1634,27 @@ var books_mail_default = async (req) => {
           await secrets().delete("up:" + bookId);
           return json(200, { ok: true, upay: false });
         }
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em) || key.length < 6 || key.length > 300) return json(400, { error: "key" });
-        await secrets().setJSON("up:" + bookId, { email: em, key, by: email, at: (/* @__PURE__ */ new Date()).toISOString() });
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em) || key && (key.length < 6 || key.length > 300)) return json(400, { error: "key" });
+        const old = key ? null : await secrets().get("up:" + bookId, { type: "json" }).catch(() => null);
+        await secrets().setJSON("up:" + bookId, { email: em, key: key || old?.key || "", by: email, at: (/* @__PURE__ */ new Date()).toISOString() });
         return json(200, { ok: true, upay: true });
+      }
+      if (body.action === "pay-confirm") {
+        /* The business saw the payment in uPay's own screen and confirms it:
+           the same issuing as a confirmed payment, by the same path. */
+        if (!["owner", "clerk"].includes(role)) return json(403, { error: "role" });
+        const pid = String(body.pay || "");
+        const pr = /^[\w-]{1,80}$/.test(pid) ? await db.get(`books/${bookId}/payreqs/${pid}`) : null;
+        if (!pr) return json(404, { error: "no-page" });
+        if (pr.status !== "open") return json(400, { error: "status" });
+        let kept = await secrets().get(`pay:${bookId}:${pid}`).catch(() => null);
+        if (!kept) { kept = token(24); await secrets().set(`pay:${bookId}:${pid}`, kept); }
+        const r = await handleCallback({ bookId, payId: pid, secret: kept, body: { UniqueID: pid, ReferenceNumber: String(pr.upReport?.trx || body.ref || "manual"), Total: pr.total } }, {
+          db, secretOf: (bb, pp) => secrets().get(`pay:${bb}:${pp}`).catch(() => null),
+          pdf: (bk, d, o) => docPdf(bk, d, o), sign: (await signState()).sign ? (pdf, info) => signPdf(pdf, info) : null,
+          mail: mailOverride || mailReady() ? sendMail : null, ita: null, version: VERSION
+        });
+        return json(r.status || 200, r);
       }
       if (!["owner", "clerk"].includes(role)) return json(403, { error: "role" });
       const provider = body.provider === "upay" ? "upay" : "zcredit";

@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.27.0';
+const VERSION = '1.28.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1047,6 +1047,10 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.28.0', date: '01.10.26', items: [
+    'יופיי בלי מפתח API: מספיק האימייל של חשבון יופיי. הלקוח משלם בטופס של יופיי עם הסכום של הדף.',
+    'כשיופיי מדווח שהתשלום עבר מקבלים מייל, ובדפי הסליקה מופיע "אישור והפקת חשבונית": לחיצה אחת מפיקה ושולחת אותה.',
+    'מפתח API של יופיי נשאר רשות: מי שמוסיף אותו מקבל חשבונית אוטומטית אחרי בדיקה מול יופיי.'] },
   { v: '1.27.0', date: '01.10.26', items: [
     'דפי סליקה גם דרך יופיי (uPay): בגיבוי וענן ← דפי סליקה מזינים אימייל חשבון יופיי ומפתח API לכל עסק.',
     'כשמוגדרים גם זד קרדיט וגם יופיי, בוחרים בכל דף סליקה דרך מי. כל תשלום ביופיי נבדק מול יופיי לפני שהחשבונית מופקת ונשלחת.'] },
@@ -1278,7 +1282,7 @@ const TOURS = {
     { t: 'set-store', title: 'החנות', text: 'חיבור לקריאה בלבד: הזמנות ששולמו ומספרי חשבוניות.', since: '1.1.0' },
     { t: 'set-store', title: 'חיבור קבוע', text: 'מתחברים לחנות פעם אחת, והחיבור עובד בכל המכשירים דרך השרת. הסיסמה לא נשמרת.', since: '1.11.0' },
     { t: 'set-ita', title: 'רשות המסים', text: 'מתחברים פעם בשלושה חודשים, ומספרי ההקצאה מתבקשים אוטומטית.', since: '1.7.0' },
-    { t: 'set-pay', title: 'דפי סליקה', text: 'מפתח השירות של Firebase, ולכל עסק מפתח זד קרדיט ו/או פרטי יופיי (אימייל ומפתח API). מגדירים פעם אחת, ומאז החשבונית יוצאת לבד אחרי כל תשלום.', since: '1.27.0' },
+    { t: 'set-pay', title: 'דפי סליקה', text: 'מפתח השירות של Firebase, ולכל עסק מפתח זד קרדיט ו/או אימייל חשבון יופיי. מגדירים פעם אחת. בזד קרדיט החשבונית יוצאת לבד; ביופיי בלי מפתח מאשרים בלחיצה.', since: '1.28.0' },
     { t: 'set-pin', title: 'נעילה בקוד', text: 'קוד לפתיחת המערכת, אותו קוד בכל המכשירים. ננעל לבד אחרי 15 דקות בלי פעילות.', since: '1.7.0' },
     { t: 'set-archive', title: 'ארכיון חודשי', text: 'קבצי מבנה אחיד וגיבוי לכל חודש, במקום אחד.', since: '1.7.0' },
   ],
@@ -6398,6 +6402,16 @@ function PayList({ book, list, onCancel, onRefresh, flash, ro }) {
   const sorted = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const shown = all ? sorted : sorted.filter(p => p.status === 'open' || p.status === 'mismatch' || Date.now() - Date.parse(p.paidAt || p.createdAt) < 3 * 86400000).slice(0, 20);
   const open = list.filter(p => p.status === 'open').length;
+  const [busy, setBusy] = useState('');
+  /* uPay without a key: its report waits here for the business's word. */
+  const confirm = async (p) => {
+    if (!window.confirm(`לאשר שהתשלום של ${p.customer?.name || ''} (${fmt(p.total)}) נראה במסוף של יופיי, ולהפיק ולשלוח את החשבונית?`)) return;
+    setBusy(p.id);
+    try { const r = await fnCall({ action: 'pay-confirm', book: book.id, pay: p.id });
+          flash(r.ok === false ? 'לא הופקה · ' + (r.error === 'amount' ? 'הסכום לא תואם' : r.error) : 'החשבונית הופקה ונשלחה'); onRefresh(); }
+    catch (e) { flash('האישור נכשל · ' + e.message); }
+    setBusy('');
+  };
   /* While something is waiting to be paid, look again now and then. */
   useEffect(() => {
     if (!open) return;
@@ -6420,8 +6434,10 @@ function PayList({ book, list, onCancel, onRefresh, flash, ro }) {
             <td><b>{p.customer?.name}</b>{p.opens ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>נפתח {p.opens} פעמים</div> : null}</td>
             <td>{fmt(p.total)}{p.maxPayments > 1 ? <span style={{ fontSize: 12, color: 'var(--muted)' }}> · עד {p.maxPayments} תש׳</span> : ''}</td>
             <td><span className={'mg-chip ' + tone}>{lb}{p.status === 'paid' && p.docNo ? ` · ${DOC_TYPES[p.docType]?.short || ''} ${p.docNo}` : ''}</span>
+              {p.status === 'open' && p.upReport && <div className="mg-chip warn" style={{ marginTop: 4 }}>יופיי דיווח: שולם{p.upReport.amount != null && Math.abs(p.upReport.amount - p.total) > 0.011 ? ` (${fmt(p.upReport.amount)})` : ''}</div>}
               {(p.extraPayments || []).length > 0 && <div className="mg-chip bad" style={{ marginTop: 4 }}>שולם פעמיים · לזכות</div>}</td>
-            <td style={{ whiteSpace: 'nowrap' }}>{p.status === 'open' && <>
+            <td style={{ whiteSpace: 'nowrap' }}>{p.status === 'open' && p.upReport && !ro && <><button className="mg-btn sm" disabled={busy === p.id} onClick={() => confirm(p)}>אישור והפקת חשבונית</button>{' '}</>}
+              {p.status === 'open' && <>
               <button className="mg-btn ghost sm keep" onClick={() => { navigator.clipboard?.writeText(p.link); flash('הקישור הועתק'); }}>קישור</button>{' '}
               <a className="mg-btn ghost sm keep" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone(p.customer?.phone)}?text=${encodeURIComponent(payText(book, p))}`}>וואטסאפ</a>{' '}
               {!ro && <button className="mg-btn ghost sm" onClick={() => onCancel(p)}>בטל</button>}</>}</td>
@@ -6443,7 +6459,7 @@ function PayCard({ server, books, user, flash, onServer }) {
     const u = ups[b.id] || {};
     try { await fnCall({ action: 'up-key', book: b.id, email: clear ? '' : (u.email || st[b.id]?.upayEmail || ''), key: clear ? '' : u.key || '' });
           setUps(x => ({ ...x, [b.id]: {} })); flash(clear ? 'פרטי יופיי הוסרו' : 'פרטי יופיי נשמרו'); load(); }
-    catch (e) { flash('השמירה נכשלה · ' + (e.message === 'key' ? 'צריך אימייל תקין ומפתח API' : e.message)); }
+    catch (e) { flash('השמירה נכשלה · ' + (e.message === 'key' ? 'צריך אימייל תקין (ומפתח, אם יש, של 6 תווים לפחות)' : e.message)); }
     setBusy('');
   };
   const load = () => mine.forEach(b => fnCall({ action: 'pay-status', book: b.id }).then(r => setSt(x => ({ ...x, [b.id]: r }))).catch(() => {}));
@@ -6485,16 +6501,16 @@ function PayCard({ server, books, user, flash, onServer }) {
             </div>))}
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid #f0ebe0' }}>
             <b>3. יופיי (uPay) לכל עסק · רשות</b>
-            <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.7 }}>האימייל של חשבון יופיי ומפתח API מיופיי. כל תשלום נבדק מול יופיי לפני שהחשבונית מופקת. כשמוגדרים גם זד קרדיט וגם יופיי, בוחרים בכל דף סליקה דרך מי.</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.7 }}>מספיק האימייל של חשבון יופיי. הלקוח משלם בטופס של יופיי עם הסכום של הדף; כשיופיי מדווח שהתשלום עבר, מקבלים מייל, ובלחיצה על "אישור והפקת חשבונית" ליד דף הסליקה היא מופקת ונשלחת. מי שיש לו גם מפתח API מיופיי (לא חובה) יכול להוסיף אותו, ואז החשבונית מופקת לבד אחרי בדיקה מול יופיי. כשמוגדרים גם זד קרדיט וגם יופיי, בוחרים בכל דף סליקה דרך מי.</div>
             {!admin ? <div className="mg-empty">קודם מעלים את מפתח השירות.</div> : mine.map(b => (
               <div key={b.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', flexWrap: 'wrap' }}>
                 <b style={{ minWidth: 110 }}>{b.name}</b>
-                {st[b.id]?.upay ? <span className="mg-chip ok">מוגדר · {st[b.id].upayEmail}</span> : <span className="mg-chip">לא מוגדר</span>}
+                {st[b.id]?.upay ? <span className="mg-chip ok">מוגדר · {st[b.id].upayEmail}{st[b.id].upayKey ? ' · עם מפתח' : ''}</span> : <span className="mg-chip">לא מוגדר</span>}
                 <input dir="ltr" type="email" autoComplete="off" style={{ flex: 1, minWidth: 150 }} placeholder="אימייל חשבון יופיי"
                        value={ups[b.id]?.email ?? ''} onChange={e => setUps(x => ({ ...x, [b.id]: { ...(x[b.id] || {}), email: e.target.value } }))} />
-                <input dir="ltr" type="text" autoComplete="off" spellCheck={false} style={{ flex: 1, minWidth: 150, WebkitTextSecurity: 'disc' }} placeholder={st[b.id]?.upay ? 'מפתח חדש להחלפה' : 'מפתח API'}
+                <input dir="ltr" type="text" autoComplete="off" spellCheck={false} style={{ flex: 1, minWidth: 150, WebkitTextSecurity: 'disc' }} placeholder={st[b.id]?.upayKey ? 'מפתח חדש להחלפה' : 'מפתח API (לא חובה)'}
                        value={ups[b.id]?.key || ''} onChange={e => setUps(x => ({ ...x, [b.id]: { ...(x[b.id] || {}), key: e.target.value } }))} />
-                <button className="mg-btn sm" disabled={busy === 'up:' + b.id || (ups[b.id]?.key || '').trim().length < 6 || !/@/.test(ups[b.id]?.email || st[b.id]?.upayEmail || '')} onClick={() => saveUp(b)}>שמור</button>
+                <button className="mg-btn sm" disabled={busy === 'up:' + b.id || !(ups[b.id]?.email || (ups[b.id]?.key || '').trim()) || !/@/.test(ups[b.id]?.email || st[b.id]?.upayEmail || '')} onClick={() => saveUp(b)}>שמור</button>
                 {st[b.id]?.upay && <button className="mg-btn ghost sm" disabled={busy === 'up:' + b.id} onClick={() => saveUp(b, true)}>הסר</button>}
               </div>))}
           </div>
