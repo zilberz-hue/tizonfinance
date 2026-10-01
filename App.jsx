@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.23.1';
+const VERSION = '1.23.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -654,7 +654,7 @@ input:focus,select:focus{border-color:var(--gold)}
 .mg-tabs{display:flex;gap:6px;flex-wrap:wrap}
 .mg-tab{background:#fff;border:1.5px solid var(--line);border-radius:999px;padding:7px 15px;cursor:pointer;font-weight:600;color:var(--muted)}
 .mg-tab.on{background:var(--gold);border-color:var(--gold);color:#fff}
-.mg-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.mg-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr));gap:12px}
 .mg-stat{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--gold);border-radius:16px;padding:16px 18px}
 .mg-stat:nth-child(4n+2){border-top-color:#2b4bb8}.mg-stat:nth-child(4n+3){border-top-color:#d9822b}.mg-stat:nth-child(4n+4){border-top-color:var(--green2)}
 .mg-stat .lb{font-size:13px;font-weight:700;color:var(--muted)}
@@ -782,7 +782,7 @@ input:focus,select:focus{border-color:var(--gold)}
   .mg-h{padding:18px 20px}.mg-h h2{font-size:26px}
   .mg-tabs.book-tabs{flex-wrap:nowrap;overflow-x:auto;margin-inline:-4px;padding:2px 4px 6px}
   .mg-tab{font-size:15.5px;padding:9px 16px;flex-shrink:0}
-  .mg-stats{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .mg-stats{grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr))}
   .mg-stat .vl{font-size:clamp(22px,2.6vw,28px)}
   .mg-stat .lb{font-size:14px}
   .mg-tbl th{font-size:14px}.mg-tbl td{font-size:15.5px;padding:11px 12px}
@@ -916,6 +916,8 @@ input:focus,select:focus{border-color:var(--gold)}
   .mg-h > div:first-child{flex:1;min-width:0}
 }
 @media print{.fab,.fab-back{display:none}}
+
+@media (max-width:820px){[data-tour=ledger-kind]{flex-wrap:wrap !important;overflow:visible !important;margin-inline:0 !important;padding-inline:0 !important}}
 `;
 
 /* ===================================================================== ui */
@@ -931,7 +933,7 @@ function Box({ title, onClose, children, footer, wide }) {
     </div>
   );
 }
-const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 };
+const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(180px,100%),1fr))', gap: 12 };
 const row = { display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' };
 
 /* ================================================================== login */
@@ -1043,6 +1045,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.23.2', date: '01.10.26', items: ['נייד צר: כרטיסים ברשות המסים ובמסכים נוספים כבר לא נחתכים בצד. שום כרטיס לא רחב מהמסך.'] },
   { v: '1.23.1', date: '01.10.26', items: ['הוצאות קבועות: "חלק העסק (%)" להוצאות של קליניקה בתוך הבית (שכירות, ארנונה, חשמל, מים). רושמים את הסכום המלא, ונרשם רק החלק של העסק. בהדבקה: "ארנונה, 1100, 1, 25%".'] },
   { v: '1.23.0', date: '01.10.26', items: [
     'הוצאות קבועות (בלשונית הוצאות): שכירות, טלפון, ביטוח, רואה חשבון וכו׳. מגדירים פעם אחת, וכל חודש ההוצאה נרשמת לבד ביום שלה, עם מע״מ לקיזוז, ונכנסת לרווח והפסד, למע״מ ולצפי המס.',
@@ -1395,7 +1398,7 @@ function HelpView({ role, clerkOnly, onStart, flash }) {
       <div className="mg-h" style={{ '--h1': '#8a6331', '--h2': '#c4a36e' }}>
         <div><h2>מדריך</h2><div className="sub">גרסה {VERSION} · סיור לכל מסך, ומה השתנה בכל גרסה</div></div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(320px,100%),1fr))', gap: 16 }}>
         <div data-tour="help-list" className="mg-card">
           <h3 style={{ marginTop: 0 }}>ההדרכות</h3>
           <table className="mg-tbl"><tbody>
@@ -2150,7 +2153,7 @@ function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreCha
         <div><h2>גיבוי וענן</h2><div className="sub">גרסה {VERSION} · {cloud ? `מחובר לענן · ${cloud.cfg.projectId}` : 'הנתונים נשמרים במחשב הזה'}</div></div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(320px,100%),1fr))', gap: 16 }}>
         <div data-tour="set-backup" className="mg-card">
           <h3 style={{ marginTop: 0 }}>גיבוי</h3>
           <p style={{ marginTop: 0 }}>קובץ אחד עם כל העסקים וכל הרשומות. אפשר לשחזר ממנו בכל מחשב, גם אחרי מעבר לענן.</p>
@@ -2353,7 +2356,7 @@ function AllView({ books, datas, loading, onOpen, onStoreLogin }) {
         <tfoot><tr><td colSpan={2}>סה״כ</td><td>{fmt(sum('incNet'))}</td><td>{fmt(sum('expNet'))}</td><td>{fmt(sum('profit'))}</td><td>{fmt(sum('vatDue'))}</td><td></td></tr></tfoot>
       </table></div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 16, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(320px,100%),1fr))', gap: 16, marginBottom: 16 }}>
         <div data-tour="all-vat" className="mg-card">
           <h3 style={{ marginTop: 0 }}>מע״מ לפי עוסק · {label}</h3>
           {Object.values(vatGroups).map((g, i) => (
@@ -3644,7 +3647,7 @@ function TaxForecast({ book, rows, onLoad, compact }) {
         </>}
         <L l="סה״כ" v={f.total} b c="var(--green)" />
       </div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10, marginTop: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(170px,100%),1fr))', gap: 10, marginTop: 12 }}>
         {!company && <Field label="נקודות זיכוי"><input inputMode="decimal" value={prof.points ?? 2.25} onChange={e => save({ points: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>}
         <Field label={`מקדמות ששולמו ב-${y}`}><input inputMode="decimal" value={prof.adv?.[advKey] ?? ''} placeholder="0" onChange={e => save({ adv: { ...(prof.adv || {}), [advKey]: e.target.value } })} /></Field>
         {!company && <Field label="ניכויים בשנה (פנסיה, השתלמות)"><input inputMode="decimal" value={prof.deduct ?? ''} placeholder="0" onChange={e => save({ deduct: e.target.value })} /></Field>}
@@ -3692,7 +3695,7 @@ function PnlTab({ totals, supName, book, taxRows, onLoadSiblings }) {
           ...t.exp.map(e => ['הוצאה', e.date, e.desc, e.cat, supName(e.supplierId) || e.supplierName || '', e.docNo, e.pay, r2(e.gross - e.vat), e.vat, e.gross]),
         ])}>⬇ כל התנועות לרואה החשבון</button>
       </div>
-      <div data-tour="pnl-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 16 }}>
+      <div data-tour="pnl-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(300px,100%),1fr))', gap: 16 }}>
         <div className="mg-card">
           <h3 style={{ marginTop: 0 }}>תמצית · {monthName(from)} עד {monthName(to)}</h3>
           <Line l="הכנסות (לפני מע״מ)" v={t.incNet} color="var(--green2)" />
@@ -4410,7 +4413,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
       {T.pay && <>
         <h4 style={{ margin: '16px 0 6px' }}>תשלומים</h4>
         {pays.map((p, i) => (
-          <div key={i} style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', marginBottom: 8 }}>
+          <div key={i} style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(min(130px,100%),1fr))', marginBottom: 8 }}>
             <Field label="אמצעי"><select value={p.kind} onChange={e => setPay(i, 'kind', e.target.value)}>{PAY_KINDS.map(k => <option key={k}>{k}</option>)}</select></Field>
             <Field label="סכום"><input inputMode="decimal" value={p.amount} onChange={e => setPay(i, 'amount', e.target.value)} /></Field>
             <Field label="תאריך"><input type="date" value={p.date} onChange={e => setPay(i, 'date', e.target.value)} /></Field>
@@ -4731,7 +4734,7 @@ function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 16 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(340px,100%),1fr))', gap: 16 }}>
       <div data-tour="tax-export" className="mg-card">
         <h3 style={{ marginTop: 0 }}>ייצוא קבצים במבנה אחיד</h3>
         <p style={{ marginTop: 0 }}>INI.TXT ו-BKMVDATA.TXT לפי הוראה 1.31, בתיקיית OPENFRMT. זה הקובץ שמבקר מס מבקש, והקובץ שנבדק בסימולטור לרישום התוכנה.</p>
@@ -5312,7 +5315,7 @@ function CustomerImport({ list, col, flash, onDone, onClose }) {
       {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
       {rows && <>
         <h4 style={{ margin: '16px 0 6px' }}>איזו עמודה היא מה</h4>
-        <div style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
+        <div style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(min(150px,100%),1fr))' }}>
           {CUST_FIELDS.map(k => (
             <Field key={k} label={CUST_LABELS[k] + (k === 'name' ? ' *' : '')}>
               <select value={map[k] ?? ''} onChange={e => setMap(m => ({ ...m, [k]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
@@ -6381,7 +6384,7 @@ function ItemImport({ list, col, rate, flash, onDone, onClose }) {
       {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
       {rows && <>
         <h4 style={{ margin: '16px 0 6px' }}>איזו עמודה היא מה</h4>
-        <div style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
+        <div style={{ ...grid, gridTemplateColumns: 'repeat(auto-fit,minmax(min(150px,100%),1fr))' }}>
           {ITEM_FIELDS.map(k => (
             <Field key={k} label={ITEM_LABELS[k] + (k === 'name' ? ' *' : '')}>
               <select value={map[k] ?? ''} onChange={e => setMap(m => ({ ...m, [k]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
