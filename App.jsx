@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.30.0';
+const VERSION = '1.30.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -933,6 +933,38 @@ input:focus,select:focus{border-color:var(--gold)}
   .tab-group{display:block;font-size:12px;color:var(--muted);font-weight:800;padding:12px 12px 4px;letter-spacing:.02em;border-top:1px solid #f0ebe0;margin-top:6px}
   .book-main{min-width:0}
 }
+
+/* The side bar, compact: a small logo, icons, and a fold to a narrow strip (computers). */
+.brand{display:flex !important;align-items:center;gap:8px;text-align:right !important;padding:2px 6px 10px !important}
+.brand img.full{display:none !important}
+.brand img.mark{display:block !important;width:34px !important;height:34px !important;flex-shrink:0}
+.brand-t{flex:1;min-width:0;line-height:1.15}
+.brand-t b{display:block;font-size:16px;color:#6e4d22}
+.brand-t small{display:block !important;font-size:11.5px !important;color:var(--gold);font-weight:700;margin:0 !important}
+.side-fold{border:1px solid var(--line);background:#fff;border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--muted);font-size:15px;line-height:1;flex-shrink:0}
+.side-fold:hover{color:var(--ink);border-color:var(--gold)}
+.side .ic{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px}
+.side .bk-ini{border-radius:50%;color:#fff;font-weight:800;font-size:13px}
+.side .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side .foot-a{display:flex;gap:10px;flex-wrap:wrap;margin:4px 0}
+.side .foot-a button{text-decoration:none !important}
+@media (min-width:821px){
+  .side{width:212px !important;padding:12px 8px !important;position:sticky;top:0;height:100vh;overflow-y:auto;transition:width .18s}
+  .side button.bk{padding:8px 8px !important;font-size:15px !important;gap:8px}
+  .side .sec{padding:10px 8px 2px !important}
+  .side.mini{width:62px !important;padding:12px 6px !important}
+  .side.mini .lbl,.side.mini .brand-t,.side.mini .sec{display:none !important}
+  .side.mini .brand{flex-direction:column;padding:2px 0 10px !important}
+  .side.mini button.bk{justify-content:center;padding:8px 0 !important}
+  .side.mini .foot{padding:8px 0}
+  .side.mini .foot-a{flex-direction:column;align-items:center}
+}
+@media (max-width:820px){.side-fold{display:none}}
+
+@media (min-width:821px){
+  .help-btn{right:auto !important;left:26px !important;bottom:96px !important;width:42px !important;height:42px !important;font-size:19px !important}
+  .brand-t b{font-size:15px;white-space:nowrap}
+}
 `;
 
 /* ===================================================================== ui */
@@ -1060,6 +1092,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.30.1', date: '01.10.26', items: ['במחשב: העמודה הימנית צרה וקומפקטית יותר, עם לוגו קטן, וכפתור » שמכווץ אותה לפס צר של אייקונים (העסקים כעיגולים עם האות הראשונה). המערכת זוכרת את הבחירה.'] },
   { v: '1.30.0', date: '01.10.26', items: [
     'במחשב: הלשוניות של העסק עברו לסרגל צד קבוע, בקבוצות: עבודה יומית, כספים, דוחות ומיסים. בנייד ובטאבלט הן נשארות למעלה.',
     'עריכת דף סליקה שעוד לא שולם (✎ ערוך): נוצר קישור חדש עם הפרטים המעודכנים, והקודם מבוטל.'] },
@@ -1526,6 +1559,10 @@ function App() {
   /* Guided tours: which screen is showing, and whether its tour should run. */
   const [bookTab, setBookTab] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
+  /* On a computer the side bar can fold to a narrow strip of icons; remembered on this device. */
+  const [mini, setMini] = useState(() => { try { return localStorage.getItem('tzbooks_side_mini') === '1'; } catch { return false; } });
+  const toggleMini = () => setMini(m => { try { localStorage.setItem('tzbooks_side_mini', m ? '0' : '1'); } catch {} return !m; });
+  const ini = (n) => String(n || '?').trim().replace(/^[^\p{L}\d]+/u, '').slice(0, 1) || '•';
   const [tabReq, setTabReq] = useState(null);
   const [tour, setTour] = useState(null);
   const [tourWant, setTourWant] = useState(null);
@@ -1739,30 +1776,37 @@ function App() {
         <img className="tb-mark" src={MARK} alt="Tizon" />
       </header>
       {navOpen && <div className="side-dim" onClick={() => setNavOpen(false)} />}
-      <aside className={'side' + (navOpen ? ' open' : '')} onClickCapture={e => { if (e.target.closest('button.bk')) setTimeout(() => setNavOpen(false), 0); }}>
-        <div className="brand"><img className="full" src={LOGO} alt="Tizon Health" /><img className="mark" src={MARK} alt="Tizon" /><small>Books · הנהלת חשבונות</small></div>
-        <button className={'bk' + (cur === 'all' ? ' on' : '')} onClick={() => setCur('all')}>
-          <span className="dot" style={{ background: 'var(--bronze2)' }} />כל העסקים</button>
+      <aside className={'side' + (navOpen ? ' open' : '') + (mini ? ' mini' : '')} onClickCapture={e => { if (e.target.closest('button.bk')) setTimeout(() => setNavOpen(false), 0); }}>
+        <div className="brand">
+          <img className="mark" src={MARK} alt="Tizon" />
+          <span className="brand-t"><b>Tizon Books</b><small>הנהלת חשבונות</small></span>
+          <button className="side-fold" onClick={toggleMini} title={mini ? 'הרחב את התפריט' : 'כווץ את התפריט'} aria-label={mini ? 'הרחב את התפריט' : 'כווץ את התפריט'}>{mini ? '«' : '»'}</button>
+        </div>
+        <button className={'bk' + (cur === 'all' ? ' on' : '')} onClick={() => setCur('all')} title="כל העסקים">
+          <span className="ic">▦</span><span className="lbl">כל העסקים</span></button>
         <div data-tour="side-books" className="sec">העסקים</div>
         {(books || []).map(b => (
-          <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '')} onClick={() => setCur(b.id)}>
-            <span className="dot" style={{ background: b.color || '#2f7d5b' }} />{b.name}
+          <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '')} onClick={() => setCur(b.id)} title={b.name}>
+            <span className="ic bk-ini" style={{ background: b.color || '#2f7d5b' }}>{ini(b.name)}</span><span className="lbl">{b.name}</span>
           </button>
         ))}
-        <button data-tour="side-new" className="bk" onClick={() => setBookForm({})} style={{ color: 'var(--gold)', fontWeight: 700 }}>＋ עסק חדש</button>
+        <button data-tour="side-new" className="bk" onClick={() => setBookForm({})} style={{ color: 'var(--gold)', fontWeight: 700 }} title="עסק חדש"><span className="ic">＋</span><span className="lbl">עסק חדש</span></button>
+        <div className="sec">כללי</div>
         {cloud && (books || []).some(b => roleOf(b, user.email) === 'owner') && (
-          <button data-tour="side-users" className={'bk' + (cur === 'users' ? ' on' : '')} onClick={() => setCur('users')}>
-            <span className="dot" style={{ background: '#2b4bb8' }} />משתמשים והרשאות</button>)}
-        <button data-tour="side-settings" className={'bk' + (cur === 'settings' ? ' on' : '')} onClick={() => setCur('settings')}>
-          <span className="dot" style={{ background: cloud ? '#4f9d6f' : '#d9822b' }} />גיבוי וענן</button>
-        <button data-tour="side-help" className={'bk' + (cur === 'help' ? ' on' : '')} onClick={() => setCur('help')}>
-          <span className="dot" style={{ background: 'var(--gold)' }} />מדריך</button>
+          <button data-tour="side-users" className={'bk' + (cur === 'users' ? ' on' : '')} onClick={() => setCur('users')} title="משתמשים והרשאות">
+            <span className="ic">👥</span><span className="lbl">משתמשים והרשאות</span></button>)}
+        <button data-tour="side-settings" className={'bk' + (cur === 'settings' ? ' on' : '')} onClick={() => setCur('settings')} title="גיבוי וענן">
+          <span className="ic">{cloud ? '☁️' : '💾'}</span><span className="lbl">גיבוי וענן</span></button>
+        <button data-tour="side-help" className={'bk' + (cur === 'help' ? ' on' : '')} onClick={() => setCur('help')} title="מדריך">
+          <span className="ic">📖</span><span className="lbl">מדריך</span></button>
         <div className="foot">
-          <small>{cloud ? user.email : 'נשמר במחשב הזה'}</small><br />
-          <button onClick={() => { setDatas({}); refreshBooks(); }}>רענון</button>
-          {cloud && <> · <button onClick={() => signOut(cloud.auth)}>יציאה</button></>}
-          {lsGet(PIN_KEY, null) && <> · <button onClick={() => { sessionStorage.removeItem(UNLOCK_KEY); setLocked(true); }}>נעל</button></>}
-          <br /><small style={{ opacity: .6 }}>גרסה {VERSION} · {BUILD_DATE}</small>
+          <small className="lbl">{cloud ? user.email : 'נשמר במחשב הזה'}</small>
+          <div className="foot-a">
+            <button onClick={() => { setDatas({}); refreshBooks(); }} title="רענון">↻<span className="lbl"> רענון</span></button>
+            {cloud && <button onClick={() => signOut(cloud.auth)} title="יציאה">⎋<span className="lbl"> יציאה</span></button>}
+            {lsGet(PIN_KEY, null) && <button onClick={() => { sessionStorage.removeItem(UNLOCK_KEY); setLocked(true); }} title="נעל">🔒<span className="lbl"> נעל</span></button>}
+          </div>
+          <small className="lbl" style={{ opacity: .6 }}>גרסה {VERSION}</small>
         </div>
       </aside>
 
