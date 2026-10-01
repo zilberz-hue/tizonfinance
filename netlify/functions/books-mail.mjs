@@ -1306,7 +1306,11 @@ var books_mail_default = async (req) => {
         const fnb = `${baseOf(url)}/.netlify/functions/books-mail`;
         const backU = `${fnb}?${new URLSearchParams({ action: "pay-up", b, p, t: secret })}`;
         const fields = { email: ucreds.email, amount: r2(pay.total).toFixed(2), returnurl: backU, ipnurl: backU + "&ipn=1",
-          paymentdetails: upDesc({ ...pay, id: p }), productdescription: upDesc({ ...pay, id: p }),
+          /* As uPay's own plugin posts this form: the customer's email and
+             mobile, a short comment, and no productdescription (an API field). */
+          ...(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(pay.customer?.email || "")) ? { emailnotify: pay.customer.email } : {}),
+          ...(/^(05|\+9725)/.test(String(pay.customer?.phone || "").replace(/[^\d+]/g, "")) ? { cellphonenotify: String(pay.customer.phone).replace(/[^\d+]/g, "") } : {}),
+          comment: p, paymentdetails: upDesc({ ...pay, id: p }),
           maxpayments: String(Math.max(1, Math.min(36, Number(pay.maxPayments) || 1))), livesystem: "1", commissionreduction: "",
           createinvoiceandreceipt: "0", createinvoice: "0", createreceipt: "0", refername: "UPAY", lang: "HE", currency: "NIS" };
         const escA = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);

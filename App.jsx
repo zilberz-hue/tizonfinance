@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.28.1';
+const VERSION = '1.28.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1047,6 +1047,8 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.28.2', date: '01.10.26', items: [
+    'יופיי: טופס התשלום נשלח כמו בתוסף הרשמי של יופיי, עם האימייל והנייד של הלקוח, כך שהם כבר ממולאים בעמוד התשלום.'] },
   { v: '1.28.1', date: '01.10.26', items: [
     'יופיי: התיאור שנשלח לעמוד התשלום הוא שורה אחת בלי מרכאות. שורות נפרדות שיבשו את כפתור התשלום בעמוד של יופיי.'] },
   { v: '1.28.0', date: '01.10.26', items: [
