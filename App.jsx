@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.24.2';
+const VERSION = '1.25.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1045,6 +1045,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.25.0', date: '01.10.26', items: ['הוצאות קבועות מתחילת השנה: כפתור "📅 השלם מתחילת השנה" רושם את כל החודשים מינואר, ובהדבקת רשימה אפשר לבחור "מתחילת השנה". חודש שכבר נרשם לא נרשם שוב.'] },
   { v: '1.24.2', date: '01.10.26', items: ['צפי המס: מס הכנסה וביטוח לאומי (כולל מס בריאות) בנפרד, כל אחד עם המקדמות שלו, כמה להפריש לחודש וכמה נותר לשלם.'] },
   { v: '1.24.1', date: '01.10.26', items: ['הדבקת הוצאות קבועות: שם כמו "מילניום" כבר לא נחתך.'] },
   { v: '1.24.0', date: '01.10.26', items: ['הוצאה קבועה משוערת (למשל ספק חומרי גלם בממוצע ₪5,000): כל חודש נרשמת הערכה "לבדיקה". כשהחשבונית בפועל מגיעה במייל, היא מחליפה את ההערכה במקום להיכפל. אפשר גם לעדכן את הסכום ידנית.'] },
@@ -2448,6 +2449,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const [quickDoc, setQuickDoc] = useState(null);
   /* Fixed expenses due by today are recorded (owners only; each month's id is fixed, so never twice). */
   const recRunning = useRef(false);
+  const [recTick, setRecTick] = useState(0);
   useEffect(() => {
     if (role !== 'owner' || recRunning.current || !(data.recurring || []).length) return;
     const due = recurringDue(data.recurring);
@@ -2464,8 +2466,10 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       }
       if (n) flash(`נרשמו ${n} הוצאות קבועות`);
       recRunning.current = false;
+      /* Rules changed while this ran (a whole year filled at once): look again. */
+      if (n) setRecTick(t => t + 1);
     })();
-  }, [data.recurring, role]);
+  }, [data.recurring, role, recTick]);
   /* Income tax is per person: every business under the same tax id counts together. */
   const taxRows = useMemo(() => {
     const y = todayIso().slice(0, 4), to = thisMonth();
@@ -3171,10 +3175,20 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
     try { await cols.recurring.del(r.id); patch('recurring', l => l.filter(x => x.id !== r.id)); } catch { flash('המחיקה נכשלה'); }
   };
   const parsed = paste !== null ? parseRecurring(paste) : [];
+  const yearStart = todayIso().slice(0, 4) + '-01';
+  const [pasteFrom, setPasteFrom] = useState(thisMonth());
   const addParsed = async () => {
     const good = parsed.filter(x => x.ok); let n = 0;
-    for (const x of good) if (await saveRule({ id: uid('rec'), ...x, from: thisMonth(), active: true, pay: 'הוראת קבע' })) n++;
-    flash(`נוספו ${n} הוצאות קבועות. החודש נרשם לבד בכל אחת, ביום שלה.`); setPaste(null);
+    for (const x of good) if (await saveRule({ id: uid('rec'), ...x, from: pasteFrom || thisMonth(), active: true, pay: 'הוראת קבע' })) n++;
+    flash(pasteFrom < thisMonth() ? `נוספו ${n} הוצאות קבועות, ונרשמות עכשיו מ-${monthName(pasteFrom)}.` : `נוספו ${n} הוצאות קבועות. החודש נרשם לבד בכל אחת, ביום שלה.`); setPaste(null);
+  };
+  /* Back to January: every active fixed expense is recorded for each month of the year so far (a month already there is kept, not doubled). */
+  const fillYear = async () => {
+    const act = list.filter(r => r.active !== false && (r.from || thisMonth()) > yearStart);
+    if (!act.length) { flash('כל ההוצאות הקבועות כבר רשומות מתחילת השנה'); return; }
+    if (!window.confirm(`לרשום ${act.length} הוצאות קבועות לכל חודש מינואר ${yearStart.slice(0, 4)} ועד היום? חודש שכבר נרשם לא יירשם שוב.`)) return;
+    let n = 0; for (const r of act) if (await saveRule({ ...r, from: yearStart, lastMonth: '' })) n++;
+    flash(`${n} הוצאות קבועות מתעדכנות מינואר. זה לוקח כמה שניות.`);
   };
   return (
     <div data-tour="exp-recurring" className="mg-card" style={{ marginBottom: 14, padding: 14 }}>
@@ -3183,6 +3197,7 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
         {list.length > 0 && <button className="mg-btn ghost sm" onClick={() => setOpen(o => !o)}>{open ? 'הסתר' : 'הצג'}</button>}
         <button className="mg-btn ghost sm" onClick={() => setEdit({ id: uid('rec'), name: '', gross: '', day: 1, cat: 'אחר', vatMode: rate > 0 ? 'full' : 'none', pay: 'הוראת קבע', from: thisMonth(), active: true })}>＋ הוספה</button>
         <button className="mg-btn ghost sm" onClick={() => setPaste('')}>📋 הדבקת רשימה</button>
+        {list.some(r => r.active !== false && (r.from || thisMonth()) > yearStart) && <button className="mg-btn ghost sm" onClick={fillYear}>📅 השלם מתחילת השנה</button>}
       </div>
       {!list.length && <div style={{ fontSize: 14, marginTop: 6 }}>שכירות, טלפון, ביטוח, רואה חשבון: מגדירים פעם אחת, וכל חודש ההוצאה נרשמת לבד ביום שלה.</div>}
       {open && list.map(r => (
@@ -3221,6 +3236,11 @@ function RecurringCard({ book, data, rate, cols, patch, flash, suppliers }) {
         <div style={{ fontSize: 14, marginBottom: 6 }}>שורה לכל הוצאה: <b>שם, סכום, יום בחודש</b>. למשל:</div>
         <div dir="rtl" style={{ fontSize: 13, color: 'var(--muted)', background: 'var(--soft)', borderRadius: 8, padding: '6px 10px', marginBottom: 8, whiteSpace: 'pre-line' }}>{'שכירות קליניקה, 4500, 1\nטלפון סלולרי, 89, 10\nביטוח מקצועי, 250, 15\nרואה חשבון, 590, 5\nClaude מנוי, 75, 20, ללא מע״מ'}</div>
         <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={7} style={{ width: '100%' }} placeholder="הדבק או הקלד כאן…" autoFocus />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap', marginTop: 8 }}>
+          <Field label="לרשום החל מחודש"><input type="month" value={pasteFrom} onChange={e => setPasteFrom(e.target.value || thisMonth())} /></Field>
+          <button type="button" className={'mg-btn sm' + (pasteFrom === yearStart ? '' : ' ghost')} onClick={() => setPasteFrom(yearStart)}>מתחילת השנה</button>
+          <button type="button" className={'mg-btn sm' + (pasteFrom === thisMonth() ? '' : ' ghost')} onClick={() => setPasteFrom(thisMonth())}>מהחודש</button>
+        </div>
         {parsed.length > 0 && <div style={{ marginTop: 10 }}>{parsed.map((x, i) => (
           <div key={i} style={{ display: 'flex', gap: 8, padding: '4px 0', borderBottom: '1px dashed var(--line)', color: x.ok ? undefined : 'var(--bad)', fontSize: 14 }}>
             <span style={{ flex: 1 }}>{x.ok ? '✓' : '✗'} <b>{x.name}</b> · ב-{x.day} לחודש · {x.cat}{x.vatMode === 'none' ? ' · ללא מע״מ' : x.vatMode === 'car' ? ' · רכב' : ''}{x.share < 100 ? ` · ${x.share}% לעסק מתוך ${fmt(x.gross)}` : ''}{x.estimate ? ' · משוער' : ''}</span>
