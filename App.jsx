@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.25.0';
+const VERSION = '1.26.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -918,6 +918,8 @@ input:focus,select:focus{border-color:var(--gold)}
 @media print{.fab,.fab-back{display:none}}
 
 @media (max-width:820px){[data-tour=ledger-kind]{flex-wrap:wrap !important;overflow:visible !important;margin-inline:0 !important;padding-inline:0 !important}}
+
+@media (max-width:640px){.mg-tbl.has-labels td.stack{flex-direction:column;align-items:flex-start;gap:4px}.mg-tbl.has-labels td.stack::before{display:none}}
 `;
 
 /* ===================================================================== ui */
@@ -1045,6 +1047,10 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.26.0', date: '01.10.26', items: [
+    'לשונית "לתשלום": בכל תקופה (חודשית או דו-חודשית) כמה מגיע לרשויות. מע״מ (עסקאות פחות תשומות), מקדמת מס הכנסה (מחזור × השיעור מההודעה) וביטוח לאומי. כל העסקים באותו מספר עוסק נספרים יחד.',
+    'השוואה לרואה החשבון: מזינים את הסכומים שהוא שלח, ורואים ✓ תואם או ⚠ הפרש, עם הסבר על הסיבות הנפוצות להפרש. הדפסה וייצוא.',
+    'בכל סוף תקופה: התראה בסקירה, והדוח נכלל במייל הארכיון החודשי.'] },
   { v: '1.25.0', date: '01.10.26', items: ['הוצאות קבועות מתחילת השנה: כפתור "📅 השלם מתחילת השנה" רושם את כל החודשים מינואר, ובהדבקת רשימה אפשר לבחור "מתחילת השנה". חודש שכבר נרשם לא נרשם שוב.'] },
   { v: '1.24.2', date: '01.10.26', items: ['צפי המס: מס הכנסה וביטוח לאומי (כולל מס בריאות) בנפרד, כל אחד עם המקדמות שלו, כמה להפריש לחודש וכמה נותר לשלם.'] },
   { v: '1.24.1', date: '01.10.26', items: ['הדבקת הוצאות קבועות: שם כמו "מילניום" כבר לא נחתך.'] },
@@ -1151,7 +1157,7 @@ const CHANGES = [
 
 const TOUR_CTX = {
   welcome: 'התחלה', all: 'כל העסקים', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
-  expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pnl: 'רווח והפסד', tax: 'רשות המסים',
+  expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', pnl: 'רווח והפסד', tax: 'רשות המסים',
   items: 'פריטים', ledger: 'כרטסת', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
 const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'import'];
@@ -1242,6 +1248,9 @@ const TOURS = {
   vat: [
     { t: 'vat-period', title: 'תקופת הדיווח', text: 'חודשי או דו-חודשי, ובחירת התקופה. מכאן גם יוצא הדוח לרואה החשבון.', since: '1.0.0' },
     { t: 'vat-stats', title: 'לדיווח', text: 'עסקאות, מע״מ עסקאות, תשומות ומע״מ לתשלום. אלה המספרים שממלאים בדיווח.', since: '1.0.0' },
+  ],
+  pay: [
+    { t: 'pay-auth', title: 'לתשלום לרשויות', text: 'כמה מגיע למע״מ, למס הכנסה ולביטוח לאומי בכל תקופה, וההשוואה מול מה שרואה החשבון שלח.', since: '1.26.0' },
   ],
   pnl: [
     { t: 'tax-forecast', title: 'צפי מס הכנסה', text: 'כמה מס הכנסה, ביטוח לאומי ומס בריאות צפויים השנה לפי הרווח עד עכשיו, כמה להפריש כל חודש, וכמה נותר אחרי מקדמות. הערכה בלבד.', since: '1.22.0' },
@@ -2601,7 +2610,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   };
 
   const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
-    ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ...(ro ? [] : [['import', 'ייבוא']])]
+    ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ...(ro ? [] : [['import', 'ייבוא']])]
     .filter(([k]) => !clerk || ['docs', 'customers', 'items'].includes(k));
 
   return (
@@ -2642,6 +2651,12 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       </div>
 
       {sub === 'dash' && <Dash totals={tot} rate={rate} alerts={alerts} onSub={setSub} linked={!!book.tenant}
+                               payNote={role === 'owner' && Number(todayIso().slice(8, 10)) <= 20 ? (() => {
+                                 const tid = digitsOf(book.taxId) || book.id, prof = lsGet(TAX_PROFILE_KEY, {}) || {}, freq = prof.freq?.[tid] || 'bi';
+                                 const p = lastPeriod(freq); if (p.end !== addMonths(thisMonth(), -1)) return null;
+                                 const r = authReport([{ book, data }, ...siblings], p, prof, tid);
+                                 return <div className="mg-note warn" style={{ marginBottom: 14, cursor: 'pointer' }} onClick={() => setSub('pay')}>
+                                   🧾 <b>לתשלום לרשויות · {periodLabel(p)}:</b> {r.lines.map(l => `${l.label} ${fmt(l.amount)}`).join(' · ')}. סה״כ <b>{fmt(r.total)}</b>, עד {dueOf(p)}. לחץ להשוואה מול רואה החשבון.</div>; })() : null}
                                taxTile={role === 'owner' ? <div role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => setSub('pnl')}><TaxForecast compact book={book} rows={taxRows} /></div> : null} />}
       {sub === 'income' && <IncomeList income={ledger.income} linked={!!book.tenant} onDoc={ro ? null : () => openDoc()} onManual={role === 'owner' ? () => setEdit({ kind: 'income', rec: null }) : null}
         onEdit={(r) => setEdit({ kind: 'income', rec: r })} onDel={(r) => remove('incomes', r.id, 'ההכנסה')} />}
@@ -2670,6 +2685,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         onSave={(r) => save('banktx', r)} onDel={(r) => remove('banktx', r.id, 'השורה')}
         onBulk={async (recs) => { let ok = 0; for (const r of recs) if (await save('banktx', r)) ok++; return ok; }} />}
       {sub === 'vat' && <VatTab totals={tot} rate={rate} book={book} />}
+      {sub === 'pay' && <AuthPayTab book={book} rows={[{ book, data }, ...siblings]} onLoad={onLoadSiblings} flash={flash} />}
       {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} taxRows={role === 'owner' ? taxRows : null} onLoadSiblings={onLoadSiblings} />}
       {sub === 'docs' && <DocsTab quick={quickDoc} book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
@@ -2703,7 +2719,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
 }
 
 /* ------------------------------------------------------------------- סקירה */
-function Dash({ totals, rate, alerts, onSub, linked, taxTile }) {
+function Dash({ totals, rate, alerts, onSub, linked, taxTile, payNote }) {
   const [month, setMonth] = useState(thisMonth());
   const t = totals(month, month);
   const year = month.slice(0, 4);
@@ -2716,6 +2732,7 @@ function Dash({ totals, rate, alerts, onSub, linked, taxTile }) {
 
   return (
     <>
+      {payNote}
       <div data-tour="dash-month" style={{ ...row, marginBottom: 14 }}>
         <Field label="חודש"><input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} /></Field>
       </div>
@@ -3698,6 +3715,125 @@ function TaxForecast({ book, rows, onLoad, compact }) {
       </div>
       <div className="mg-note" style={{ marginTop: 10, fontSize: 13 }}>
         הערכה בלבד, לפי מדרגות {TAX.year} ליחיד {company ? '' : 'ושיעורי ביטוח לאומי לעצמאי'}. לא כולל הכנסות אחרות (משכורת, שכר דירה), זיכויים מיוחדים או הוצאות שלא נרשמו כאן. המספר הסופי נקבע בדוח השנתי מול רואה החשבון.
+      </div>
+    </div>
+  );
+}
+
+/* ============================================== payments to the authorities */
+/* What a period should cost: VAT (sales less purchases), the income tax
+   advance (turnover × the rate on the Tax Authority's notice) and Bituach
+   Leumi's monthly advance, for every business under one tax id. Each line can
+   be checked against what the accountant sent. Rates not entered yet are
+   estimated from the year's forecast, and say so. */
+const nMonths = (a, b) => { const [y1, m1] = a.split('-').map(Number), [y2, m2] = b.split('-').map(Number); return (y2 - y1) * 12 + (m2 - m1) + 1; };
+function periodOf(freq, ym) { const s = freq === 'month' ? ym : biStart(ym); return { start: s, end: freq === 'month' ? s : addMonths(s, 1) }; }
+/* The last period that has ended. */
+function lastPeriod(freq, today = thisMonth()) { const cur = periodOf(freq, today); return periodOf(freq, addMonths(cur.start, -1)); }
+function authReport(rows, period, prof, tid) {
+  const sum = { incNet: 0, incVat: 0, incGross: 0, expNet: 0, expVat: 0, vatBooks: 0, ytdProfit: 0, ytdTurn: 0, books: [] };
+  const y = period.end.slice(0, 4), ytdTo = period.end < thisMonth() ? period.end : thisMonth();
+  for (const { book, data } of rows) {
+    if (!data || data.histPending) { sum.books.push({ name: book.name, ready: false }); continue; }
+    const L = buildLedger(book, data), t = totals(L, period.start, period.end), ytd = totals(L, `${y}-01`, ytdTo);
+    sum.incNet += t.incNet; sum.incVat += t.incVat; sum.incGross += t.incGross; sum.expNet += t.expNet; sum.expVat += t.expVat;
+    if (L.rate > 0) sum.vatBooks++;
+    sum.ytdProfit += ytd.profit; sum.ytdTurn += ytd.incNet; sum.books.push({ name: book.name, ready: true });
+  }
+  const months = nMonths(period.start, period.end);
+  const company = isCompanyId(tid);
+  /* The year so far, carried to a full year, for estimates. */
+  const share = Math.max(0.08, Math.min(1, ytdTo === thisMonth() ? yearShare() : nMonths(`${y}-01`, ytdTo) / 12));
+  const f = taxForecast(sum.ytdProfit / share, { points: prof.points ?? 2.25, other: Number(prof.deduct) || 0, company });
+  const rateIn = Number(prof.advRate?.[tid]);
+  const estRate = sum.ytdTurn > 0 ? f.tax / (sum.ytdTurn / share) : 0;
+  const advRate = rateIn > 0 ? rateIn / 100 : estRate;
+  const blIn = Number(prof.blMonthly?.[tid]);
+  const blMonth = company ? 0 : blIn > 0 ? blIn : (f.ni + f.health) / 12;
+  const lines = [
+    sum.vatBooks ? { k: 'vat', label: 'מע״מ', amount: r2(sum.incVat - sum.expVat), to: 'רשות המסים (מע״מ)',
+      detail: `עסקאות ${fmt(sum.incNet)} · מע״מ עסקאות ${fmt(sum.incVat)} · מע״מ תשומות ${fmt(sum.expVat)}` } : null,
+    { k: 'tax', label: company ? 'מקדמת מס חברות' : 'מקדמת מס הכנסה', amount: r2(Math.max(0, sum.incNet) * advRate), to: 'מס הכנסה', est: !(rateIn > 0),
+      detail: `מחזור ${fmt(sum.incNet)} × ${(advRate * 100).toFixed(1)}%${rateIn > 0 ? ' (מהודעת מס הכנסה)' : ' (הערכה לפי צפי המס: הזן את השיעור מהפנקס)'}` },
+    company ? null : { k: 'bl', label: 'ביטוח לאומי + מס בריאות', amount: r2(blMonth * months), to: 'ביטוח לאומי', est: !(blIn > 0),
+      detail: `${fmt(blMonth)} לחודש × ${months}${blIn > 0 ? ' (מהודעת ביטוח לאומי)' : ' (הערכה לפי צפי המס: הזן את המקדמה החודשית)'}` },
+  ].filter(Boolean);
+  return { period, months, lines, total: r2(lines.reduce((a, l) => a + l.amount, 0)), books: sum.books, partial: sum.books.some(b => !b.ready) };
+}
+const periodLabel = (p) => p.start === p.end ? monthName(p.start) : `${monthName(p.start)}–${monthName(p.end)}`;
+const dueOf = (p) => { const n = addMonths(p.end, 1); return `15/${n.slice(5, 7)}/${n.slice(0, 4)}`; };
+
+function AuthPayTab({ book, rows, onLoad, flash }) {
+  const tid = digitsOf(book.taxId) || book.id;
+  const [prof, setProf] = useState(() => lsGet(TAX_PROFILE_KEY, {}) || {});
+  const save = (o) => { const n = { ...prof, ...o }; setProf(n); try { lsSet(TAX_PROFILE_KEY, n); } catch {} };
+  const freq = prof.freq?.[tid] || 'bi';
+  const [ym, setYm] = useState(() => lastPeriod(freq).start);
+  useEffect(() => { onLoad?.(); }, []);
+  const period = periodOf(freq, ym);
+  const rep = authReport(rows, period, prof, tid);
+  const pk = `${tid}:${period.start}:${period.end}`;
+  const acct = prof.acct?.[pk] || {};
+  const setAcct = (k, v) => save({ acct: { ...(prof.acct || {}), [pk]: { ...acct, [k]: v } } });
+  const diffOf = (l) => acct[l.k] === undefined || acct[l.k] === '' ? null : r2(Number(acct[l.k]) - l.amount);
+  const ended = period.end < thisMonth();
+  const csv = () => downloadCSV(`payments-${book.name}-${period.start}_${period.end}.csv`, [
+    ['תשלומים לרשויות', periodLabel(period), book.legalName || book.name, book.taxId || ''], [],
+    ['תשלום', 'לפי המערכת', 'לפי רו״ח', 'הפרש', 'פירוט'],
+    ...rep.lines.map(l => [l.label, l.amount, acct[l.k] ?? '', diffOf(l) ?? '', l.detail]), ['סה״כ', rep.total]]);
+  const print = () => printHTML(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>תשלומים לרשויות</title>
+    <style>body{font-family:Arial;padding:28px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:8px;text-align:right}th{background:#f3efe6}.n{direction:ltr;text-align:left}</style></head><body>
+    <h2>תשלומים לרשויות · ${periodLabel(period)}</h2><div>${book.legalName || book.name} · ${book.taxId || ''} · לתשלום עד ${dueOf(period)} (בדרך כלל)</div><br>
+    <table><tr><th>תשלום</th><th>לפי המערכת</th><th>לפי רו״ח</th><th>הפרש</th><th>פירוט</th></tr>
+    ${rep.lines.map(l => `<tr><td>${l.label}${l.est ? ' (הערכה)' : ''}</td><td class="n">${fmt(l.amount)}</td><td class="n">${acct[l.k] ? fmt(acct[l.k]) : ''}</td><td class="n">${diffOf(l) === null ? '' : fmt(diffOf(l))}</td><td>${l.detail}</td></tr>`).join('')}
+    <tr><th>סה״כ</th><th class="n">${fmt(rep.total)}</th><th></th><th></th><th></th></tr></table>
+    <p style="font-size:12px;color:#666">הופק ב-Tizon Books ${VERSION}. הערכה לבקרה פנימית בלבד; הסכומים לתשלום הם אלה שבהודעות הרשויות ומרואה החשבון.</p></body></html>`);
+  return (
+    <div data-tour="pay-auth">
+      <div style={{ ...row, marginBottom: 12 }}>
+        <Field label="תדירות"><select value={freq} onChange={e => { save({ freq: { ...(prof.freq || {}), [tid]: e.target.value } }); setYm(lastPeriod(e.target.value).start); }}>
+          <option value="bi">דו-חודשי</option><option value="month">חודשי</option></select></Field>
+        <Field label="תקופה"><input type="month" value={ym} onChange={e => e.target.value && setYm(e.target.value)} /></Field>
+        <button className="mg-btn ghost sm keep" onClick={() => setYm(addMonths(period.start, -1))}>‹ קודמת</button>
+        <button className="mg-btn ghost sm keep" onClick={() => setYm(addMonths(period.end, 1))}>הבאה ›</button>
+      </div>
+      <div className="mg-card" style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>לתשלום לרשויות · {periodLabel(period)}</h3>
+          <span style={{ color: ended ? 'var(--ink)' : 'var(--warn)', fontSize: 14, fontWeight: 700 }}>{ended ? `לתשלום עד ${dueOf(period)} (בדרך כלל)` : 'התקופה עוד לא הסתיימה: הסכומים עד היום'}</span>
+        </div>
+        {(rows.length > 1 || rep.partial) && <div style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0' }}>
+          {rows.length > 1 ? `כולל את כל העסקים שלך במספר עוסק ${book.taxId}: ${rows.map(r => r.book.name).join(', ')}. ` : ''}
+          {rep.partial && <b style={{ color: 'var(--warn)' }}>עוד נטען: {rep.books.filter(b => !b.ready).map(b => b.name).join(', ')}.</b>}</div>}
+        <div className="mg-tblwrap" style={{ marginTop: 10 }}><table className="mg-tbl">
+          <thead><tr><th>תשלום</th><th>לפי המערכת</th><th>לפי רו״ח (הזן)</th><th>בדיקה</th></tr></thead>
+          <tbody>{rep.lines.map(l => { const d = diffOf(l); return (
+            <tr key={l.k}>
+              <td className="stack"><span><b>{l.label}</b>{l.est && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>הערכה</span>}</span>
+                <div style={{ fontSize: 12.5, color: 'var(--muted)', fontWeight: 400 }}>{l.detail}</div></td>
+              <td><b dir="ltr">{fmt(l.amount)}</b></td>
+              <td><input inputMode="decimal" style={{ maxWidth: 130 }} value={acct[l.k] ?? ''} placeholder="—" onChange={e => setAcct(l.k, e.target.value)} /></td>
+              <td>{d === null ? <span style={{ color: 'var(--muted)' }}>—</span> : Math.abs(d) <= 1 ? <span style={{ color: 'var(--green)', fontWeight: 800 }}>✓ תואם</span>
+                : <span style={{ color: 'var(--bad)', fontWeight: 800 }}>⚠ הפרש {fmt(d)}</span>}</td>
+            </tr>); })}
+            <tr><td><b>סה״כ</b></td><td><b dir="ltr">{fmt(rep.total)}</b></td>
+              <td>{Object.values(acct).some(v => v !== '') ? <b dir="ltr">{fmt(Object.values(acct).reduce((a, v) => a + (Number(v) || 0), 0))}</b> : ''}</td><td></td></tr>
+          </tbody></table></div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <button className="mg-btn ghost sm" onClick={print}>🖨 הדפסה / PDF</button>
+          <button className="mg-btn ghost sm" onClick={csv}>⬇ ייצוא</button>
+        </div>
+        {rep.lines.some(l => diffOf(l) !== null && Math.abs(diffOf(l)) > 1) && <div className="mg-note warn" style={{ marginTop: 10, fontSize: 14 }}>
+          יש הפרש מול רואה החשבון. סיבות נפוצות: הוצאה או חשבונית שלא נרשמו כאן (או נרשמו פעמיים), מסמך בתאריך של תקופה אחרת, שיעור מקדמה שהשתנה, או הוצאה שהוכרה אחרת (רכב, בית). כדאי להשוות את רשימת ההוצאות של התקופה.</div>}
+      </div>
+      <div className="mg-card">
+        <b>מה כתוב בהודעות שלך</b>
+        <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 10px' }}>עם הנתונים האלה הדוח מחשב בדיוק כמו הרשויות. בלעדיהם הוא מעריך לפי צפי המס.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(200px,100%),1fr))', gap: 10 }}>
+          <Field label="שיעור מקדמת מס הכנסה (%)"><input inputMode="decimal" value={prof.advRate?.[tid] ?? ''} placeholder="למשל 5" onChange={e => save({ advRate: { ...(prof.advRate || {}), [tid]: e.target.value } })} /></Field>
+          {!isCompanyId(tid) && <Field label="מקדמת ביטוח לאומי לחודש (₪)"><input inputMode="decimal" value={prof.blMonthly?.[tid] ?? ''} placeholder="מהודעת ביטוח לאומי" onChange={e => save({ blMonthly: { ...(prof.blMonthly || {}), [tid]: e.target.value } })} /></Field>}
+        </div>
+        <div className="mg-note" style={{ marginTop: 10, fontSize: 13 }}>בקרה פנימית בלבד. הסכום לתשלום הוא מה שבהודעות הרשויות ומה שרואה החשבון מגיש. בכל סוף חודש הדוח של התקופה שהסתיימה נשלח גם במייל הארכיון החודשי.</div>
       </div>
     </div>
   );
@@ -4723,6 +4859,20 @@ async function makeArchive(books, month, email) {
       lines.push(`${b.name}: ${docs.length} מסמכים, ${u.counts.total} רשומות`);
     } else lines.push(`${b.name}: אין מספר עוסק, רק גיבוי`);
   }
+  /* Payments to the authorities for the period that ended with this month. */
+  try {
+    const prof = lsGet(TAX_PROFILE_KEY, {}) || {};
+    const groups = {};
+    for (const b of books) { const k = digitsOf(b.taxId) || b.id; (groups[k] = groups[k] || []).push(b); }
+    for (const [tid, bs] of Object.entries(groups)) {
+      const freq = prof.freq?.[tid] || 'bi', p = periodOf(freq, month);
+      if (p.end !== month) continue;                   // a bi-monthly period ends every second month
+      const rows = []; for (const b of bs) rows.push({ book: b, data: await loadBook(b) });
+      const r = authReport(rows, p, prof, tid);
+      lines.push('', `לתשלום לרשויות · ${periodLabel(p)} · ${bs.map(b => b.name).join(', ')} (${tid}) · עד ${dueOf(p)}:`,
+        ...r.lines.map(l => `  ${l.label}: ${fmt(l.amount)}${l.est ? ' (הערכה)' : ''}`), `  סה״כ: ${fmt(r.total)}`);
+    }
+  } catch (e) { console.warn('pay report', e); }
   const backup = await exportAll(email);
   backup.books = backup.books.filter(x => books.some(b => b.id === x.id));
   files['backup.json'] = strToU8(JSON.stringify(backup));
