@@ -1754,5 +1754,12 @@ export {
   __test,
   certInfo,
   books_mail_default as default,
-  signPdf
+  signPdf,
+  /* For the scheduled reports (books-reports.mjs), which share these. */
+  saJson,
+  sendMail,
+  mailReady,
+  secrets,
+  icountDocs,
+  who
 };

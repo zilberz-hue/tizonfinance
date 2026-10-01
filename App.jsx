@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.32.0';
+const VERSION = '1.33.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -713,6 +713,20 @@ input:focus,select:focus{border-color:var(--gold)}
 .seg button{flex:1;border:0;background:none;padding:9px;border-radius:9px;cursor:pointer;font-weight:700;color:var(--muted)}
 .seg button.on{background:#fff;color:#6e4d22;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 .exp-ranges{display:flex;flex-wrap:wrap;gap:6px}
+.rep-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 12px}.rep-nav b{font-size:16px;text-align:center}
+.rep-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.rep-tile{background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center}
+.rep-tile .lb{font-size:13px;color:var(--muted)}.rep-tile .vl{font-size:24px;font-weight:800;direction:ltr;unicode-bidi:isolate;white-space:nowrap}
+.rep-tile .vl.in{color:var(--green2,#2f7d5b)}.rep-tile .vl.out{color:var(--bad,#b3412f)}.rep-tile .sm{font-size:12.5px;color:var(--muted);margin-top:2px}
+.rep-d{font-weight:800;font-size:12px;margin-inline-start:4px;white-space:nowrap}.rep-d.up{color:#2f7d5b}.rep-d.down{color:#b3412f}
+.rep-bars{margin:12px 2px;display:grid;gap:6px}.rep-bars div{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.rep-bars span{width:56px;flex-shrink:0}.rep-bars i{display:block;height:10px;border-radius:6px;min-width:2px;transition:width .3s}.rep-bars i.in{background:#2f7d5b}.rep-bars i.out{background:#c0583f}
+.rep-cmp{font-size:13.5px;color:var(--muted);margin:2px 2px 8px}
+.rep-ctx{background:#f6efe2;border-radius:12px;padding:10px 12px;font-size:14.5px;line-height:1.6}
+.rep-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:14px;margin-top:14px}.rep-cols h4{margin:0 0 6px}
+.rep-list{width:100%;border-collapse:collapse;font-size:14.5px}.rep-list td{padding:6px 0;border-bottom:1px solid #f1e9da}.rep-list td:last-child{text-align:left;white-space:nowrap;font-weight:700}
+.rep-empty{color:var(--muted);font-size:14px}.rep-foot{font-size:12.5px;color:var(--muted);margin-top:12px}
+@media (max-width:520px){.rep-tiles{gap:6px}.rep-tile{padding:10px 4px}.rep-tile .vl{font-size:18px}.rep-tile .sm{font-size:11.5px}}
 .mg-chipbtn{border:1px solid var(--line,#e6dcc8);background:#fff;border-radius:999px;padding:7px 14px;font:inherit;font-size:14px;font-weight:700;color:#5b5346;cursor:pointer}
 .mg-chipbtn.on{background:#6e4d22;border-color:#6e4d22;color:#fff}
 .exp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:16px}
@@ -924,7 +938,8 @@ input:focus,select:focus{border-color:var(--gold)}
 .fab-back{position:fixed;inset:0;background:rgba(20,20,15,.25);z-index:47}
 @keyframes fabIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media (max-width:820px){
-  .hdr-act{display:none !important}
+  .hdr-act:not(.hdr-rep){display:none !important}
+  .hdr-rep{padding:8px 12px !important;min-width:0 !important;width:auto !important;flex:0 0 auto !important}
   .hdr-set{padding:8px 12px !important;min-width:0 !important;width:auto !important;flex:0 0 auto !important}
   .hdr-set-t{display:none}
   main{padding-bottom:96px}
@@ -1135,6 +1150,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.33.0', date: '01.10.26', items: ['דוחות עסק: יומי בערב, שבועי ביום שישי בבוקר (שישי עד חמישי) וחודשי ב-1 לחודש. הכנסות, הוצאות ורווח, מול התקופה הקודמת, החודש או השנה עד עכשיו, ומאיפה הגיעו ההכנסות ועל מה הלכו ההוצאות.', 'הדוח מגיע במייל (מייל אחד לכל העסקים) ונפתח גם כחלון קופץ כשנכנסים. כפתור 📊 דוחות בראש העסק פותח כל דוח בכל זמן. הגדרות: ⚙ ← דוחות.'] },
   { v: '1.32.0', date: '01.10.26', items: ['בנייד: מתג תצוגה מעל כל רשימה (כרטיסים, שורות או טבלה), כל מכשיר זוכר את הבחירה.', 'מסמכים: קיבוץ לתיקיות לפי חודש, לקוח או סוג, עם מספר המסמכים והסכום בכל תיקייה.', 'בנייד הפעולות של כל מסמך מתקפלות מאחורי ⋯, והכרטיס קטן בהרבה.'] },
   { v: '1.31.1', date: '01.10.26', items: ['תיקון: דף סליקה שממתין לתשלום כבר לא קורא את כל המסמכים מהענן כל 20 שניות (זה מה שגמר את המכסה היומית של Firebase). עכשיו נבדקים רק הדפים הממתינים, כל 30 שניות, ורק בחצי השעה הראשונה.', 'כשהמכסה היומית של מסד הנתונים נגמרת, מוצגת הודעה ברורה בעברית במקום resource-exhausted.'] },
   { v: '1.31.0', date: '01.10.26', items: ['לשונית ייצוא חדשה תחת כלים: Excel מלא עם גיליון לכל רשימה (מסמכים, תקבולים, הכנסות, הוצאות, מע״מ לפי חודש, פקודות יומן, מאזן בוחן, לקוחות, ספקים, פריטים, בנק), חבילת ZIP לרואה החשבון, מבנה אחיד, CSV לכל רשימה וגיבוי של העסק. בחירת תקופה אחת לכולם.'] },
@@ -1299,6 +1315,7 @@ const TOURS = {
     { t: 'help-btn', title: 'עזרה בכל מסך', text: 'הכפתור הזה מפעיל את ההדרכה של המסך שאתה נמצא בו. אחרי כל עדכון ההדרכה מציגה רק את מה שחדש.', since: '1.8.0' },
   ],
   dash: [
+    { t: 'hdr-reports', title: 'דוחות', text: 'הכנסות והוצאות של היום, השבוע או החודש, מול התקופה הקודמת. הדוח נפתח גם לבד בערב, ביום שישי וב-1 לחודש, ונשלח במייל.', since: '1.33.0' },
     { t: 'book-head', title: 'הספר של העסק', text: 'סוג העוסק, מספר העוסק ושיעור המע״מ. מכאן גם עורכים את פרטי העסק.', since: '1.0.0' },
     { t: 'book-tabs', title: 'הלשוניות', text: 'כל עבודת העסק כאן: מסמכים, לקוחות, פריטים, הכנסות, הוצאות, בנק, מע״מ, רווח והפסד ורשות המסים.', since: '1.0.0' },
     { t: 'dash-month', title: 'חודש', text: 'בוחרים חודש והמספרים מתעדכנים.', since: '1.0.0' },
@@ -2607,6 +2624,163 @@ function SetRow({ icon, title, ok, status, children, onOpen, open }) {
     </div>
   );
 }
+/* ------------------------------------------------------- business reports
+   The day, the week (Friday to Thursday) and the month at a glance: what came
+   in, what went out, where from and on what, against the period before and
+   with the month or year so far. Shown here as a pop-up when one is due, and
+   sent by email from the server (netlify/reports-core.mjs, the same rules). */
+const REP_SEEN = 'tzbooks_rep_seen';
+const REP_KINDS = [['daily', 'יומי'], ['weekly', 'שבועי'], ['monthly', 'חודשי']];
+const MONTHS_HE_FULL = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+const addDaysIso = (iso, k) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); };
+const monthEndIso = (ym) => { const [y, m] = ym.split('-').map(Number); return `${ym}-${pad(new Date(Date.UTC(y, m, 0)).getUTCDate())}`; };
+const ilHour = () => Number(new Intl.DateTimeFormat('en-GB', { timeZone: IL_TZ, hour: '2-digit', hour12: false }).format(new Date())) % 24;
+const dowOf = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay();
+const monthLabel = (ym) => `${MONTHS_HE_FULL[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+/* n periods back (0 = the current one, so far). */
+function repPeriod(kind, n) {
+  const today = todayIso();
+  if (kind === 'daily') {
+    const d = addDaysIso(today, -n);
+    return { kind, key: 'd:' + d, from: d, to: d, title: n === 0 ? `היום · ${heDate(d)}` : n === 1 ? `אתמול · ${heDate(d)}` : heDate(d),
+             cmp: { label: 'יום קודם', from: addDaysIso(d, -1), to: addDaysIso(d, -1) },
+             ctx: { label: `${monthLabel(d.slice(0, 7))} עד ${heDate(d)}`, from: d.slice(0, 7) + '-01', to: d } };
+  }
+  if (kind === 'weekly') {
+    const end0 = addDaysIso(today, (4 - dowOf(today) + 7) % 7);          // the Thursday that closes this week
+    const to = addDaysIso(end0, -7 * n), from = addDaysIso(to, -6);
+    return { kind, key: 'w:' + to, from, to, title: `${n === 0 ? 'השבוע · ' : ''}${heDate(from)} – ${heDate(to)}`,
+             cmp: { label: 'שבוע קודם', from: addDaysIso(from, -7), to: addDaysIso(to, -7) },
+             ctx: { label: `${monthLabel(to.slice(0, 7))} עד ${heDate(to)}`, from: to.slice(0, 7) + '-01', to } };
+  }
+  const m = addMonths(thisMonth(), -n), pm = addMonths(m, -1);
+  return { kind: 'monthly', key: 'm:' + m, from: m + '-01', to: monthEndIso(m), title: `${monthLabel(m)}${n === 0 ? ' · עד היום' : ''}`,
+           cmp: { label: monthLabel(pm), from: pm + '-01', to: monthEndIso(pm) },
+           ctx: { label: `שנת ${m.slice(0, 4)} עד ${n === 0 ? 'היום' : 'סוף ' + MONTHS_HE_FULL[Number(m.slice(5, 7)) - 1]}`, from: m.slice(0, 4) + '-01-01', to: monthEndIso(m) } };
+}
+function repSummary(ledger, from, to) {
+  const inR = (d) => { const x = String(d || '').slice(0, 10); return x >= from && x <= to; };
+  const inc = ledger.income.filter(i => inR(i.date)), exp = ledger.outgo.filter(e => inR(e.date));
+  const s = (l, k) => r2(l.reduce((a, x) => a + (Number(x[k]) || 0), 0));
+  const who = (i) => i.customer || String(i.desc || '').split(' · ').slice(-1)[0] || i.cat || '—';
+  const top = (l, f, n) => { const m = {}; l.forEach(x => { const k = f(x) || '—'; m[k] = (m[k] || 0) + (Number(x.gross) || 0); });
+    return Object.entries(m).map(([k, v]) => [k, r2(v)]).filter(([, v]) => Math.abs(v) > 0.004).sort((a, b) => b[1] - a[1]).slice(0, n); };
+  const ig = s(inc, 'gross'), iv = s(inc, 'vat'), eg = s(exp, 'gross'), ev = s(exp, 'vat');
+  return { inc: { gross: ig, vat: iv, net: r2(ig - iv), count: inc.length }, exp: { gross: eg, vat: ev, net: r2(eg - ev), count: exp.length, est: exp.filter(e => e.estimate).length },
+           profit: r2((ig - iv) - (eg - ev)), vatDue: r2(iv - ev), topCust: top(inc, who, 6), byCat: top(exp, e => e.cat || 'אחר', 6) };
+}
+/* Which report to show by itself now, if any: the month in its first week,
+   the week on Friday and Saturday, the day in the evening (or yesterday's,
+   the next morning). Each once. */
+function repDue(book, ledger) {
+  const cfg = { hour: 20, ...(book.reports || {}) };
+  if (cfg.popup === false) return null;
+  const seen = (lsGet(REP_SEEN, {}) || {})[book.id] || {};
+  const today = todayIso(), h = ilHour(), dow = dowOf(today), day = Number(today.slice(8, 10));
+  const busy = (p) => { const r = repSummary(ledger, p.from, p.to); return r.inc.count + r.exp.count > 0; };
+  const cands = [];
+  if (cfg.monthly !== false && day <= 7) cands.push(['monthly', 1]);
+  if (cfg.weekly !== false && (dow === 5 || dow === 6)) cands.push(['weekly', 1]);
+  if (cfg.daily !== false && h >= (Number(cfg.hour) || 20)) cands.push(['daily', 0]);
+  if (cfg.daily !== false && h < 12) cands.push(['daily', 1]);
+  /* One pop-up at a time: the biggest report due opens, and the others due with
+     it count as seen (their tabs are right there in the same window). */
+  const due = cands.map(([k, n]) => ({ kind: k, n, p: repPeriod(k, n) })).filter(x => !seen[x.p.key] && busy(x.p));
+  if (!due.length) return null;
+  due.slice(1).forEach(x => repMarkSeen(book.id, x.p.key));
+  return { kind: due[0].kind, n: due[0].n };
+}
+function repMarkSeen(bookId, key) {
+  const all = lsGet(REP_SEEN, {}) || {}; const mine = { ...(all[bookId] || {}), [key]: new Date().toISOString().slice(0, 10) };
+  /* Only the last few dozen are worth keeping. */
+  all[bookId] = Object.fromEntries(Object.entries(mine).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 60));
+  try { lsSet(REP_SEEN, all); } catch { /* ignore */ }
+}
+const pct = (a, b) => { if (!b) return null; const p = Math.round((a - b) / Math.abs(b) * 100); return p; };
+function Delta({ a, b, bad }) {
+  const p = pct(a, b); if (p === null || !p) return null;
+  const good = bad ? p < 0 : p > 0;
+  return <span className={'rep-d ' + (good ? 'up' : 'down')}>{p > 0 ? '▲' : '▼'}{Math.abs(p)}%</span>;
+}
+function ReportModal({ book, ledger, start, onClose }) {
+  const [kind, setKind] = useState(start?.kind || 'daily');
+  const [n, setN] = useState(start?.n ?? 0);
+  const p = repPeriod(kind, n);
+  const s = useMemo(() => repSummary(ledger, p.from, p.to), [ledger, p.from, p.to]);
+  const c = useMemo(() => repSummary(ledger, p.cmp.from, p.cmp.to), [ledger, p.cmp.from, p.cmp.to]);
+  const x = useMemo(() => repSummary(ledger, p.ctx.from, p.ctx.to), [ledger, p.ctx.from, p.ctx.to]);
+  useEffect(() => { repMarkSeen(book.id, p.key); }, [book.id, p.key]);
+  const exempt = rateOf(book) === 0;
+  const list = (l, empty) => l.length ? <table className="rep-list"><tbody>{l.map(([k, v]) => <tr key={k}><td>{k}</td><td dir="ltr">{fmtRound(v)}</td></tr>)}</tbody></table>
+    : <div className="rep-empty">{empty}</div>;
+  const bar = Math.max(s.inc.gross, s.exp.gross, 1);
+  return (
+    <Box title={`📊 דוח ${REP_KINDS.find(k => k[0] === kind)[1]} · ${book.name}`} onClose={onClose} wide
+         footer={<button className="mg-btn" onClick={onClose}>סגור</button>}>
+      <div data-tour="rep-kinds" className="seg" style={{ marginBottom: 10 }}>
+        {REP_KINDS.map(([k, l]) => <button key={k} className={kind === k ? 'on' : ''} onClick={() => { setKind(k); setN(0); }}>{l}</button>)}</div>
+      <div className="rep-nav">
+        <button className="mg-btn ghost sm" onClick={() => setN(n + 1)} aria-label="תקופה קודמת">→ קודם</button>
+        <b>{p.title}</b>
+        <button className="mg-btn ghost sm" disabled={n <= 0} onClick={() => setN(n - 1)} aria-label="תקופה הבאה">הבא ←</button></div>
+      <div className="rep-tiles">
+        <div className="rep-tile"><div className="lb">הכנסות</div><div className="vl in">{fmtRound(s.inc.gross)}</div><div className="sm">{s.inc.count} תנועות <Delta a={s.inc.gross} b={c.inc.gross} /></div></div>
+        <div className="rep-tile"><div className="lb">הוצאות</div><div className="vl out">{fmtRound(s.exp.gross)}</div><div className="sm">{s.exp.count} תנועות{s.exp.est ? ` · ${s.exp.est} בהערכה` : ''} <Delta a={s.exp.gross} b={c.exp.gross} bad /></div></div>
+        <div className="rep-tile"><div className="lb">רווח (לפני מע״מ)</div><div className={'vl ' + (s.profit >= 0 ? 'in' : 'out')}>{fmtRound(s.profit)}</div><div className="sm">{exempt ? 'עוסק פטור' : `מע״מ נטו ${fmtRound(s.vatDue)}`}</div></div>
+      </div>
+      <div className="rep-bars" aria-hidden="true">
+        <div><span>הכנסות</span><i className="in" style={{ width: `${Math.max(0, s.inc.gross) / bar * 100}%` }} /></div>
+        <div><span>הוצאות</span><i className="out" style={{ width: `${Math.max(0, s.exp.gross) / bar * 100}%` }} /></div></div>
+      <div className="rep-cmp">{p.cmp.label}: הכנסות {fmtRound(c.inc.gross)} · הוצאות {fmtRound(c.exp.gross)} · רווח {fmtRound(c.profit)}</div>
+      <div className="rep-ctx"><b>{p.ctx.label}:</b> הכנסות {fmtRound(x.inc.gross)} · הוצאות {fmtRound(x.exp.gross)} · <b>רווח {fmtRound(x.profit)}</b>{exempt ? '' : ` · מע״מ לתשלום ${fmtRound(x.vatDue)}`}</div>
+      <div className="rep-cols">
+        <div><h4>מאיפה הגיעו ההכנסות</h4>{list(s.topCust, 'אין הכנסות בתקופה')}</div>
+        <div><h4>על מה הלך הכסף</h4>{list(s.byCat, 'אין הוצאות בתקופה')}</div></div>
+      <div className="rep-foot">סכומים כולל מע״מ; הרווח לפני מע״מ. {book.reports?.email === false ? '' : 'אותו דוח נשלח גם במייל (הגדרות העסק ← דוחות).'}</div>
+    </Box>
+  );
+}
+/* The settings: which reports, at what hour, to whom, and pop-ups. */
+function ReportSettings({ book, owner, flash, server }) {
+  const [r, setR] = useState(() => ({ daily: true, weekly: true, monthly: true, hour: 20, popup: true, to: book.owners?.[0] || '', ...(book.reports || {}) }));
+  const [busy, setBusy] = useState('');
+  const save = async (patch) => {
+    const n = { ...r, ...patch }; setR(n);
+    try { await DB.patch('books', book.id, { reports: clean(n) }); book.reports = n; } catch (e) { flash('השמירה נכשלה · ' + dbErr(e)); }
+  };
+  const test = async (kind) => {
+    setBusy(kind);
+    try {
+      const idToken = await cloud.auth.currentUser.getIdToken();
+      const res = await fetch('/.netlify/functions/books-report-now', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ idToken, kind }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error === 'no-mail' ? 'שליחת מייל לא מוגדרת בשרת (SMTP)' : j.error === 'no-service-account' ? 'חסר מפתח שירות של Firebase בשרת' : j.error || 'HTTP ' + res.status);
+      flash(j.sent ? `הדוח נשלח ל-${j.to}` : 'אין עסקים עם דוחות לכתובת הזו');
+    } catch (e) { flash('השליחה נכשלה · ' + e.message); }
+    setBusy('');
+  };
+  const ck = (k, l) => <label key={k} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 15 }}>
+    <input type="checkbox" style={{ width: 'auto' }} disabled={!owner} checked={r[k] !== false} onChange={e => save({ [k]: e.target.checked })} /> {l}</label>;
+  return (<div style={{ display: 'grid', gap: 10 }}>
+    <div style={{ display: 'grid', gap: 6 }}>
+      {ck('daily', 'דוח יומי בערב: הכנסות והוצאות של היום, והחודש עד היום')}
+      {ck('weekly', 'דוח שבועי ביום שישי בבוקר: שישי עד חמישי, מול השבוע הקודם')}
+      {ck('monthly', 'דוח חודשי ב-1 לחודש: החודש שעבר, מול החודש שלפניו והשנה עד עכשיו')}
+      {ck('popup', 'להציג את הדוח גם כחלון קופץ כשנכנסים למערכת')}
+    </div>
+    <div style={row}>
+      <Field label="שעת הדוח היומי"><select disabled={!owner} value={r.hour} onChange={e => save({ hour: Number(e.target.value) })}>
+        {[17, 18, 19, 20, 21, 22, 23].map(h => <option key={h} value={h}>{h}:00</option>)}</select></Field>
+      <Field label="לשלוח אל"><input dir="ltr" type="email" disabled={!owner} value={r.to} onChange={e => setR({ ...r, to: e.target.value })} onBlur={() => save({ to: r.to.trim().toLowerCase() })} /></Field>
+    </div>
+    {cloud && server && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <span style={{ fontSize: 14, color: 'var(--muted)' }}>שלח לי עכשיו לבדיקה:</span>
+      {REP_KINDS.map(([k, l]) => <button key={k} className="mg-btn ghost sm" disabled={!!busy} onClick={() => test(k)}>{busy === k ? 'שולח…' : '✉ ' + l}</button>)}</div>}
+    {server && !server.mail && <div className="mg-note warn">שליחת מייל עוד לא מוגדרת בשרת (SMTP), אז בינתיים הדוחות מופיעים רק כחלון קופץ.</div>}
+    <div style={{ fontSize: 13, color: 'var(--muted)' }}>עסקים עם אותה כתובת מקבלים מייל אחד משותף. יום בלי שום תנועה לא נשלח.</div>
+  </div>);
+}
+
 function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEditBook, onStoreLogin, onGo, onGlobal, onServer, onReload, onLog }) {
   const [open, setOpen] = useState(() => { try { return sessionStorage.getItem('tzbooks_bset') || ''; } catch { return ''; } });
   const tog = (k) => { const n = open === k ? '' : k; setOpen(n); try { sessionStorage.setItem('tzbooks_bset', n); } catch {} };
@@ -2657,6 +2831,12 @@ function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEd
           <button className="mg-btn ghost sm" onClick={() => onGo('expenses')}>לחשבוניות שהגיעו</button>
         </div>
         {gmail && <GmailSetup book={book} flash={flash} onClose={() => { setGmail(false); inboxCall('inbox-list', book.id).then(setInbox).catch(() => {}); }} />}
+      </SetRow>
+
+      <SetRow icon="📊" title="דוחות יומי, שבועי וחודשי" ok={book.reports ? (book.reports.daily !== false || book.reports.weekly !== false || book.reports.monthly !== false) : true} open={open === 'reports'} onOpen={() => tog('reports')}
+              status={(() => { const r = { daily: true, weekly: true, monthly: true, hour: 20, ...(book.reports || {}) }; const on = [r.daily && `יומי ב-${r.hour}:00`, r.weekly && 'שבועי בשישי', r.monthly && 'חודשי ב-1'].filter(Boolean);
+                return on.length ? `${on.join(' · ')} · במייל${server?.mail ? '' : ' (כשיוגדר מייל)'}${r.popup === false ? '' : ' ובחלון קופץ'}` : 'כבוי'; })()}>
+        <ReportSettings book={book} owner={owner} flash={flash} server={server} />
       </SetRow>
 
       <SetRow icon="🛒" title="החנות" ok={book.tenant ? !(data.storeErr || data.storeLogin) : null} open={open === 'store'} onOpen={() => tog('store')}
@@ -2741,6 +2921,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
+  const [report, setReport] = useState(null);
   const [quickDoc, setQuickDoc] = useState(null);
   /* Fixed expenses due by today are recorded (owners only; each month's id is fixed, so never twice). */
   const recRunning = useRef(false);
@@ -2781,6 +2962,14 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const [edit, setEdit] = useState(null);
   const cols = useMemo(() => Object.fromEntries(COLS.map(c => [c, bookCol(book.id, c)])), [book.id]);
   const ledger = useMemo(() => buildLedger(book, data), [book, data]);
+  /* A report that is due (and not seen on this device) opens by itself, once the history is in. */
+  const repChecked = useRef('');
+  useEffect(() => {
+    if (role !== 'owner' || data.histPending || data.storePending || repChecked.current === book.id) return;
+    repChecked.current = book.id;
+    const due = repDue(book, ledger);
+    if (due) setReport(due);
+  }, [book.id, data.histPending, data.storePending, role]);
   const rate = ledger.rate;
   const tot = (f, t) => totals(ledger, f, t);
   const alerts = alertsOf(data, ledger);
@@ -2958,7 +3147,9 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
           <button className="mg-btn ghost hdr-act" onClick={() => setEdit({ kind: 'expense', rec: null })}>＋ הוצאה</button>
           {/* Income is recorded by issuing its document: the same form, with customers and items. */}
           <button className="mg-btn ghost hdr-act" onClick={() => openDoc()}>＋ הכנסה</button>
+          <button data-tour="hdr-reports" className="mg-btn ghost hdr-act hdr-rep" onClick={() => setReport({ kind: 'daily', n: 0 })}>📊 <span className="hdr-set-t">דוחות</span></button>
           <button data-tour="hdr-settings" className={'mg-btn ghost hdr-set' + (sub === 'bset' ? ' on' : '')} onClick={() => setSub('bset')} aria-label="הגדרות העסק">⚙ <span className="hdr-set-t">הגדרות</span></button></>}
+        {role === 'viewer' && <button className="mg-btn ghost hdr-act hdr-rep" onClick={() => setReport({ kind: 'monthly', n: 0 })}>📊 <span className="hdr-set-t">דוחות</span></button>}
         {role !== 'owner' && <span className="mg-chip" style={{ background: 'rgba(255,255,255,.2)', color: '#fff' }}>{ROLES[role]}</span>}
       </div>
 
@@ -2978,6 +3169,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         חלק מהנתונים לא נטענו ({data.errors.join(', ')}). בדוק שחוקי ה-Firestore המעודכנים פורסמו.{' '}
         <button className="mg-linkish" onClick={onReload}>נסה שוב</button></div>}
 
+      {report && <ReportModal book={book} ledger={ledger} start={report} onClose={() => setReport(null)} />}
       {/* On a computer the tabs stand as a side bar, grouped; on phones and tablets they scroll across the top. */}
       <div className="book-body">
       <nav data-tour="book-tabs" className="mg-tabs book-tabs" style={{ marginBottom: 16 }} aria-label="לשוניות העסק">
