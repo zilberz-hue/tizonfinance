@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.35.1';
+const VERSION = '1.35.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1201,6 +1201,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.35.2', date: '02.10.26', items: ['המאמן החכם: הודעת שגיאה ברורה כשאין יתרה בחשבון Anthropic, כשהשרתים עמוסים או כששם המודל לא מוכר, עם ההודעה המקורית מ-Anthropic.'] },
   { v: '1.35.1', date: '02.10.26', items: ['המאמן החכם: שדה מפתח ה-API מופיע תמיד, גם לפני שכל הנתונים נטענו ואם השרת לא ענה; כפתור 🤖 בראש מסך המאמן קופץ אליו.'] },
   { v: '1.35.0', date: '01.10.26', items: ['🤖 המאמן החכם (במסך המאמן): שיחה עם Claude על המספרים שלך, ושאלות מוכנות בלחיצה.', 'תוכניות 90 יום לפי תחום: הקליניקה, החנות, קורסים, Tizon Health, שיווק, אוברדרפט ותזרים, וקיצוץ הוצאות. נשמרות, מתעדכנות ומודפסות.', 'עובד עם מפתח API של Anthropic שנשמר רק בשרת.'] },
   { v: '1.34.1', date: '01.10.26', items: ['המאמן בנייד: תקרות ההוצאה והחשבונות מוצגים בשורות כפולות, בלי חיתוך בצד.'] },
@@ -2544,8 +2545,10 @@ async function coachCall(body, background) {
   return j;
 }
 const COACH_ERR = { 'no-key': 'עוד אין מפתח API למאמן.', 'bad-key': 'Anthropic דחו את המפתח. בדוק שהעתקת אותו נכון ושיש בחשבון יתרה.', 'owners only': 'המאמן פתוח רק לבעלי עסק.',
-  'no-service-account': 'חסר מפתח שירות של Firebase בשרת.', 'key-format': 'המפתח צריך להתחיל ב-sk-ant-', model: 'המודל לא ענה כרגע. נסה שוב בעוד דקה.', timeout: 'התשובה מתעכבת. נסה לרענן בעוד כמה דקות.' };
-const coachErr = (e) => COACH_ERR[e] || COACH_ERR[String(e).split(':')[0]] || String(e || 'שגיאה');
+  'no-service-account': 'חסר מפתח שירות של Firebase בשרת.', 'key-format': 'המפתח צריך להתחיל ב-sk-ant-', model: 'המודל לא ענה כרגע. נסה שוב בעוד דקה.', timeout: 'התשובה מתעכבת. נסה לרענן בעוד כמה דקות.',
+  credit: 'אין מספיק יתרה בחשבון Anthropic. טוענים ב-console.anthropic.com ← Billing (אחרי רכישה זה לפעמים לוקח כמה דקות להיכנס).',
+  'bad-model': 'Anthropic לא מכירים את שם המודל. אפשר להגדיר אחר ב-Netlify (COACH_MODEL).', busy: 'יותר מדי בקשות ברגע זה. נסה שוב בעוד דקה.', overloaded: 'השרתים של Anthropic עמוסים כרגע. נסה שוב בעוד כמה דקות.' };
+const coachErr = (e, detail) => (COACH_ERR[e] || COACH_ERR[String(e).split(':')[0]] || String(e || 'שגיאה')) + (detail ? ` (${detail})` : '');
 /* Headings, bullets and bold, as the model writes them; nothing else is markup. */
 function CoachText({ text }) {
   const inl = (s) => String(s).split(/(\*\*[^*]+\*\*)/g).map((p, i) => /^\*\*[^*]+\*\*$/.test(p) ? <b key={i}>{p.slice(2, -2)}</b> : p);
@@ -2591,7 +2594,7 @@ function SmartCoach({ summary, flash, partial }) {
       await coachCall({ id, kind: 'chat', text: t, summary }, true);
       const j = await poll(id);
       if (j.state === 'done') setChat(c => [...c, { role: 'assistant', text: j.text, at: new Date().toISOString() }]);
-      else { setErr(coachErr(j.error)); setChat(c => c.slice(0, -1)); setQ(t); }
+      else { setErr(coachErr(j.error, j.detail)); setChat(c => c.slice(0, -1)); setQ(t); }
     } catch (e) { setErr(coachErr(e.message)); setChat(c => c.slice(0, -1)); setQ(t); }
     setWait('');
   };
@@ -2602,7 +2605,7 @@ function SmartCoach({ summary, flash, partial }) {
       await coachCall({ id, kind: 'plan', area, summary, note }, true);
       const j = await poll(id);
       if (j.state === 'done') { setPlans(p => ({ ...p, [j.area]: j.plan })); flash('התוכנית מוכנה'); }
-      else setErr(coachErr(j.error));
+      else setErr(coachErr(j.error, j.detail));
     } catch (e) { setErr(coachErr(e.message)); }
     setWait('');
   };

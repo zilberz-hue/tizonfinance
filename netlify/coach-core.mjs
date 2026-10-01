@@ -38,7 +38,12 @@ export async function askClaude({ key, system, messages, maxTokens = 1500, fetch
     body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages }),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j?.error?.message || ('anthropic ' + r.status)), { status: r.status === 401 ? 400 : 502, code: r.status === 401 ? 'bad-key' : 'model' });
+  if (!r.ok) {
+    const msg = String(j?.error?.message || ('anthropic ' + r.status));
+    const code = r.status === 401 ? 'bad-key' : /credit balance|billing|purchase credits/i.test(msg) ? 'credit'
+      : r.status === 404 || /model/i.test(msg) && r.status === 400 ? 'bad-model' : r.status === 429 ? 'busy' : r.status === 529 || r.status >= 500 ? 'overloaded' : 'model';
+    throw Object.assign(new Error(msg), { status: r.status === 401 ? 400 : 502, code, detail: msg });
+  }
   return (j.content || []).filter(x => x.type === 'text').map(x => x.text).join('\n').trim();
 }
 
@@ -101,6 +106,6 @@ export async function coachRun(body, email, deps) {
     await st.setJSON(chatKey(email), next);
     await st.setJSON(jobKey(id), { state: 'done', kind: 'chat', text });
   } catch (e) {
-    await st.setJSON(jobKey(id), { state: 'error', error: e.code || e.message || 'error' });
+    await st.setJSON(jobKey(id), { state: 'error', error: e.code || e.message || 'error', detail: String(e.detail || e.message || '').slice(0, 300) });
   }
 }
