@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.31.1';
+const VERSION = '1.32.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -935,6 +935,33 @@ input:focus,select:focus{border-color:var(--gold)}
 
 @media (max-width:820px){[data-tour=ledger-kind]{flex-wrap:wrap !important;overflow:visible !important;margin-inline:0 !important;padding-inline:0 !important}}
 
+/* Phones: the other two list views, and folders */
+.view-switch{display:none}
+tr.grp td{background:var(--soft);font-weight:800;cursor:pointer;padding:11px 12px;color:#4a3a20;user-select:none}
+tr.grp td .grp-n{font-weight:600;color:var(--muted);font-size:.92em;margin-inline-start:8px}
+tr.grp td .grp-t{float:left;direction:ltr}
+.act-more{min-width:40px}
+@media (max-width:640px){
+  .view-switch{display:flex;width:100%;margin:0 0 10px}
+  .view-switch button{padding:8px 4px;font-size:14px}
+  .mg-tbl.has-labels tr.grp{padding:0;overflow:hidden;background:var(--soft);border-color:#d9c9a6}
+  .mg-tbl.has-labels tr.grp td{display:block;padding:12px 14px;border:0;font-size:16px}
+  html.view-rows .mg-tblwrap{overflow:visible;background:#fff;border:1px solid var(--line);border-radius:14px}
+  html.view-rows .mg-tbl thead{display:none}
+  html.view-rows .mg-tbl,html.view-rows .mg-tbl tbody,html.view-rows .mg-tbl tfoot{display:block;width:100%}
+  html.view-rows .mg-tbl tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 12px;padding:9px 12px;border-bottom:1px solid #efe7d6}
+  html.view-rows .mg-tbl td{display:block;padding:0;border:0;font-size:15px;white-space:normal !important;min-height:0}
+  html.view-rows .mg-tbl td:first-child{flex-basis:100%;font-size:16px}
+  html.view-rows .mg-tbl td:empty{display:none}
+  html.view-rows .mg-tbl td:last-child{flex-basis:100%}
+  html.view-rows .mg-tbl tr.grp{padding:0;display:block}html.view-rows .mg-tbl tr.grp td{display:block;padding:11px 12px}
+  html.view-table .mg-tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  html.view-table .mg-tbl{font-size:14px}
+  html.view-table .mg-tbl th,html.view-table .mg-tbl td{white-space:nowrap;padding:8px 10px}
+  html.view-table .mg-tbl tr.grp td{position:sticky;right:0}
+  html.view-table .mg-tbl td > div{flex-wrap:nowrap !important}
+  html.view-table .mg-tbl td > div[style*="muted"]{white-space:normal}
+}
 @media (max-width:640px){.mg-tbl.has-labels td.stack{flex-direction:column;align-items:flex-start;gap:4px}.mg-tbl.has-labels td.stack::before{display:none}}
 
 /* The business's tabs: a grouped side bar on a computer. */
@@ -1108,6 +1135,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.32.0', date: '01.10.26', items: ['בנייד: מתג תצוגה מעל כל רשימה (כרטיסים, שורות או טבלה), כל מכשיר זוכר את הבחירה.', 'מסמכים: קיבוץ לתיקיות לפי חודש, לקוח או סוג, עם מספר המסמכים והסכום בכל תיקייה.', 'בנייד הפעולות של כל מסמך מתקפלות מאחורי ⋯, והכרטיס קטן בהרבה.'] },
   { v: '1.31.1', date: '01.10.26', items: ['תיקון: דף סליקה שממתין לתשלום כבר לא קורא את כל המסמכים מהענן כל 20 שניות (זה מה שגמר את המכסה היומית של Firebase). עכשיו נבדקים רק הדפים הממתינים, כל 30 שניות, ורק בחצי השעה הראשונה.', 'כשהמכסה היומית של מסד הנתונים נגמרת, מוצגת הודעה ברורה בעברית במקום resource-exhausted.'] },
   { v: '1.31.0', date: '01.10.26', items: ['לשונית ייצוא חדשה תחת כלים: Excel מלא עם גיליון לכל רשימה (מסמכים, תקבולים, הכנסות, הוצאות, מע״מ לפי חודש, פקודות יומן, מאזן בוחן, לקוחות, ספקים, פריטים, בנק), חבילת ZIP לרואה החשבון, מבנה אחיד, CSV לכל רשימה וגיבוי של העסק. בחירת תקופה אחת לכולם.'] },
   { v: '1.30.1', date: '01.10.26', items: ['במחשב: העמודה הימנית צרה וקומפקטית יותר, עם לוגו קטן, וכפתור » שמכווץ אותה לפס צר של אייקונים (העסקים כעיגולים עם האות הראשונה). המערכת זוכרת את הבחירה.'] },
@@ -3159,6 +3187,7 @@ function IncomeList({ income, linked, onEdit, onDel, onDoc, onManual }) {
       {linked && <div className="mg-note" style={{ marginBottom: 12 }}>
         הזמנות מהחנות נכנסות לכאן מעצמן ברגע שהן מסומנות כשולמו. את החשבונית שלהן מפיקים בקונסולת החנות.
       </div>}
+      <ViewSwitch />
       <div data-tour="inc-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>תאריך</th><th>תיאור</th><th>קטגוריה</th><th>תשלום</th><th>מסמך</th><th>לפני מע״מ</th><th>מע״מ</th><th>סה״כ</th><th></th></tr></thead>
         <tbody>
@@ -3607,6 +3636,7 @@ function ExpenseList({ outgo, supName, onEdit, onDel, onFile }) {
           ...list.map(e => [e.date, supName(e.supplierId) || e.supplierName || '', e.desc, e.cat, e.pay, e.docNo, r2(e.gross - e.vat), e.vat, e.gross])
         ])}>⬇ ייצוא</button>
       </div>
+      <ViewSwitch />
       <div data-tour="exp-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>תאריך</th><th>ספק</th><th>תיאור</th><th>קטגוריה</th><th>מסמך</th><th>לפני מע״מ</th><th>מע״מ</th><th>סה״כ</th><th></th></tr></thead>
         <tbody>
@@ -3700,6 +3730,7 @@ function SupplierList({ suppliers, outgo, onEdit, onDel }) {
   return (
     <>
       <div data-tour="sup-new" style={{ marginBottom: 12 }}><button className="mg-btn" onClick={() => onEdit(null)}>＋ ספק חדש</button></div>
+      <ViewSwitch />
       <div data-tour="sup-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>שם</th><th>ח.פ. / ע.מ.</th><th>טלפון</th><th>אימייל</th><th>קטגוריה</th><th>השנה</th><th>סה״כ</th><th></th></tr></thead>
         <tbody>
@@ -4590,6 +4621,72 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
   };
 
   const [lim, more] = useLimit([month, type, src]);
+  /* Folders: the list gathered by month, customer or type, each opened by a tap.
+     On a phone the actions of a document wait behind ⋯ so a row stays one row. */
+  const phone = usePhone();
+  const [groupBy, setGroupBy] = useState(() => lsGet('tzbooks_docs_group', null) ?? (typeof matchMedia === 'function' && matchMedia('(max-width:640px)').matches ? 'month' : ''));
+  const setGroup = (g) => { setGroupBy(g); lsSet('tzbooks_docs_group', g); setOpenG(null); };
+  const [openG, setOpenG] = useState(null);
+  const [gLim, setGLim] = useState({});
+  const [act, setAct] = useState('');
+  const MONTHS_HE = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+  const groups = useMemo(() => {
+    if (!groupBy) return null;
+    const m = new Map();
+    for (const d of list) {
+      const k = groupBy === 'month' ? String(d.date || '').slice(0, 7) : groupBy === 'type' ? d.type : (normName(d.customer?.name) || '—');
+      if (!m.has(k)) m.set(k, { key: k, label: groupBy === 'month' ? (k ? `${MONTHS_HE[Number(k.slice(5, 7)) - 1]} ${k.slice(0, 4)}` : 'ללא תאריך')
+                                       : groupBy === 'type' ? (DOC_TYPES[k]?.label || k) : (d.customer?.name || 'ללא לקוח'), items: [], total: 0 });
+      const g = m.get(k); g.items.push(d); g.total += (d.type === '330' ? -1 : 1) * (Number(d.total) || 0);
+    }
+    const out = [...m.values()];
+    if (groupBy === 'cust') out.sort((a, b) => b.total - a.total);
+    return out;
+  }, [list, groupBy]);
+  const isOpen = (k) => openG ? openG.has(k) : groups?.[0]?.key === k;
+  const rowOf = (d) => {
+            const open = d.type === '305' ? openOf(d, docs) : 0;
+            const credited = docs.some(x => x.refId === d.id && x.type === '330');
+            return (
+              <tr key={d.id}>
+                <td><b>{DOC_TYPES[d.type]?.label}</b> <span dir="ltr">{docNum(d)}</span>{d.series === 'test' && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>ניסיון</span>}
+                  {isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 6 }}>iCount</span>}
+                  {d.cancelled && <span className="mg-chip bad" style={{ marginInlineStart: 6 }}>מבוטל</span>}
+                  {d.allocationNo && <span className="mg-chip ok" style={{ marginInlineStart: 6 }} title={d.allocationNo}>הקצאה {String(d.allocationNo).slice(-9)}</span>}
+                  {needsAlloc(book, d) && !d.allocationNo && <span className="mg-chip bad" style={{ marginInlineStart: 6 }}>חסר מספר הקצאה</span>}</td>
+                <td>{heDate(d.date)}</td>
+                <td>{d.customer?.name}</td>
+                <td><b>{d.type === '330' ? '‎-' : ''}{fmt(d.total)}</b></td>
+                <td>{isImported(d) ? <span className="mg-chip">היסטוריה</span>
+                  : credited ? <span className="mg-chip bad">זוכתה</span>
+                  : d.type === '305' ? (open > 0.009 ? <span className="mg-chip warn">פתוחה · {fmt(open)}</span> : <span className="mg-chip ok">שולמה</span>)
+                  : <span className="mg-chip ok">הופק</span>}
+                  {(d.printCount || 0) > 0 && !isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 4 }}>הודפס</span>}</td>
+                <td>{isImported(d) ? <><button className="mg-btn ghost sm keep" onClick={() => printHTML(docHTML(book, d, true))}>🖨 העתק</button>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>המקור הופק ב-iCount</div></> :
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <button className="mg-btn ghost sm keep" onClick={() => print(d)}>🖨 {(d.printCount || 0) > 0 ? 'העתק' : 'הדפס'}</button>
+                  <button className="mg-btn ghost sm keep" disabled={busyId === d.id} onClick={() => pdf(d)}>{busyId === d.id ? '…' : canSign ? 'PDF חתום' : 'PDF'}</button>
+                  {phone && <button className="mg-btn ghost sm act-more" aria-expanded={act === d.id} onClick={() => setAct(act === d.id ? '' : d.id)}>{act === d.id ? '✕' : '⋯'}</button>}
+                  {(!phone || act === d.id) && <>
+                  {canMail && <button className="mg-btn ghost sm" disabled={busyId === d.id} onClick={() => sendSigned(d)}>✉ שלח חתום</button>}
+                  {d.sentTo && <span className="mg-chip ok" title={d.sentAt}>נשלח</span>}
+                  {needsAlloc(book, d) && !d.allocationNo && <>
+                    {ita?.connected && <button className="mg-btn sm" disabled={busyId === d.id}
+                      onClick={async () => { setBusyId(d.id); await onRequestAlloc(d); setBusyId(''); }}>בקש מספר הקצאה</button>}
+                    <button className="mg-btn ghost sm" onClick={() => { const n = window.prompt('מספר ההקצאה שהתקבל מרשות המסים:'); if (n && n.trim()) onManualAlloc(d, n.trim()); }}>הזן הקצאה</button></>}
+                  {canShareFiles ? <button className="mg-btn ghost sm" disabled={busyId === d.id} onClick={() => share(d)}>📲 שתף</button>
+                    : d.customer?.phone && <button className="mg-btn ghost sm" onClick={() => send(d, 'wa')}>וואטסאפ</button>}
+                  {d.customer?.email && <button className="mg-btn ghost sm" onClick={() => send(d, 'mail')}>מייל</button>}
+                  {d.type === '305' && d.series === series && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setForm({ type: '400', ref: d })}>קבלה</button>}
+                  {['305', '320'].includes(d.type) && d.series === series && !credited && book.dealerType !== 'exempt' &&
+                    <button className="mg-btn ghost sm" onClick={() => setForm({ type: '330', ref: d })}>זיכוי</button>}
+                  </>}
+                </div>}</td>
+              </tr>
+            );
+          };
+  const toggleG = (k) => setOpenG(() => { const n = new Set(groups.filter(g => isOpen(g.key)).map(g => g.key)); n.has(k) ? n.delete(k) : n.add(k); return n; });
   return (
     <>
       {series === 'test'
@@ -4614,55 +4711,25 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
         <Field label="חודש"><input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
         <Field label="סוג"><select value={type} onChange={e => setType(e.target.value)}>
           <option value="">הכול</option>{allowedTypes(book).map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>
+        <Field label="קיבוץ"><select value={groupBy} onChange={e => setGroup(e.target.value)}>
+          <option value="">ללא</option><option value="month">📁 לפי חודש</option><option value="cust">📁 לפי לקוח</option><option value="type">📁 לפי סוג</option></select></Field>
         {hasImp && <Field label="מקור"><select value={src} onChange={e => setSrc(e.target.value)}>
           <option value="">הכול</option><option value="own">Tizon Books</option><option value="import">iCount</option></select></Field>}
         {openInv.length > 0 && <div className="mg-note" style={{ alignSelf: 'center' }}>
           {openInv.length} חשבוניות פתוחות בסך {fmt(openInv.reduce((a, d) => a + openOf(d, docs), 0))}</div>}
       </div>
+      <ViewSwitch />
       <div data-tour="docs-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>מסמך</th><th>תאריך</th><th>לקוח</th><th>סה״כ</th><th>מצב</th><th></th></tr></thead>
         <tbody>
-          {list.slice(0, lim).map(d => {
-            const open = d.type === '305' ? openOf(d, docs) : 0;
-            const credited = docs.some(x => x.refId === d.id && x.type === '330');
-            return (
-              <tr key={d.id}>
-                <td><b>{DOC_TYPES[d.type]?.label}</b> <span dir="ltr">{docNum(d)}</span>{d.series === 'test' && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>ניסיון</span>}
-                  {isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 6 }}>iCount</span>}
-                  {d.cancelled && <span className="mg-chip bad" style={{ marginInlineStart: 6 }}>מבוטל</span>}
-                  {d.allocationNo && <span className="mg-chip ok" style={{ marginInlineStart: 6 }} title={d.allocationNo}>הקצאה {String(d.allocationNo).slice(-9)}</span>}
-                  {needsAlloc(book, d) && !d.allocationNo && <span className="mg-chip bad" style={{ marginInlineStart: 6 }}>חסר מספר הקצאה</span>}</td>
-                <td>{heDate(d.date)}</td>
-                <td>{d.customer?.name}</td>
-                <td><b>{d.type === '330' ? '‎-' : ''}{fmt(d.total)}</b></td>
-                <td>{isImported(d) ? <span className="mg-chip">היסטוריה</span>
-                  : credited ? <span className="mg-chip bad">זוכתה</span>
-                  : d.type === '305' ? (open > 0.009 ? <span className="mg-chip warn">פתוחה · {fmt(open)}</span> : <span className="mg-chip ok">שולמה</span>)
-                  : <span className="mg-chip ok">הופק</span>}
-                  {(d.printCount || 0) > 0 && !isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 4 }}>הודפס</span>}</td>
-                <td>{isImported(d) ? <><button className="mg-btn ghost sm keep" onClick={() => printHTML(docHTML(book, d, true))}>🖨 העתק</button>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>המקור הופק ב-iCount</div></> :
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  <button className="mg-btn ghost sm keep" onClick={() => print(d)}>🖨 {(d.printCount || 0) > 0 ? 'העתק' : 'הדפס'}</button>
-                  <button className="mg-btn ghost sm keep" disabled={busyId === d.id} onClick={() => pdf(d)}>{busyId === d.id ? '…' : canSign ? 'PDF חתום' : 'PDF'}</button>
-                  {canMail && <button className="mg-btn ghost sm" disabled={busyId === d.id} onClick={() => sendSigned(d)}>✉ שלח חתום</button>}
-                  {d.sentTo && <span className="mg-chip ok" title={d.sentAt}>נשלח</span>}
-                  {needsAlloc(book, d) && !d.allocationNo && <>
-                    {ita?.connected && <button className="mg-btn sm" disabled={busyId === d.id}
-                      onClick={async () => { setBusyId(d.id); await onRequestAlloc(d); setBusyId(''); }}>בקש מספר הקצאה</button>}
-                    <button className="mg-btn ghost sm" onClick={() => { const n = window.prompt('מספר ההקצאה שהתקבל מרשות המסים:'); if (n && n.trim()) onManualAlloc(d, n.trim()); }}>הזן הקצאה</button></>}
-                  {canShareFiles ? <button className="mg-btn ghost sm" disabled={busyId === d.id} onClick={() => share(d)}>📲 שתף</button>
-                    : d.customer?.phone && <button className="mg-btn ghost sm" onClick={() => send(d, 'wa')}>וואטסאפ</button>}
-                  {d.customer?.email && <button className="mg-btn ghost sm" onClick={() => send(d, 'mail')}>מייל</button>}
-                  {d.type === '305' && d.series === series && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setForm({ type: '400', ref: d })}>קבלה</button>}
-                  {['305', '320'].includes(d.type) && d.series === series && !credited && book.dealerType !== 'exempt' &&
-                    <button className="mg-btn ghost sm" onClick={() => setForm({ type: '330', ref: d })}>זיכוי</button>}
-                </div>}</td>
-              </tr>
-            );
-          })}
+          {groups ? groups.map(g => { const o = isOpen(g.key), n = gLim[g.key] || 50; return <React.Fragment key={'g' + g.key}>
+            <tr className="grp" onClick={() => toggleG(g.key)} aria-expanded={o}><td colSpan={6}>{o ? '▾' : '◂'} <bdi>{g.label}</bdi><span className="grp-n"> · <bdi>{g.items.length} מסמכים</bdi></span><span className="grp-t">{fmt(g.total)}</span></td></tr>
+            {o && g.items.slice(0, n).map(rowOf)}
+            {o && g.items.length > n && <tr className="showmore"><td colSpan={6} style={{ textAlign: 'center', padding: 10 }}>
+              <button className="mg-btn ghost sm" onClick={() => setGLim(x => ({ ...x, [g.key]: n + 100 }))}>הצג עוד · {n} מתוך {g.items.length}</button></td></tr>}
+          </React.Fragment>; }) : list.slice(0, lim).map(rowOf)}
           {!list.length && <tr><td colSpan={6}><div className="mg-empty">עוד לא הופקו מסמכים.</div></td></tr>}
-          <ShowMore n={lim} total={list.length} onMore={more} cols={9} />
+          {!groups && <ShowMore n={lim} total={list.length} onMore={more} cols={9} />}
         </tbody>
       </table></div>
       <div className="mg-note" style={{ marginTop: 12 }}>
@@ -6278,6 +6345,7 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
       </div>
 
       {dups && <DupFinder list={list} activity={activity} cols={cols} patch={patch} flash={flash} onClose={() => setDups(false)} />}
+      <ViewSwitch />
       <div data-tour="cust-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr><th>שם</th><th>ח.פ. / ת.ז.</th><th>טלפון</th><th>אימייל</th><th>עיר</th><th>מקור</th><th>מחזור</th><th>אחרון</th></tr></thead>
         <tbody>
@@ -7319,6 +7387,7 @@ function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
           <button className="mg-btn danger sm" disabled={busy} onClick={delMany}>{busy ? 'מוחק…' : '🗑 מחק נבחרים'}</button>
           <button className="mg-btn ghost sm" onClick={() => setSel(new Set())}>נקה בחירה</button>
         </div>)}
+      <ViewSwitch />
       <div data-tour="items-table" className="mg-tblwrap"><table className="mg-tbl">
         <thead><tr>{role === 'owner' && <th style={{ width: 36 }}><input type="checkbox" aria-label="בחר הכול" style={{ width: 20, height: 20 }}
               checked={shown.length > 0 && shown.every(x => sel.has(x.id))}
@@ -7349,7 +7418,34 @@ function ItemsTab({ book, data, cols, patch, flash, ro, role = 'owner' }) {
 /* On a phone a wide table becomes a stack of cards: each cell shows its
    column's name beside it. The names come from the table's own header, for
    every table, as it is drawn — nothing to maintain screen by screen. */
+/* How lists look on a phone, chosen by each person on each device: cards
+   (each row a card with its column names), rows (compact lines, no names) or
+   table (the real table, scrolled sideways). One choice for every list. */
+const VIEW_KEY = 'tzbooks_view';
+const VIEWS = [['cards', '▦ כרטיסים'], ['rows', '☰ שורות'], ['table', '⊞ טבלה']];
+let viewMode = (() => { const v = lsGet(VIEW_KEY, 'cards'); return VIEWS.some(([k]) => k === v) ? v : 'cards'; })();
+const viewSubs = new Set();
+const applyView = () => { const h = document.documentElement; h.classList.toggle('view-rows', viewMode === 'rows'); h.classList.toggle('view-table', viewMode === 'table'); };
+function setViewMode(v) { viewMode = v; try { lsSet(VIEW_KEY, v); } catch { /* ignore */ } applyView(); labelTables(); viewSubs.forEach(f => f(v)); }
+function useViewMode() {
+  const [v, setV] = useState(viewMode);
+  useEffect(() => { viewSubs.add(setV); return () => viewSubs.delete(setV); }, []);
+  return v;
+}
+function usePhone() {
+  const q = '(max-width:640px)';
+  const [m, setM] = useState(() => typeof matchMedia === 'function' && matchMedia(q).matches);
+  useEffect(() => { const mq = matchMedia(q), f = () => setM(mq.matches); mq.addEventListener?.('change', f); return () => mq.removeEventListener?.('change', f); }, []);
+  return m;
+}
+function ViewSwitch() {
+  const v = useViewMode();
+  return <div className="view-switch seg" role="group" aria-label="תצוגת רשימות">
+    {VIEWS.map(([k, l]) => <button key={k} className={v === k ? 'on' : ''} aria-pressed={v === k} onClick={() => setViewMode(k)}>{l}</button>)}</div>;
+}
+
 function labelTables() {
+  if (viewMode !== 'cards') { document.querySelectorAll('table.mg-tbl.has-labels').forEach(t => t.classList.remove('has-labels')); return; }
   document.querySelectorAll('table.mg-tbl').forEach(t => {
     const hs = [...t.querySelectorAll(':scope > thead th')].map(th => th.textContent.trim());
     if (!hs.length) return;
@@ -7365,6 +7461,7 @@ function labelTables() {
     });
   });
 }
+applyView();
 let labelQueued = false;
 new MutationObserver(() => { if (labelQueued) return; labelQueued = true; requestAnimationFrame(() => { labelQueued = false; labelTables(); }); })
   .observe(document.body, { childList: true, subtree: true, characterData: true });
