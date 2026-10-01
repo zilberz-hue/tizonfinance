@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.29.2';
+const VERSION = '1.30.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -920,6 +920,19 @@ input:focus,select:focus{border-color:var(--gold)}
 @media (max-width:820px){[data-tour=ledger-kind]{flex-wrap:wrap !important;overflow:visible !important;margin-inline:0 !important;padding-inline:0 !important}}
 
 @media (max-width:640px){.mg-tbl.has-labels td.stack{flex-direction:column;align-items:flex-start;gap:4px}.mg-tbl.has-labels td.stack::before{display:none}}
+
+/* The business's tabs: a grouped side bar on a computer. */
+.tab-group{display:none}
+@media (min-width:1100px){
+  .book-body{display:grid;grid-template-columns:200px minmax(0,1fr);gap:22px;align-items:start}
+  .book-tabs.mg-tabs{flex-direction:column;flex-wrap:nowrap;overflow:visible;position:sticky;top:14px;margin:0 !important;padding:8px;
+    background:#fff;border:1px solid var(--line);border-radius:16px;gap:2px;max-height:calc(100vh - 28px);overflow-y:auto}
+  .book-tabs .mg-tab{border:0;border-radius:10px;text-align:right;padding:9px 12px;background:transparent;width:100%;font-size:15px}
+  .book-tabs .mg-tab:hover{background:#f6efe1}
+  .book-tabs .mg-tab.on{background:var(--gold);color:#fff}
+  .tab-group{display:block;font-size:12px;color:var(--muted);font-weight:800;padding:12px 12px 4px;letter-spacing:.02em;border-top:1px solid #f0ebe0;margin-top:6px}
+  .book-main{min-width:0}
+}
 `;
 
 /* ===================================================================== ui */
@@ -1047,6 +1060,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.30.0', date: '01.10.26', items: [
+    'במחשב: הלשוניות של העסק עברו לסרגל צד קבוע, בקבוצות: עבודה יומית, כספים, דוחות ומיסים. בנייד ובטאבלט הן נשארות למעלה.',
+    'עריכת דף סליקה שעוד לא שולם (✎ ערוך): נוצר קישור חדש עם הפרטים המעודכנים, והקודם מבוטל.'] },
   { v: '1.29.2', date: '01.10.26', items: ['לשונית "💳 סליקה" קבועה בכל עסק: כל דפי הסליקה, דף חדש, וכשעוד לא מוגדר ספק סליקה, מה חסר וכפתור להגדרה.'] },
   { v: '1.29.1', date: '01.10.26', items: ['iCount: מסמכים חדשים נמשכים בכל פתיחה של העסק (לכל היותר פעם ב-20 דקות) ולא רק פעם ביום. בלשונית המסמכים יש כפתור "↻ משוך מ-iCount" עם התוצאה, ושגיאה מוצגת במקום להיבלע. מסמך של היום תמיד בטווח.'] },
   { v: '1.29.0', date: '01.10.26', items: [
@@ -2591,9 +2607,10 @@ function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEd
 
 /* Payment pages, in a place of their own: the list, a new page, and when
    none can be made yet, what is missing and where to set it up. */
-function PayPagesTab({ book, data, payOk, server, role, ro, flash, onCreated, onCancel, onRefresh, onSetup }) {
+function PayPagesTab({ book, data, payOk, server, role, ro, flash, onCreated, onCancel, onRefresh, onSetup, onReplace }) {
   const list = data.payreqs || [];
   const [form, setForm] = useState(false);
+  const [editing, setEditing] = useState(null);
   const onNew = () => setForm(true);
   const ready = !!(payOk?.zcredit || payOk?.upay);
   const paid = list.filter(p => p.status === 'paid'), open = list.filter(p => p.status === 'open');
@@ -2612,10 +2629,12 @@ function PayPagesTab({ book, data, payOk, server, role, ro, flash, onCreated, on
             : 'לעסק הזה עוד לא הוגדר ספק סליקה: מפתח זד קרדיט או אימייל של חשבון יופיי.'}</div>
         {role === 'owner' && cloud && server && <button className="mg-btn" style={{ marginTop: 10 }} onClick={onSetup}>⚙ הגדרת דפי סליקה</button>}
       </div>}
-      {list.length > 0 ? <PayList book={book} list={list} onCancel={onCancel} onRefresh={onRefresh} flash={flash} ro={ro} />
+      {list.length > 0 ? <PayList book={book} list={list} onCancel={onCancel} onRefresh={onRefresh} flash={flash} ro={ro} onEdit={ready ? (p) => setEditing(p) : null} />
         : ready && <div className="mg-empty">עוד אין דפי סליקה. "💳 דף סליקה חדש" יוצר קישור לתשלום ושולח אותו ללקוח בוואטסאפ או במייל.</div>}
       {form && <PayForm book={book} payOk={payOk} docs={data.documents || []} customers={data.customers || []} items={data.items || []} flash={flash}
                         onCreated={onCreated} onClose={() => setForm(false)} />}
+      {editing && <PayForm book={book} payOk={payOk} docs={data.documents || []} customers={data.customers || []} items={data.items || []} flash={flash} preset={editing}
+                           onCreated={(r, c) => { onCreated(r, c); onReplace(editing, r); }} onClose={() => setEditing(null)} />}
     </div>
   );
 }
@@ -2659,7 +2678,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   const openDoc = (type, pay) => { setSub('docs'); setQuickDoc({ at: Date.now(), type, pay }); };
   useEffect(() => { onTab?.(sub); }, [sub]);
   /* On a narrow screen the tabs scroll sideways: keep the chosen one in view. */
-  useEffect(() => { document.querySelector('.book-tabs .mg-tab.on')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }, [sub]);
+  useEffect(() => { if (window.innerWidth < 1100) document.querySelector('.book-tabs .mg-tab.on')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }, [sub]);
   useEffect(() => { if (tabReq) { if (SUBS.some(([k]) => k === tabReq)) setSub(tabReq); onTabDone?.(); } }, [tabReq]);
   const [edit, setEdit] = useState(null);
   const cols = useMemo(() => Object.fromEntries(COLS.map(c => [c, bookCol(book.id, c)])), [book.id]);
@@ -2741,6 +2760,13 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     const cp = planCustomers(data.customers || [], [cust || {}], 'doc');
     if (cp.add.length + cp.upd.length) { await saveCustomers(cols.customers, [...cp.add, ...cp.upd]); patch('customers', () => cp.all); }
   };
+  /* An edited page: the old link stops working, pointing to the new one. */
+  const payReplace = async (old, nu) => {
+    /* Only the fields the rules let a cancellation touch. */
+    const f = { status: 'cancelled', cancelledAt: new Date().toISOString(), cancelledBy: cloud?.auth?.currentUser?.email || '' };
+    try { await DB.patch(`books/${book.id}/payreqs`, old.id, f); patch('payreqs', l => l.map(x => x.id === old.id ? { ...x, ...f } : x)); }
+    catch { flash('הקישור החדש נוצר, אבל ביטול הקישור הקודם נכשל. בטל אותו ידנית.'); }
+  };
   const payCancel = async (p) => {
     if (!window.confirm(`לבטל את הקישור לתשלום של ${p.customer?.name} (${fmt(p.total)})? מי שיפתח אותו יראה שהוא בוטל.`)) return;
     const f = { status: 'cancelled', cancelledAt: new Date().toISOString(), cancelledBy: cloud?.auth?.currentUser?.email || '' };
@@ -2798,6 +2824,9 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     patch('documents', list => list.map(x => x.id === d.id ? { ...x, printCount: n } : x));
   };
 
+  const TAB_GROUP = { docs: 'עבודה יומית', paypages: 'עבודה יומית', customers: 'עבודה יומית', items: 'עבודה יומית',
+    income: 'כספים', expenses: 'כספים', suppliers: 'כספים', bank: 'כספים', ledger: 'כספים',
+    vat: 'דוחות ומיסים', pay: 'דוחות ומיסים', pnl: 'דוחות ומיסים', tax: 'דוחות ומיסים', import: 'כלים' };
   const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ...(ro ? [] : [['paypages', '💳 סליקה' + ((data.payreqs || []).filter(p => p.status === 'open').length ? ` (${(data.payreqs || []).filter(p => p.status === 'open').length})` : '')]]), ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
     ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ...(ro ? [] : [['import', 'ייבוא']])]
     .filter(([k]) => !clerk || ['docs', 'paypages', 'customers', 'items'].includes(k));
@@ -2835,9 +2864,16 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         חלק מהנתונים לא נטענו ({data.errors.join(', ')}). בדוק שחוקי ה-Firestore המעודכנים פורסמו.{' '}
         <button className="mg-linkish" onClick={onReload}>נסה שוב</button></div>}
 
-      <div data-tour="book-tabs" className="mg-tabs book-tabs" style={{ marginBottom: 16 }}>
-        {SUBS.map(([k, l]) => <button key={k} className={'mg-tab' + (sub === k ? ' on' : '')} onClick={() => setSub(k)}>{l}</button>)}
-      </div>
+      {/* On a computer the tabs stand as a side bar, grouped; on phones and tablets they scroll across the top. */}
+      <div className="book-body">
+      <nav data-tour="book-tabs" className="mg-tabs book-tabs" style={{ marginBottom: 16 }} aria-label="לשוניות העסק">
+        {SUBS.map(([k, l], i) => { const g = TAB_GROUP[k], pg = i ? TAB_GROUP[SUBS[i - 1][0]] : null; return (
+          <React.Fragment key={k}>
+            {g && g !== pg && <div className="tab-group">{g}</div>}
+            <button className={'mg-tab' + (sub === k ? ' on' : '')} onClick={() => setSub(k)}>{l}</button>
+          </React.Fragment>); })}
+      </nav>
+      <div className="book-main">
 
       {sub === 'dash' && <Dash totals={tot} rate={rate} alerts={alerts} onSub={setSub} linked={!!book.tenant}
                                payNote={role === 'owner' && Number(todayIso().slice(8, 10)) <= 20 ? (() => {
@@ -2880,14 +2916,14 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
           onEditBook={onEditBook} onStoreLogin={onStoreLogin} onReload={onReload} onLog={log} onServer={onServer}
           onGo={(k, o) => { if (o?.pay) openDoc(null, true); else setSub(k); }} onGlobal={onGlobal} /></>}
       {sub === 'paypages' && <PayPagesTab book={book} data={data} payOk={payOk} server={server} role={role} ro={ro} flash={flash}
-        onCreated={payCreated} onCancel={payCancel} onRefresh={payRefresh}
+        onCreated={payCreated} onCancel={payCancel} onRefresh={payRefresh} onReplace={payReplace}
         onSetup={() => { try { sessionStorage.setItem('tzbooks_bset', 'pay'); } catch {} setSub('bset'); }} />}
       {sub === 'pay' && <AuthPayTab book={book} rows={[{ book, data }, ...siblings]} onLoad={onLoadSiblings} flash={flash} />}
       {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} taxRows={role === 'owner' ? taxRows : null} onLoadSiblings={onLoadSiblings} />}
       {sub === 'docs' && <DocsTab quick={quickDoc} book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
                                   onLog={log} server={server} ro={ro} flash={flash}
-                                  payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh}
+                                  payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh} onPayReplace={payReplace}
                                   onSetup={role === 'owner' ? () => { try { sessionStorage.setItem('tzbooks_bset', 'pay'); } catch {} setSub('bset'); } : null}
                                   icount={role === 'owner' && cloud && server && (book.icountAuto || book.icountSyncAt || data.documents?.some(d => d.source === 'icount-api')) ? { ...ic, err: ic.err || (!ic.msg && book.icountErr) || '', sync: () => icSync(true) } : null} />}
       {sub === 'ledger' && <LedgerTab book={book} data={data} ledger={ledger} pick={ledgerPick} />}
@@ -2909,6 +2945,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
           if (edit.inboxId) { await inboxCall('inbox-mark', book.id, { id: edit.inboxId, status: 'done', expenseId: r.id }).catch(() => {}); setInboxTick(t => t + 1); }
           flash('ההוצאה נשמרה'); setEdit(null);
         }} />}
+      </div></div>
       {!ro && <QuickFab book={book} canPay={!!(payOk?.zcredit || payOk?.upay)} canExpense={role === 'owner'} onDoc={(t) => openDoc(t)} onPay={() => openDoc(null, true)}
                         onExpense={() => setEdit({ kind: 'expense', rec: null })} />}
       {edit?.kind === 'supplier' && <SupplierForm rec={edit.rec} onClose={() => setEdit(null)}
@@ -4373,7 +4410,7 @@ function IssuedPanel({ d, book, busy, canShareFiles, canMail, onShare, onMail, o
 }
 
 function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
-                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh, onSetup, icount = null }) {
+                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh, onSetup, icount = null, onPayReplace = null }) {
   const [busyId, setBusyId] = useState('');
   const [payForm, setPayForm] = useState(false);
   const [form, setForm] = useState(null);
@@ -4483,7 +4520,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
         <span style={{ flex: 1, minWidth: 180 }}>🔗 <b>iCount</b> · {icount.busy ? 'מושך מסמכים…' : icount.err ? icount.err : icount.msg ? icount.msg : icount.at ? `עודכן ${new Date(icount.at).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'עוד לא נמשך'}</span>
         <button className="mg-btn sm keep" disabled={icount.busy} onClick={icount.sync}>{icount.busy ? '…' : '↻ משוך מ-iCount'}</button>
       </div>}
-      <PayList book={book} list={payreqs} onCancel={onPayCancel} onRefresh={onPayRefresh} flash={flash} ro={ro} />
+      <PayList book={book} list={payreqs} onCancel={onPayCancel} onRefresh={onPayRefresh} flash={flash} ro={ro} onEdit={onPayReplace && (payOk?.zcredit || payOk?.upay) ? (p) => setPayForm({ preset: p }) : null} />
       {payOk && (payOk.zcredit || payOk.upay) && !payreqs.length && !ro && <div className="mg-note" style={{ marginBottom: 12, fontSize: 14 }}>💳 דפי סליקה מוכנים. "דף סליקה" למעלה שולח ללקוח קישור לתשלום בכרטיס, ואחרי התשלום מופקת לו חשבונית לבד.</div>}
       {onSetup && !ro && cloud && !(payOk && (payOk.zcredit || payOk.upay)) && <div className="mg-note" style={{ marginBottom: 12, fontSize: 14 }}>💳 רוצה לשלוח ללקוח קישור לתשלום בכרטיס, עם חשבונית אוטומטית? <button className="mg-linkish" onClick={onSetup}>הגדרת דפי סליקה (זד קרדיט או יופיי)</button></div>}
       <div data-tour="docs-filters" style={{ ...row, marginBottom: 12 }}>
@@ -4547,7 +4584,8 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
           : 'חשבונית שנשלחת דיגיטלית צריכה חתימה אלקטרונית מאובטחת. עד שתוגדר תעודה: מדפיסים ומוסרים ביד, או שולחים PDF רק למטרות ניסיון.'}
         {' '}מסמך שהופק לא נמחק ולא נערך; טעות מתקנים בחשבונית זיכוי.
       </div>
-      {payForm && <PayForm book={book} payOk={payOk} docs={docs} customers={customers} items={items} flash={flash} onCreated={onPayCreated} onClose={() => setPayForm(false)} />}
+      {payForm && <PayForm book={book} payOk={payOk} docs={docs} customers={customers} items={items} flash={flash} preset={payForm.preset || null}
+                           onCreated={(r, c) => { onPayCreated(r, c); if (payForm.preset) onPayReplace(payForm.preset, r); }} onClose={() => setPayForm(false)} />}
       {form && <DocForm book={book} docs={docs} customers={customers} items={items} preset={form} itaReady={!!ita?.connected} series={series} onClose={() => setForm(null)}
                         onIssue={async (rec) => { const d = await onIssue(rec); if (d) { setForm(null); setDone(d); } return d; }} />}
       {done && <IssuedPanel d={docs.find(x => x.id === done.id) || done} book={book} busy={busyId === done.id} canShareFiles={canShareFiles} canMail={canMail}
@@ -6498,17 +6536,18 @@ function LedgerTab({ book, data, ledger, pick }) {
 const PAY_STATUS = { open: ['ממתין לתשלום', 'warn'], paid: ['שולם', 'ok'], cancelled: ['בוטל', ''], mismatch: ['סכום שונה · לבדוק', 'bad'] };
 const payText = (book, p) => `שלום ${p.customer?.name || ''},\nקישור לתשלום ל-${book.legalName || book.name} על סך ${fmt(p.total)}:\n${p.link}\nהחשבונית תישלח אליך מיד אחרי התשלום.`;
 
-function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, flash, payOk = null }) {
+function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, flash, payOk = null, preset = null }) {
   /* Which company clears this page: the one set up, or the business's choice
      when both are. */
   const provs = [payOk?.zcredit && ['zcredit', 'זד קרדיט'], payOk?.upay && ['upay', 'יופיי']].filter(Boolean);
-  const [provider, setProvider] = useState(provs[0]?.[0] || 'zcredit');
+  /* Editing an open page: the same details, as a new page that replaces it. */
+  const [provider, setProvider] = useState(preset?.provider && provs.some(x => x[0] === preset.provider) ? preset.provider : provs[0]?.[0] || 'zcredit');
   const rate = rateOf(book);
-  const [cust, setCust] = useState({ name: '', taxId: '', phone: '', email: '', address: '' });
-  const [incl, setIncl] = useState(true);
-  const [lines, setLines] = useState([{ desc: '', qty: 1, price: '' }]);
-  const [maxPayments, setMax] = useState(1);
-  const [note, setNote] = useState('');
+  const [cust, setCust] = useState(() => preset?.customer ? { name: '', taxId: '', phone: '', email: '', address: '', ...preset.customer } : { name: '', taxId: '', phone: '', email: '', address: '' });
+  const [incl, setIncl] = useState(preset ? preset.incl !== false : true);
+  const [lines, setLines] = useState(() => preset?.lines?.length ? preset.lines.map(l => ({ ...l })) : [{ desc: '', qty: 1, price: '' }]);
+  const [maxPayments, setMax] = useState(preset?.maxPayments || 1);
+  const [note, setNote] = useState(preset?.note || '');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
   const known = useMemo(() => {
@@ -6551,8 +6590,9 @@ function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, f
     </Box>
   );
   return (
-    <Box title="דף סליקה חדש" onClose={onClose} wide
+    <Box title={preset ? 'עריכת דף סליקה' : 'דף סליקה חדש'} onClose={onClose} wide
          footer={<><button className="mg-btn" disabled={busy || !ok} onClick={create}>{busy ? 'יוצר…' : `צור קישור לתשלום · ${fmt(tot.total)}`}</button>
+      {preset && <div className="mg-note warn" style={{ marginBottom: 12, fontSize: 14 }}>בשמירה נוצר קישור חדש עם הפרטים המעודכנים, והקישור הקודם מבוטל. שלח ללקוח את הקישור החדש.</div>}
                    <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
       {provs.length > 1 && (
         <div style={{ ...row, marginBottom: 10 }}>
@@ -6595,7 +6635,7 @@ function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, f
   );
 }
 
-function PayList({ book, list, onCancel, onRefresh, flash, ro }) {
+function PayList({ book, list, onCancel, onRefresh, flash, ro, onEdit }) {
   const [all, setAll] = useState(false);
   const sorted = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const shown = all ? sorted : sorted.filter(p => p.status === 'open' || p.status === 'mismatch' || Date.now() - Date.parse(p.paidAt || p.createdAt) < 3 * 86400000).slice(0, 20);
@@ -6638,6 +6678,7 @@ function PayList({ book, list, onCancel, onRefresh, flash, ro }) {
               {p.status === 'open' && <>
               <button className="mg-btn ghost sm keep" onClick={() => { navigator.clipboard?.writeText(p.link); flash('הקישור הועתק'); }}>קישור</button>{' '}
               <a className="mg-btn ghost sm keep" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone(p.customer?.phone)}?text=${encodeURIComponent(payText(book, p))}`}>וואטסאפ</a>{' '}
+              {!ro && onEdit && <button className="mg-btn ghost sm" onClick={() => onEdit(p)}>✎ ערוך</button>}{' '}
               {!ro && <button className="mg-btn ghost sm" onClick={() => onCancel(p)}>בטל</button>}</>}</td>
           </tr>); })}</tbody></table></div>
     </div>
