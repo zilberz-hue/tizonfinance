@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.28.2';
+const VERSION = '1.29.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1047,6 +1047,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.29.0', date: '01.10.26', items: [
+    'מסך הגדרות לכל עסק (⚙ בראש העסק): פרטי העסק, דפי סליקה (זד קרדיט ויופיי), iCount, חשבוניות מ-Gmail, החנות, רשות המסים, מיסים ומקדמות, הוצאות קבועות, משתמשים וגיבוי. בכל אחד רואים אם הוא מוגדר (✓), ומגדירים אותו באותו מקום.',
+    'בלשונית המסמכים: הסבר והפניה להגדרת דפי סליקה כשהם עוד לא מוגדרים.'] },
   { v: '1.28.2', date: '01.10.26', items: [
     'יופיי: טופס התשלום נשלח כמו בתוסף הרשמי של יופיי, עם האימייל והנייד של הלקוח, כך שהם כבר ממולאים בעמוד התשלום.'] },
   { v: '1.28.1', date: '01.10.26', items: [
@@ -1168,7 +1171,7 @@ const CHANGES = [
 
 const TOUR_CTX = {
   welcome: 'התחלה', all: 'כל העסקים', dash: 'סקירה', docs: 'מסמכים', customers: 'לקוחות', income: 'הכנסות',
-  expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', pnl: 'רווח והפסד', tax: 'רשות המסים',
+  expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', bset: 'הגדרות העסק', pnl: 'רווח והפסד', tax: 'רשות המסים',
   items: 'פריטים', ledger: 'כרטסת', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
 const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'import'];
@@ -1259,6 +1262,9 @@ const TOURS = {
   vat: [
     { t: 'vat-period', title: 'תקופת הדיווח', text: 'חודשי או דו-חודשי, ובחירת התקופה. מכאן גם יוצא הדוח לרואה החשבון.', since: '1.0.0' },
     { t: 'vat-stats', title: 'לדיווח', text: 'עסקאות, מע״מ עסקאות, תשומות ומע״מ לתשלום. אלה המספרים שממלאים בדיווח.', since: '1.0.0' },
+  ],
+  bset: [
+    { t: 'bset', title: 'הגדרות העסק', text: 'כל מה שהעסק מחובר אליו, במקום אחד: ✓ מה מוגדר, ומה חסר. לחיצה על שורה פותחת אותה ומגדירה במקום.', since: '1.27.0' },
   ],
   pay: [
     { t: 'pay-auth', title: 'לתשלום לרשויות', text: 'כמה מגיע למע״מ, למס הכנסה ולביטוח לאומי בכל תקופה, וההשוואה מול מה שרואה החשבון שלח.', since: '1.26.0' },
@@ -1778,7 +1784,8 @@ function App() {
                       onDeleteBook={() => deleteBook(book)}
                       onTab={setBookTab} tabReq={tabReq?.book === book.id ? tabReq.k : null} onTabDone={() => setTabReq(null)}
                       siblings={(books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId) && roleOf(b, user.email) === 'owner').map(b => ({ book: b, data: datas[b.id] }))}
-                      onLoadSiblings={() => (books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId)).forEach(b => ensure(b))} />
+                      onLoadSiblings={() => (books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId)).forEach(b => ensure(b))}
+                      user={user} onGlobal={(v) => setCur(v)} onServer={() => serverStatus(true).then(setServer)} />
           : <div className="mg-empty">טוען את {book.name}…</div>)}
       </main>
 
@@ -2462,7 +2469,122 @@ function QuickFab({ book, canPay, canExpense, onDoc, onPay, onExpense }) {
   );
 }
 
-function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings }) {
+/* ============================================================ business settings */
+/* Everything a business is set up with, in one place: what is ready (✓),
+   what is missing, and the button that sets it up right there. */
+function SetRow({ icon, title, ok, status, children, onOpen, open }) {
+  return (
+    <div className="mg-card bset-row" style={{ padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={onOpen}>
+        <span style={{ fontSize: 24, width: 32, textAlign: 'center' }}>{icon}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
+          <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>{status}</div>
+        </div>
+        <span className={'mg-chip ' + (ok === true ? 'ok' : ok === false ? 'warn' : '')}>{ok === true ? '✓ מוגדר' : ok === false ? 'לא מוגדר' : '—'}</span>
+        <span style={{ fontSize: 18, color: 'var(--muted)' }}>{open ? '▴' : '▾'}</span>
+      </div>
+      {open && <div style={{ marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 12 }}>{children}</div>}
+    </div>
+  );
+}
+function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEditBook, onStoreLogin, onGo, onGlobal, onServer, onReload, onLog }) {
+  const [open, setOpen] = useState(() => { try { return sessionStorage.getItem('tzbooks_bset') || ''; } catch { return ''; } });
+  const tog = (k) => { const n = open === k ? '' : k; setOpen(n); try { sessionStorage.setItem('tzbooks_bset', n); } catch {} };
+  const [inbox, setInbox] = useState(null);
+  const [icount, setIcount] = useState(null);
+  const [gmail, setGmail] = useState(false);
+  useEffect(() => {
+    if (!cloud || !server) return;
+    if (server.inbox) inboxCall('inbox-list', book.id).then(setInbox).catch(() => setInbox({}));
+    fnCall({ action: 'icount-status', book: book.id }).then(setIcount).catch(() => setIcount({}));
+  }, [book.id, server]);
+  const prof = lsGet(TAX_PROFILE_KEY, {}) || {}, tid = digitsOf(book.taxId) || book.id;
+  const pays = data.payreqs || [], openPays = pays.filter(p => p.status === 'open').length;
+  const rec = (data.recurring || []).filter(r => r.active !== false);
+  const rate = rateOf(book);
+  const owner = role === 'owner';
+  const series = docSeries(book);
+  return (
+    <div data-tour="bset" style={{ display: 'grid', gap: 10 }}>
+      <SetRow icon="🏢" title="פרטי העסק" ok={digitsOf(book.taxId).length === 9} open={open === 'biz'} onOpen={() => tog('biz')}
+              status={`${book.legalName || book.name} · ${DEALERS[book.dealerType]}${book.taxId ? ' · ' + book.taxId : ' · חסר מספר עוסק'}${rate ? ` · מע״מ ${rate}%` : ''}`}>
+        <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+          שם על המסמכים: <b>{book.legalName || book.name}</b><br />
+          {book.address ? <>כתובת: {book.address}<br /></> : null}{book.phone ? <>טלפון: {book.phone}<br /></> : null}{book.email ? <>אימייל: {book.email}<br /></> : null}
+          מסמכים: <b>{series === 'live' ? 'מצב אמיתי' : 'מצב ניסיון (T-)'}</b>{book.docStart ? ` · מספור מ-${book.docStart}` : ''}
+        </div>
+        {owner && <button className="mg-btn sm" style={{ marginTop: 8 }} onClick={onEditBook}>✎ עריכת פרטי העסק, מצב המסמכים והמספור</button>}
+      </SetRow>
+
+      <SetRow icon="💳" title="דפי סליקה · זד קרדיט ויופיי" ok={!!(payOk?.zcredit || payOk?.upay)} open={open === 'pay'} onOpen={() => tog('pay')}
+              status={(payOk?.zcredit || payOk?.upay) ? `מחובר דרך ${[payOk.zcredit && 'זד קרדיט', payOk.upay && 'יופיי'].filter(Boolean).join(' ו')} · ${pays.length} דפי סליקה${openPays ? `, ${openPays} ממתינים לתשלום` : ''}` : !server ? 'דורש את השרת (ההתקנה מ-GitHub)' : !server?.pay?.admin ? 'חסר מפתח שירות של Firebase בשרת' : 'חסר מפתח זד קרדיט או אימייל יופיי לעסק הזה'}>
+        {(payOk?.zcredit || payOk?.upay) && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <button className="mg-btn sm" onClick={() => onGo('docs', { pay: true })}>💳 דף סליקה חדש</button>
+          <button className="mg-btn ghost sm" onClick={() => onGo('docs')}>רשימת דפי הסליקה ({pays.length})</button>
+        </div>}
+        {owner && <PayCard server={server} books={[book]} user={user} flash={flash} onServer={onServer} />}
+      </SetRow>
+
+      <SetRow icon="🔗" title="iCount" ok={icount ? !!icount.linked : null} open={open === 'icount'} onOpen={() => tog('icount')}
+              status={icount?.linked ? `מחובר${book.icountAuto ? ' · סנכרון יומי אוטומטי' : ''}${book.icountSyncAt ? ` · עודכן ${new Date(book.icountSyncAt).toLocaleDateString('he-IL')}` : ''}` : 'משיכת מסמכים מ-iCount בלי קבצים'}>
+        {owner ? <ICountLive book={book} data={data} cols={cols} flash={flash} onDone={onReload} onLog={onLog} server={server} /> : <div className="mg-note">רק בעלי העסק מגדירים את החיבור.</div>}
+      </SetRow>
+
+      <SetRow icon="📥" title="חשבוניות ספקים מ-Gmail" ok={inbox ? !!inbox.keyed : null} open={open === 'gmail'} onOpen={() => tog('gmail')}
+              status={inbox?.keyed ? `פעיל${inbox.lastAt ? ` · אחרונה התקבלה ${new Date(inbox.lastAt).toLocaleDateString('he-IL')}` : ' · עוד לא התקבלה חשבונית'}${inbox.items?.length ? ` · ${inbox.items.length} ממתינות` : ''}` : 'חשבוניות שמגיעות למייל נכנסות לבד להוצאות'}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {owner && <button className="mg-btn sm" onClick={() => setGmail(true)}>{inbox?.keyed ? '⚙ הסקריפט והמפתח' : 'חבר את Gmail'}</button>}
+          <button className="mg-btn ghost sm" onClick={() => onGo('expenses')}>לחשבוניות שהגיעו</button>
+        </div>
+        {gmail && <GmailSetup book={book} flash={flash} onClose={() => { setGmail(false); inboxCall('inbox-list', book.id).then(setInbox).catch(() => {}); }} />}
+      </SetRow>
+
+      <SetRow icon="🛒" title="החנות" ok={book.tenant ? !(data.storeErr || data.storeLogin) : null} open={open === 'store'} onOpen={() => tog('store')}
+              status={book.tenant ? (data.storeErr ? 'שגיאה בקריאת החנות' : data.storeLogin ? 'מקושר, צריך להתחבר' : `מקושר לחנות ${book.tenant}${data.storeAt ? ` · ${(data.orders || []).length} הזמנות` : ''}`) : 'לא מקושר לחנות'}>
+        <div style={{ fontSize: 14, marginBottom: 8 }}>{book.tenant ? 'הזמנות שולמו בחנות נספרות כהכנסה, ולקוחות החנות מתמזגים ללקוחות.' : 'קישור לחנות נעשה בפרטי העסק (מזהה החנות).'}</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {owner && <button className="mg-btn ghost sm" onClick={onEditBook}>✎ מזהה החנות</button>}
+          {book.tenant && <button className="mg-btn ghost sm" onClick={onStoreLogin}>התחברות לחנות</button>}
+          {book.tenant && <button className="mg-btn ghost sm" onClick={onReload}>↻ רענון מהחנות</button>}
+        </div>
+      </SetRow>
+
+      <SetRow icon="🏛" title="רשות המסים · מספרי הקצאה" ok={server?.ita?.configured ? null : false} open={open === 'ita'} onOpen={() => tog('ita')}
+              status={server?.ita?.configured ? 'חיבור לבקשת מספרי הקצאה אוטומטית' : 'לא מוגדר בשרת · אפשר להזין מספר הקצאה ידנית'}>
+        {owner && <ItaCard server={server} books={[book]} user={user} flash={flash} />}
+        <button className="mg-btn ghost sm" style={{ marginTop: 8 }} onClick={() => onGo('tax')}>לשונית רשות המסים (מבנה אחיד, רישום תוכנה)</button>
+      </SetRow>
+
+      <SetRow icon="🧾" title="מיסים ומקדמות" ok={Number(prof.advRate?.[tid]) > 0 && (isCompanyId(tid) || Number(prof.blMonthly?.[tid]) > 0)} open={open === 'tax'} onOpen={() => tog('tax')}
+              status={`מקדמת מס הכנסה ${Number(prof.advRate?.[tid]) > 0 ? prof.advRate[tid] + '%' : 'לא הוזנה'}${isCompanyId(tid) ? '' : ` · ביטוח לאומי ${Number(prof.blMonthly?.[tid]) > 0 ? fmt(prof.blMonthly[tid]) + ' לחודש' : 'לא הוזן'}`} · דיווח ${(prof.freq?.[tid] || 'bi') === 'month' ? 'חודשי' : 'דו-חודשי'}`}>
+        <div style={{ fontSize: 14, marginBottom: 8 }}>השיעורים מההודעות של מס הכנסה וביטוח לאומי, נקודות הזיכוי ותדירות הדיווח. נמצאים בלשונית "לתשלום" ובצפי המס ברווח והפסד.</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="mg-btn sm" onClick={() => onGo('pay')}>לתשלום לרשויות</button>
+          <button className="mg-btn ghost sm" onClick={() => onGo('pnl')}>צפי מס הכנסה</button>
+        </div>
+      </SetRow>
+
+      <SetRow icon="🔁" title="הוצאות קבועות" ok={rec.length ? true : null} open={open === 'rec'} onOpen={() => tog('rec')}
+              status={rec.length ? `${rec.length} הוצאות · ${fmt(rec.reduce((a, r) => a + (Number(r.gross) || 0) * Math.min(100, Math.max(1, Number(r.share) || 100)) / 100, 0))} בחודש` : 'שכירות, טלפון, ביטוח: נרשמות לבד כל חודש'}>
+        <button className="mg-btn sm" onClick={() => onGo('expenses')}>לניהול ההוצאות הקבועות</button>
+      </SetRow>
+
+      <SetRow icon="👥" title="משתמשים והרשאות" ok={null} open={open === 'users'} onOpen={() => tog('users')}
+              status={`בעלים: ${(book.owners || []).length} · מפיקי מסמכים: ${(book.clerks || []).length} · צפייה (רו״ח): ${(book.viewers || []).length}`}>
+        <div style={{ fontSize: 14, marginBottom: 8 }}>למשל: לתת לששון גישת צפייה, או לעובדת הרשאה להפיק מסמכים בלבד.</div>
+        <button className="mg-btn sm" onClick={() => onGlobal('users')}>למסך המשתמשים</button>
+      </SetRow>
+
+      <SetRow icon="☁️" title="גיבוי, ענן, קוד נעילה וארכיון" ok={!!cloud} open={open === 'cloud'} onOpen={() => tog('cloud')}
+              status={cloud ? 'מחובר לענן · גיבוי שבועי וארכיון חודשי במייל' : 'עובד במכשיר בלבד'}>
+        <button className="mg-btn sm" onClick={() => onGlobal('settings')}>למסך גיבוי וענן</button>
+      </SetRow>
+    </div>
+  );
+}
+
+function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings, user, onGlobal, onServer }) {
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
@@ -2637,7 +2759,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
           <button className="mg-btn ghost hdr-act" onClick={() => setEdit({ kind: 'expense', rec: null })}>＋ הוצאה</button>
           {/* Income is recorded by issuing its document: the same form, with customers and items. */}
           <button className="mg-btn ghost hdr-act" onClick={() => openDoc()}>＋ הכנסה</button>
-          <button className="mg-btn ghost hdr-set" onClick={onEditBook} aria-label="הגדרות העסק">⚙ <span className="hdr-set-t">הגדרות</span></button></>}
+          <button data-tour="hdr-settings" className={'mg-btn ghost hdr-set' + (sub === 'bset' ? ' on' : '')} onClick={() => setSub('bset')} aria-label="הגדרות העסק">⚙ <span className="hdr-set-t">הגדרות</span></button></>}
         {role !== 'owner' && <span className="mg-chip" style={{ background: 'rgba(255,255,255,.2)', color: '#fff' }}>{ROLES[role]}</span>}
       </div>
 
@@ -2696,12 +2818,18 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
         onSave={(r) => save('banktx', r)} onDel={(r) => remove('banktx', r.id, 'השורה')}
         onBulk={async (recs) => { let ok = 0; for (const r of recs) if (await save('banktx', r)) ok++; return ok; }} />}
       {sub === 'vat' && <VatTab totals={tot} rate={rate} book={book} />}
+      {sub === 'bset' && <><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}><h3 style={{ margin: 0, flex: 1 }}>⚙ הגדרות · {book.name}</h3>
+        <button className="mg-btn ghost sm" onClick={() => setSub('dash')}>סגור</button></div>
+        <BookSettings book={book} data={data} cols={cols} flash={flash} server={server} user={user} payOk={payOk} role={role}
+          onEditBook={onEditBook} onStoreLogin={onStoreLogin} onReload={onReload} onLog={log} onServer={onServer}
+          onGo={(k, o) => { if (o?.pay) openDoc(null, true); else setSub(k); }} onGlobal={onGlobal} /></>}
       {sub === 'pay' && <AuthPayTab book={book} rows={[{ book, data }, ...siblings]} onLoad={onLoadSiblings} flash={flash} />}
       {sub === 'pnl' && <PnlTab totals={tot} supName={supName} book={book} taxRows={role === 'owner' ? taxRows : null} onLoadSiblings={onLoadSiblings} />}
       {sub === 'docs' && <DocsTab quick={quickDoc} book={book} docs={data.documents || []} customers={data.customers || []} items={data.items || []} onIssue={issueDoc} onPrinted={printedDoc} onSent={sentDoc}
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
                                   onLog={log} server={server} ro={ro} flash={flash}
-                                  payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh} />}
+                                  payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh}
+                                  onSetup={role === 'owner' ? () => { try { sessionStorage.setItem('tzbooks_bset', 'pay'); } catch {} setSub('bset'); } : null} />}
       {sub === 'ledger' && <LedgerTab book={book} data={data} ledger={ledger} pick={ledgerPick} />}
       {sub === 'items' && <ItemsTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role} />}
       {sub === 'customers' && <CustomersTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role}
@@ -4185,7 +4313,7 @@ function IssuedPanel({ d, book, busy, canShareFiles, canMail, onShare, onMail, o
 }
 
 function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
-                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh }) {
+                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh, onSetup }) {
   const [busyId, setBusyId] = useState('');
   const [payForm, setPayForm] = useState(false);
   const [form, setForm] = useState(null);
@@ -4292,6 +4420,8 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
         {(payOk?.zcredit || payOk?.upay) && !ro && <button data-tour="docs-paynew" className="mg-btn" style={{ background: '#1f4e79' }} onClick={() => setPayForm(true)}>💳 דף סליקה</button>}
       </div>
       <PayList book={book} list={payreqs} onCancel={onPayCancel} onRefresh={onPayRefresh} flash={flash} ro={ro} />
+      {payOk && (payOk.zcredit || payOk.upay) && !payreqs.length && !ro && <div className="mg-note" style={{ marginBottom: 12, fontSize: 14 }}>💳 דפי סליקה מוכנים. "דף סליקה" למעלה שולח ללקוח קישור לתשלום בכרטיס, ואחרי התשלום מופקת לו חשבונית לבד.</div>}
+      {onSetup && !ro && cloud && !(payOk && (payOk.zcredit || payOk.upay)) && <div className="mg-note" style={{ marginBottom: 12, fontSize: 14 }}>💳 רוצה לשלוח ללקוח קישור לתשלום בכרטיס, עם חשבונית אוטומטית? <button className="mg-linkish" onClick={onSetup}>הגדרת דפי סליקה (זד קרדיט או יופיי)</button></div>}
       <div data-tour="docs-filters" style={{ ...row, marginBottom: 12 }}>
         <Field label="חודש"><input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
         <Field label="סוג"><select value={type} onChange={e => setType(e.target.value)}>
