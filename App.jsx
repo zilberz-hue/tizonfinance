@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.35.0';
+const VERSION = '1.35.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1201,6 +1201,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.35.1', date: '02.10.26', items: ['המאמן החכם: שדה מפתח ה-API מופיע תמיד, גם לפני שכל הנתונים נטענו ואם השרת לא ענה; כפתור 🤖 בראש מסך המאמן קופץ אליו.'] },
   { v: '1.35.0', date: '01.10.26', items: ['🤖 המאמן החכם (במסך המאמן): שיחה עם Claude על המספרים שלך, ושאלות מוכנות בלחיצה.', 'תוכניות 90 יום לפי תחום: הקליניקה, החנות, קורסים, Tizon Health, שיווק, אוברדרפט ותזרים, וקיצוץ הוצאות. נשמרות, מתעדכנות ומודפסות.', 'עובד עם מפתח API של Anthropic שנשמר רק בשרת.'] },
   { v: '1.34.1', date: '01.10.26', items: ['המאמן בנייד: תקרות ההוצאה והחשבונות מוצגים בשורות כפולות, בלי חיתוך בצד.'] },
   { v: '1.34.0', date: '01.10.26', items: ['🎯 המאמן הפיננסי (בתפריט הצד): יעד הכנסה חודשי עם מדרגות (50, 100, 150 אלף), תחזית לסוף החודש וכמה צריך ליום עבודה, 12 חודשים מול היעד.', 'יציאה מהאוברדרפט: חשבונות, מסגרות, ריבית וחובות; כמה להחזיר בחודש כדי לצאת עד תאריך, או כמה זמן ייקח.', 'כמה להפריש החודש למס, ביטוח לאומי ומע״מ; תקרות הוצאה לכל קטגוריה; הערות המאמן מהנתונים; ופגישת חודש.'] },
@@ -2557,7 +2558,7 @@ function CoachText({ text }) {
 const COACH_AREAS = [['clinic', '🩺 הקליניקה'], ['store', '🛒 החנות'], ['courses', '🎓 קורסים'], ['tizon', '🌿 Tizon Health'], ['marketing', '📣 שיווק'], ['debt', '🏦 אוברדרפט ותזרים'], ['costs', '✂ קיצוץ הוצאות']];
 const COACH_ASK = ['איך מגיעים ל-50 אלף כבר החודש?', 'מה לחתוך קודם?', 'מה לשלוח ללקוחות שלא חזרו?', 'איך יוצאים מהאוברדרפט הכי מהר?', 'מה 3 הפעולות החשובות לשבוע הזה?'];
 
-function SmartCoach({ summary, flash }) {
+function SmartCoach({ summary, flash, partial }) {
   const [st, setSt] = useState(null);
   const [err, setErr] = useState('');
   const [key, setKey] = useState('');
@@ -2607,21 +2608,23 @@ function SmartCoach({ summary, flash }) {
   };
   const saveKey = async (remove) => {
     try { await coachCall({ action: 'set-key', key, remove }); setKey(''); flash(remove ? 'המפתח הוסר' : 'המפתח נשמר בשרת'); load(); }
-    catch (e) { setErr(coachErr(e.message)); }
+    catch (e) { setErr(coachErr(e.message)); flash('המפתח לא נשמר · ' + coachErr(e.message)); }
   };
   const clear = async () => { if (!window.confirm('למחוק את השיחה עם המאמן? התוכניות נשארות.')) return; await coachCall({ action: 'clear' }).catch(() => {}); setChat([]); };
   const delPlan = async (a) => { const r = await coachCall({ action: 'del-plan', area: a }).catch(() => null); if (r) setPlans(r.plans || {}); };
 
   return (<div data-tour="coach-ai" className="mg-card coach-ai">
     <h3 style={{ marginTop: 0 }}>🤖 המאמן החכם</h3>
-    {!st && <div className="mg-empty">מתחבר…</div>}
-    {st && !st.failed && !st.keyed && <div className="coach-key">
+    {!st && <div className="mg-empty">מתחבר לשרת…</div>}
+    {st?.failed && <div className="mg-note warn" style={{ marginBottom: 8 }}>השרת לא ענה ({err || 'שגיאה'}). אפשר בכל זאת לנסות לשמור מפתח, או <button className="mg-linkish" onClick={load}>לנסות שוב</button>.</div>}
+    {st && (st.failed || !st.keyed) && <div className="coach-key">
       <p className="coach-p" style={{ marginTop: 0 }}>המאמן החכם עובד עם Claude של Anthropic. צריך מפתח API פעם אחת: נכנסים ל-<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a>, יוצרים מפתח (Create Key), מוסיפים יתרה קטנה בחיוב, ומדביקים כאן. המפתח נשמר רק בשרת שלך.</p>
       <div style={row}><Field label="מפתח API"><input dir="ltr" type="password" autoComplete="off" value={key} placeholder="sk-ant-…" onChange={e => setKey(e.target.value.trim())} /></Field>
         <button className="mg-btn" disabled={!key} onClick={() => saveKey(false)}>שמור</button></div>
     </div>}
-    {err && <div className="mg-note bad" style={{ margin: '8px 0' }}>{err}</div>}
-    {st?.keyed && <>
+    {err && !st?.failed && <div className="mg-note bad" style={{ margin: '8px 0' }}>{err}</div>}
+    {partial && st?.keyed && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>⏳ חלק מהנתונים עוד נטען; המאמן יראה את כולם בעוד רגע.</div>}
+    {st?.keyed && !st.failed && <>
       <div className="coach-chat" aria-live="polite">
         {!chat.length && <div className="coach-p">שאל אותי כל דבר על העסק. אני רואה את המספרים שלמעלה: היעד, הקצב, ההוצאות, ההפרשות והאוברדרפט.</div>}
         {chat.map((m, i) => <div key={i} className={'cm ' + m.role}>{m.role === 'assistant' ? <CoachText text={m.text} /> : m.text}</div>)}
@@ -2746,7 +2749,8 @@ function CoachView({ books, datas, loading, user, flash }) {
   const maxBar = Math.max(goal, ...hist.map(h => h.v), 1);
   return (<div className="coach">
     <div className="mg-h" style={{ '--h1': '#2f5d46', '--h2': '#7aa37f' }}><div><h2>🎯 המאמן הפיננסי</h2>
-      <div className="sub">{mine.map(b => b.name).join(' + ')} · יעד {fmtRound(goal)} בחודש {c.basis === 'gross' ? '(כולל מע״מ)' : '(לפני מע״מ)'}</div></div></div>
+      <div className="sub">{mine.map(b => b.name).join(' + ')} · יעד {fmtRound(goal)} בחודש {c.basis === 'gross' ? '(כולל מע״מ)' : '(לפני מע״מ)'}</div></div>
+      <button className="mg-btn hdr-act hdr-rep" style={{ background: '#fff', color: '#2f5d46', fontWeight: 800 }} onClick={() => document.querySelector('[data-tour=coach-ai]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>🤖 <span>המאמן החכם</span></button></div>
     {pending > 0 && <div className="mg-note" style={{ marginBottom: 12 }}>⏳ טוען את הנתונים של {pending} עסקים…</div>}
 
     <div data-tour="coach-goal" className="mg-card coach-goal">
@@ -2774,7 +2778,7 @@ function CoachView({ books, datas, loading, user, flash }) {
     <div data-tour="coach-notes" className="mg-card"><h3 style={{ marginTop: 0 }}>💡 מה המאמן רואה</h3>
       {notes.length ? <ul className="coach-notes">{notes.map((n, i) => <li key={i} className={n.k}>{n.t}</li>)}</ul> : <div className="mg-empty">אין הערות כרגע. הכול בתלם.</div>}</div>
 
-    {ready.length > 0 && <SmartCoach summary={summary} flash={flash} />}
+    <SmartCoach summary={summary} flash={flash} partial={pending > 0} />
 
     <div className="coach-grid">
       <div data-tour="coach-debt" className="mg-card"><h3 style={{ marginTop: 0 }}>🏦 יציאה מהאוברדרפט</h3>
