@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.24.1';
+const VERSION = '1.24.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1045,6 +1045,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.24.2', date: '01.10.26', items: ['צפי המס: מס הכנסה וביטוח לאומי (כולל מס בריאות) בנפרד, כל אחד עם המקדמות שלו, כמה להפריש לחודש וכמה נותר לשלם.'] },
   { v: '1.24.1', date: '01.10.26', items: ['הדבקת הוצאות קבועות: שם כמו "מילניום" כבר לא נחתך.'] },
   { v: '1.24.0', date: '01.10.26', items: ['הוצאה קבועה משוערת (למשל ספק חומרי גלם בממוצע ₪5,000): כל חודש נרשמת הערכה "לבדיקה". כשהחשבונית בפועל מגיעה במייל, היא מחליפה את ההערכה במקום להיכפל. אפשר גם לעדכן את הסכום ידנית.'] },
   { v: '1.23.2', date: '01.10.26', items: ['נייד צר: כרטיסים ברשות המסים ובמסכים נוספים כבר לא נחתכים בצד. שום כרטיס לא רחב מהמסך.'] },
@@ -3616,23 +3617,26 @@ function TaxForecast({ book, rows, onLoad, compact }) {
   const base = mode === 'year' && share > 0.04 ? ytd / share : ytd;
   /* Advances are per taxpayer: each tax id (a person, or a company) keeps its own. */
   const tid = digitsOf(book.taxId) || book.id, advKey = `${tid}:${y}`;
-  const points = prof.points ?? 2.25, adv = Number(prof.adv?.[advKey]) || 0, other = Number(prof.deduct) || 0;
+  /* Two payees, two sets of advances: the Tax Authority, and Bituach Leumi. */
+  const blKey = `${advKey}:bl`;
+  const points = prof.points ?? 2.25, adv = Number(prof.adv?.[advKey]) || 0, advBl = Number(prof.adv?.[blKey]) || 0, other = Number(prof.deduct) || 0;
   const f = taxForecast(base, { points, other, company });
   const dueNow = mode === 'year' ? f.total : f.total;
-  const left = Math.max(0, dueNow - (company ? adv : adv));
+  const bl = company ? 0 : f.ni + f.health;
+  const leftTax = Math.max(0, f.tax - adv), leftBl = Math.max(0, bl - advBl), left = leftTax + leftBl;
   const monthsLeft = Math.max(1, 12 - Number(todayIso().slice(5, 7)) + 1);
   const fmt = (n) => fmtRound(n);
   const L = ({ l, v, b, c, sub }) => <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 0', borderBottom: '1px solid #f0ebe0', fontWeight: b ? 800 : 400, color: c }}>
     <span style={{ flex: 1, minWidth: 0 }}>{l}{sub && <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 13 }}> · {sub}</span>}</span><span dir="ltr" style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{fmt(v)}</span></div>;
   if (compact) return (
-    <div className="mg-stat" data-tour="tax-tile"><div className="lb">{company ? 'מס חברות צפוי' : 'מס הכנסה + ביט״ל צפוי'} {y}</div>
-      <div className="vl">{fmt(f.total)}</div>
-      <div className="dl">{fmt(f.total / 12)} לחודש · {Math.round(f.rate * 100)}% מהרווח{waiting.length ? ' · חלקי' : ''}</div></div>
+    <div className="mg-stat" data-tour="tax-tile"><div className="lb">{company ? 'מס חברות צפוי' : 'מס הכנסה צפוי'} {y}</div>
+      <div className="vl">{fmt(f.tax)}</div>
+      <div className="dl">{company ? `${fmt(f.tax / 12)} לחודש` : <>ביטוח לאומי + בריאות {fmt(bl)}<br />להפריש יחד {fmt((f.tax + bl) / 12)} לחודש</>}{waiting.length ? ' · חלקי' : ''}</div></div>
   );
   return (
     <div data-tour="tax-forecast" className="mg-card" style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <h3 style={{ margin: 0 }}>צפי {company ? 'מס חברות' : 'מס הכנסה וביטוח לאומי'} · {y}</h3>
+        <h3 style={{ margin: 0 }}>צפי {company ? 'מס חברות' : 'מס הכנסה · ביטוח לאומי'} · {y}</h3>
         <div className="seg" style={{ maxWidth: 320 }}>
           <button className={mode === 'year' ? 'on' : ''} onClick={() => setMode('year')}>צפי לשנה מלאה</button>
           <button className={mode === 'ytd' ? 'on' : ''} onClick={() => setMode('ytd')}>על מה שהיה עד היום</button>
@@ -3643,14 +3647,14 @@ function TaxForecast({ book, rows, onLoad, compact }) {
         רווח מתחילת השנה {fmt(ytd)}{mode === 'year' && share > 0.04 ? ` (${Math.round(share * 100)}% מהשנה), ולכן לשנה מלאה בערך ${fmt(base)}` : ''}.
         {waiting.length > 0 && <> <b style={{ color: 'var(--warn)' }}>עוד לא נטען: {waiting.map(r => r.name).join(', ')}.</b></>}</div>
       <div className="mg-stats" style={{ marginBottom: 12 }}>
-        <div className="mg-stat"><div className="lb">סה״כ צפוי {mode === 'year' ? 'לשנה' : 'עד היום'}</div><div className="vl">{fmt(f.total)}</div>
-          <div className="dl">{Math.round(f.rate * 100)}% מהרווח</div></div>
-        <div className="mg-stat"><div className="lb">להפריש כל חודש</div><div className="vl">{fmt(mode === 'year' ? f.total / 12 : f.total / Math.max(1, share * 12))}</div>
-          <div className="dl">{company ? 'מס חברות' : 'מס + ביטוח לאומי + בריאות'}</div></div>
-        <div className="mg-stat"><div className="lb">נותר לשלם</div><div className="vl" style={left > 0 ? undefined : { color: 'var(--green)' }}>{fmt(left)}</div>
-          <div className="dl">אחרי מקדמות {fmt(adv)}{mode === 'year' ? ` · ${fmt(left / monthsLeft)} לחודש עד סוף השנה` : ''}</div></div>
+        <div className="mg-stat"><div className="lb">{company ? 'מס חברות' : 'מס הכנסה'} · {mode === 'year' ? 'צפוי לשנה' : 'עד היום'}</div><div className="vl">{fmt(f.tax)}</div>
+          <div className="dl">{fmt(mode === 'year' ? f.tax / 12 : f.tax / Math.max(1, share * 12))} לחודש · נותר {fmt(leftTax)} אחרי מקדמות {fmt(adv)}</div></div>
+        {!company && <div className="mg-stat"><div className="lb">ביטוח לאומי + מס בריאות</div><div className="vl">{fmt(bl)}</div>
+          <div className="dl">ביטוח לאומי {fmt(f.ni)} · בריאות {fmt(f.health)}<br />{fmt(mode === 'year' ? bl / 12 : bl / Math.max(1, share * 12))} לחודש · נותר {fmt(leftBl)} אחרי מקדמות {fmt(advBl)}</div></div>}
+        <div className="mg-stat"><div className="lb">להפריש כל חודש {company ? '' : '(שניהם)'}</div><div className="vl">{fmt(mode === 'year' ? (f.tax + bl) / 12 : (f.tax + bl) / Math.max(1, share * 12))}</div>
+          <div className="dl">{Math.round(f.rate * 100)}% מהרווח{mode === 'year' && left > 0 ? ` · ${fmt(left / monthsLeft)} לחודש עד סוף השנה כדי לסגור את היתרה` : ''}</div></div>
         {!company && <div className="mg-stat"><div className="lb">מדרגת מס שולית</div><div className="vl">{Math.round((f.marginal || 0) * 100)}%</div>
-          <div className="dl">כל ₪1,000 רווח נוסף ≈ {fmt(1000 * ((f.marginal || 0) + (base / 12 > TAX.ni.low ? TAX.ni.niHigh + TAX.ni.hHigh : TAX.ni.niLow + TAX.ni.hLow)))} מס</div></div>}
+          <div className="dl">כל ₪1,000 רווח נוסף ≈ {fmt(1000 * ((f.marginal || 0) + (base / 12 > TAX.ni.low ? TAX.ni.niHigh + TAX.ni.hHigh : TAX.ni.niLow + TAX.ni.hLow)))} מס וביטוח לאומי</div></div>}
       </div>
       <button className="mg-linkish" onClick={() => setOpen(o => !o)}>{open ? 'הסתר פירוט' : 'איך זה חושב?'}</button>
       {open && <div style={{ marginTop: 8 }}>
@@ -3668,7 +3672,8 @@ function TaxForecast({ book, rows, onLoad, compact }) {
       </div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(170px,100%),1fr))', gap: 10, marginTop: 12 }}>
         {!company && <Field label="נקודות זיכוי"><input inputMode="decimal" value={prof.points ?? 2.25} onChange={e => save({ points: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>}
-        <Field label={`מקדמות ששולמו ב-${y}`}><input inputMode="decimal" value={prof.adv?.[advKey] ?? ''} placeholder="0" onChange={e => save({ adv: { ...(prof.adv || {}), [advKey]: e.target.value } })} /></Field>
+        <Field label={`מקדמות ${company ? 'מס' : 'מס הכנסה'} ששולמו ב-${y}`}><input inputMode="decimal" value={prof.adv?.[advKey] ?? ''} placeholder="0" onChange={e => save({ adv: { ...(prof.adv || {}), [advKey]: e.target.value } })} /></Field>
+        {!company && <Field label={`מקדמות ביטוח לאומי ששולמו ב-${y}`}><input inputMode="decimal" value={prof.adv?.[`${advKey}:bl`] ?? ''} placeholder="0" onChange={e => save({ adv: { ...(prof.adv || {}), [`${advKey}:bl`]: e.target.value } })} /></Field>}
         {!company && <Field label="ניכויים בשנה (פנסיה, השתלמות)"><input inputMode="decimal" value={prof.deduct ?? ''} placeholder="0" onChange={e => save({ deduct: e.target.value })} /></Field>}
       </div>
       <div className="mg-note" style={{ marginTop: 10, fontSize: 13 }}>
