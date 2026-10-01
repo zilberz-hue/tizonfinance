@@ -110,6 +110,58 @@ async function zcSession({ key, pay, base, secret, fetchImpl = fetch, url = ZC_U
   }
   return { sessionId: data.SessionId || "", url: data.SessionUrl };
 }
+/* uPay, the second clearing company a payment page can use. Its API takes a
+   login and a request in one message (as uPay's own WooCommerce plugin sends
+   them): a page for this payment, and later the transaction itself, asked for
+   before any document is issued — what uPay puts in the return address is
+   not proof. Needs the account's email and API key. */
+var UP_URL = "https://app.upay.co.il/API6/clientsecure/json.php";
+async function upCall(creds, request, fetchImpl = fetch) {
+  const header = { refername: "UPAY", livesystem: 1, language: "HE" };
+  const msgs = [
+    { header, request: { mainaction: "CONNECTION", minoraction: "LOGIN", encoding: "json", parameters: { email: creds.email, key: creds.key } } },
+    { header, request: { encoding: "json", ...request } }
+  ];
+  const r = await fetchImpl(UP_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ msgs: JSON.stringify(msgs) }).toString() });
+  const t = await r.text();
+  try { return JSON.parse(t); } catch { return null; }
+}
+var upDesc = (pay) => {
+  const lines = (pay.lines || []).map((l) => `\u2022 ${String(l.desc || "").slice(0, 80)}${Number(l.qty) > 1 ? " \xD7 " + l.qty : ""}`);
+  return [`${String(pay.title || "").slice(0, 80)} \xB7 ${pay.id}`, ...lines].join("\n").slice(0, 480);
+};
+async function upSession({ creds, pay, base, secret, fetchImpl = fetch }) {
+  const fn = `${base}/.netlify/functions/books-mail`;
+  const q = (o) => new URLSearchParams(o).toString();
+  const back = `${fn}?${q({ action: "pay-up", b: pay.book, p: pay.id, t: secret })}`;
+  const phone = String(pay.customer?.phone || "").replace(/[^\d+]/g, "");
+  const transfer = {
+    email: creds.email, commissionreduction: 0, amount: r2(pay.total), currency: "NIS",
+    maxpayments: Math.max(1, Math.min(36, Number(pay.maxPayments) || 1)),
+    paymentdate: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+    productdescription: upDesc(pay), returnurl: back, ipnurl: back + "&ipn=1",
+    ...(/^(05|\+9725)/.test(phone) ? { cellphonenotify: phone.replace(/^\+972/, "0") } : {}),
+    ...(pay.customer?.email ? { emailnotify: pay.customer.email } : {})
+  };
+  const res = await upCall(creds, { mainaction: "CASHIER", minoraction: "REDIRECTDEPOSITCREDITCARDTRANSFER", numbertemplate: 15,
+    parameters: { transfers: [transfer], foreign: "0", key: creds.key, cardreader: "0", creditcardcompanytype: "ISR", creditcardtype: "PR" } }, fetchImpl);
+  const url = res?.results?.[1]?.result?.transactions?.[0]?.url;
+  if (!url || !/^https:\/\//i.test(url)) throw Object.assign(new Error("upay: " + String(res?.results?.[1]?.result?.errordescription || res?.results?.[1]?.errormessage || "no page").slice(0, 160)), { status: 502 });
+  return { url };
+}
+/* The transaction as uPay itself reports it, turned into the shape the
+   payment-page callback reads — or null when uPay does not confirm it. */
+async function upVerify({ creds, pay, trx, fetchImpl = fetch }) {
+  const res = await upCall(creds, { mainaction: "TRANSACTIONSINFO", minoraction: "GETTRANSACTIONS", parameters: { cashierids: [trx] } }, fetchImpl);
+  const t = res?.results?.[1]?.result?.sendertransactions?.[0];
+  if (!t) return null;
+  const st = String(t.transferstatus || "").toUpperCase();
+  const desc = String(t.productdescription ?? t.paymentdetails ?? "");
+  if (!["S", "A"].includes(st) || (desc && !desc.includes(pay.id))) return null;
+  return { UniqueID: pay.id, ReferenceNumber: String(trx), Total: t.amount ?? pay.total,
+           ApprovalNumber: String(t.approvalnumber || t.authnumber || ""), CardNum: String(t.cardnumber || t.last4digits || ""),
+           Installments: t.numberpayments || t.payments || 1, CustomerName: String(t.sendername || t.name || "") };
+}
 function readCallback(b) {
   const pick2 = (...ks) => {
     for (const k of ks) if (b?.[k] != null && b[k] !== "") return b[k];
@@ -177,16 +229,16 @@ async function issueForPayment(db, bookId, payId, cb, { now = /* @__PURE__ */ ne
       total: tot.total,
       payments: [{ kind: "\u05DB\u05E8\u05D8\u05D9\u05E1 \u05D0\u05E9\u05E8\u05D0\u05D9", amount: tot.total, date, details: card }],
       allocationNo: "",
-      notes: [forWhat ? "\u05E2\u05D1\u05D5\u05E8: " + forWhat : "", pay.note || "", "\u05E9\u05D5\u05DC\u05DD \u05D1\u05D3\u05E3 \u05E1\u05DC\u05D9\u05E7\u05D4 (\u05D6\u05D3 \u05E7\u05E8\u05D3\u05D9\u05D8)"].filter(Boolean).join(" \xB7 "),
+      notes: [forWhat ? "\u05E2\u05D1\u05D5\u05E8: " + forWhat : "", pay.note || "", pay.provider === "upay" ? "\u05E9\u05D5\u05DC\u05DD \u05D1\u05D3\u05E3 \u05E1\u05DC\u05D9\u05E7\u05D4 (\u05D9\u05D5\u05E4\u05D9\u05D9)" : "\u05E9\u05D5\u05DC\u05DD \u05D1\u05D3\u05E3 \u05E1\u05DC\u05D9\u05E7\u05D4 (\u05D6\u05D3 \u05E7\u05E8\u05D3\u05D9\u05D8)"].filter(Boolean).join(" \xB7 "),
       withholding: 0,
-      createdBy: pay.createdBy || "zcredit",
+      createdBy: pay.createdBy || (pay.provider === "upay" ? "upay" : "zcredit"),
       refId: "",
       refTitle: "",
       printCount: 0,
       createdAt: now.toISOString(),
       payId,
       payRef: cb.reference || "",
-      via: "zcredit"
+      via: pay.provider === "upay" ? "upay" : "zcredit"
     };
     rec.stamp = stampOf(rec);
     const d = { ...rec, number: n };
@@ -1121,6 +1173,10 @@ async function mayUseStore(email, tenant, idToken) {
   const books = dbOverride || await saJson() ? await (await adminDb()).list("books") : await booksAs(idToken, email);
   return books.some((b) => tenantId(b.tenant) === tenantId(tenant) && roleIn(b, email));
 }
+var upCredsOf = async (book) => {
+  const v = await secrets().get("up:" + book, { type: "json" }).catch(() => null);
+  return v && v.email && v.key ? { email: v.email, key: v.key } : null;
+};
 var zcKeyOf = async (book) => (await secrets().get("zc:" + book, { type: "json" }).catch(() => null))?.key || "";
 var baseOf = (url) => env("URL") || url.origin;
 var html = (status, body) => new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
@@ -1229,12 +1285,22 @@ var books_mail_default = async (req) => {
       if (!pay || !k || pay.linkKey !== k) return html(404, donePage({}));
       const book = await db.get(`books/${b}`);
       if (pay.status !== "open") return html(200, donePage({ pay, book }));
-      const key = await zcKeyOf(b);
-      if (!key) return html(503, donePage({ pay: { ...pay, status: "unavailable" }, book }));
+      const up = pay.provider === "upay";
+      const key = up ? null : await zcKeyOf(b);
+      const ucreds = up ? await upCredsOf(b) : null;
+      if (up ? !ucreds : !key) return html(503, donePage({ pay: { ...pay, status: "unavailable" }, book }));
       let secret = await secrets().get(`pay:${b}:${p}`).catch(() => null);
       if (!secret) {
         secret = token(24);
         await secrets().set(`pay:${b}:${p}`, secret);
+      }
+      if (up) {
+        let su;
+        try { su = await upSession({ creds: ucreds, pay: { ...pay, book: b }, base: baseOf(url), secret, fetchImpl: fetchOverride || fetch }); }
+        catch { return html(503, donePage({ pay: { ...pay, status: "unavailable" }, book })); }
+        await db.update(`books/${b}/payreqs/${p}`, { openedAt: (/* @__PURE__ */ new Date()).toISOString(), opens: (Number(pay.opens) || 0) + 1 }).catch(() => {
+        });
+        return new Response(null, { status: 302, headers: { location: su.url, "cache-control": "no-store" } });
       }
       const s = await zcSession({ key, pay: { ...pay, book: b }, base: baseOf(url), secret, fetchImpl: fetchOverride || fetch, url: env("ZCREDIT_URL") || ZC_URL });
       await db.update(`books/${b}/payreqs/${p}`, { openedAt: (/* @__PURE__ */ new Date()).toISOString(), opens: (Number(pay.opens) || 0) + 1, sessionId: s.sessionId }).catch(() => {
@@ -1248,6 +1314,48 @@ var books_mail_default = async (req) => {
       const pay = await db.get(`books/${b}/payreqs/${p}`);
       const book = pay ? await db.get(`books/${b}`) : null;
       return html(200, donePage({ pay, book, cancel: url.searchParams.get("cancel") === "1" }));
+    }
+    if (act === "pay-up") {
+      /* uPay sends the customer back here, and calls here server to server
+         (ipn=1). The transaction is asked for from uPay; only a confirmed one,
+         for this page and its sum, goes on to the same issuing as Z-Credit's. */
+      const b = url.searchParams.get("b") || "", p = url.searchParams.get("p") || "";
+      const ipn = url.searchParams.get("ipn") === "1";
+      const q = Object.fromEntries(url.searchParams);
+      if (req.method === "POST") {
+        const raw = await req.text().catch(() => "");
+        try { Object.assign(q, JSON.parse(raw)); } catch { try { for (const [k2, v2] of new URLSearchParams(raw)) if (!(k2 in q)) q[k2] = v2; } catch {} }
+      }
+      const done = (cancel) => ipn ? json(200, { ok: !cancel }) : new Response(null, { status: 302, headers: { location: `${baseOf(url)}/.netlify/functions/books-mail?${new URLSearchParams({ action: "pay-done", b, p, ...(cancel ? { cancel: "1" } : {}) })}`, "cache-control": "no-store" } });
+      if (!/^[\w-]{1,80}$/.test(b) || !/^[\w-]{1,80}$/.test(p)) return done(true);
+      const kept = await secrets().get(`pay:${b}:${p}`).catch(() => null);
+      const secret = url.searchParams.get("t") || "";
+      if (!kept || !secret || sha(secret) !== sha(kept)) return done(true);
+      const trx = String(q.transactionid || q.cashierid || "");
+      if (q.errormessage || String(q.providererrordescription || "").toUpperCase() !== "SUCCESS" || !trx) return done(true);
+      const db = await adminDb();
+      const pay = await db.get(`books/${b}/payreqs/${p}`);
+      if (!pay) return done(true);
+      if (pay.status === "paid") return done(false);
+      const ucreds = await upCredsOf(b);
+      const cbBody = ucreds ? await upVerify({ creds: ucreds, pay, trx, fetchImpl: fetchOverride || fetch }).catch(() => null) : null;
+      if (!cbBody) {
+        await db.update(`books/${b}/payreqs/${p}`, { lastError: { at: (/* @__PURE__ */ new Date()).toISOString(), body: `uPay ${trx}: not confirmed` } }).catch(() => {
+        });
+        return done(true);
+      }
+      const itaFn2 = itaReady() ? async (inv) => {
+        const tok = await itaAccess(inv.vat_number);
+        const r3 = await fetch(itaApproval(), { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + tok }, body: JSON.stringify(inv) });
+        return r3.json().catch(() => ({}));
+      } : null;
+      const sign2 = (await signState()).sign ? (pdf, info) => signPdf(pdf, info) : null;
+      await handleCallback({ bookId: b, payId: p, secret, body: cbBody }, {
+        db, secretOf: (bb, pp) => secrets().get(`pay:${bb}:${pp}`).catch(() => null),
+        pdf: (book, d, o) => docPdf(book, d, o), sign: sign2,
+        mail: mailOverride || mailReady() ? sendMail : null, ita: itaFn2, version: VERSION
+      }).catch(() => null);
+      return done(false);
     }
     if (req.method === "POST" && act === "pay-callback") {
       const raw = await req.text();
@@ -1460,7 +1568,7 @@ var books_mail_default = async (req) => {
       adminCache = null;
       return json(200, { ok: true, project: j.project_id, account: j.client_email });
     }
-    if (["pay-create", "pay-status", "zc-key"].includes(body.action)) {
+    if (["pay-create", "pay-status", "zc-key", "up-key"].includes(body.action)) {
       const db = await adminDb();
       const bookId = String(body.book || "");
       const book = /^[\w-]{1,80}$/.test(bookId) ? await db.get(`books/${bookId}`) : null;
@@ -1468,7 +1576,8 @@ var books_mail_default = async (req) => {
       const role = roleIn(book, email);
       if (body.action === "pay-status") {
         if (!role) return json(403, { error: "role" });
-        return json(200, { admin: true, zcredit: !!await zcKeyOf(bookId), mail: mailReady() || !!mailOverride, sign: (await signState()).sign });
+        const uc = await upCredsOf(bookId);
+        return json(200, { admin: true, zcredit: !!await zcKeyOf(bookId), upay: !!uc, upayEmail: uc ? uc.email : "", mail: mailReady() || !!mailOverride, sign: (await signState()).sign });
       }
       if (body.action === "zc-key") {
         if (role !== "owner") return json(403, { error: "owners only" });
@@ -1481,8 +1590,20 @@ var books_mail_default = async (req) => {
         await secrets().setJSON("zc:" + bookId, { key, by: email, at: (/* @__PURE__ */ new Date()).toISOString() });
         return json(200, { ok: true, zcredit: true });
       }
+      if (body.action === "up-key") {
+        if (role !== "owner") return json(403, { error: "owners only" });
+        const em = String(body.email || "").trim().toLowerCase(), key = String(body.key || "").trim();
+        if (!em && !key) {
+          await secrets().delete("up:" + bookId);
+          return json(200, { ok: true, upay: false });
+        }
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em) || key.length < 6 || key.length > 300) return json(400, { error: "key" });
+        await secrets().setJSON("up:" + bookId, { email: em, key, by: email, at: (/* @__PURE__ */ new Date()).toISOString() });
+        return json(200, { ok: true, upay: true });
+      }
       if (!["owner", "clerk"].includes(role)) return json(403, { error: "role" });
-      if (!await zcKeyOf(bookId)) return json(400, { error: "no-zcredit" });
+      const provider = body.provider === "upay" ? "upay" : "zcredit";
+      if (provider === "upay" ? !await upCredsOf(bookId) : !await zcKeyOf(bookId)) return json(400, { error: provider === "upay" ? "no-upay" : "no-zcredit" });
       const rate = payDocType(book) === "400" ? 0 : rateOf(book);
       const lines = (Array.isArray(body.lines) ? body.lines : []).slice(0, 50).map((l) => ({ desc: String(l.desc || "").trim().slice(0, 200), qty: Number(l.qty) || 0, price: r2(l.price), ...l.itemId ? { itemId: String(l.itemId), sku: String(l.sku || "") } : {} })).filter((l) => l.desc && l.qty > 0 && l.price > 0);
       if (!lines.length) return json(400, { error: "lines" });
@@ -1519,6 +1640,7 @@ var books_mail_default = async (req) => {
         title: String(body.title || lines[0].desc).slice(0, 100),
         linkKey,
         link,
+        provider,
         docType: payDocType(book)
       };
       await db.set(`books/${bookId}/payreqs/${id}`, rec);

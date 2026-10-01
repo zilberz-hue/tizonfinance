@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.26.0';
+const VERSION = '1.27.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1047,6 +1047,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.27.0', date: '01.10.26', items: [
+    'דפי סליקה גם דרך יופיי (uPay): בגיבוי וענן ← דפי סליקה מזינים אימייל חשבון יופיי ומפתח API לכל עסק.',
+    'כשמוגדרים גם זד קרדיט וגם יופיי, בוחרים בכל דף סליקה דרך מי. כל תשלום ביופיי נבדק מול יופיי לפני שהחשבונית מופקת ונשלחת.'] },
   { v: '1.26.0', date: '01.10.26', items: [
     'לשונית "לתשלום": בכל תקופה (חודשית או דו-חודשית) כמה מגיע לרשויות. מע״מ (עסקאות פחות תשומות), מקדמת מס הכנסה (מחזור × השיעור מההודעה) וביטוח לאומי. כל העסקים באותו מספר עוסק נספרים יחד.',
     'השוואה לרואה החשבון: מזינים את הסכומים שהוא שלח, ורואים ✓ תואם או ⚠ הפרש, עם הסבר על הסיבות הנפוצות להפרש. הדפסה וייצוא.',
@@ -1275,7 +1278,7 @@ const TOURS = {
     { t: 'set-store', title: 'החנות', text: 'חיבור לקריאה בלבד: הזמנות ששולמו ומספרי חשבוניות.', since: '1.1.0' },
     { t: 'set-store', title: 'חיבור קבוע', text: 'מתחברים לחנות פעם אחת, והחיבור עובד בכל המכשירים דרך השרת. הסיסמה לא נשמרת.', since: '1.11.0' },
     { t: 'set-ita', title: 'רשות המסים', text: 'מתחברים פעם בשלושה חודשים, ומספרי ההקצאה מתבקשים אוטומטית.', since: '1.7.0' },
-    { t: 'set-pay', title: 'דפי סליקה', text: 'מפתח השירות של Firebase ומפתח זד קרדיט לכל עסק. מגדירים פעם אחת, ומאז החשבונית יוצאת לבד אחרי כל תשלום.', since: '1.9.0' },
+    { t: 'set-pay', title: 'דפי סליקה', text: 'מפתח השירות של Firebase, ולכל עסק מפתח זד קרדיט ו/או פרטי יופיי (אימייל ומפתח API). מגדירים פעם אחת, ומאז החשבונית יוצאת לבד אחרי כל תשלום.', since: '1.27.0' },
     { t: 'set-pin', title: 'נעילה בקוד', text: 'קוד לפתיחת המערכת, אותו קוד בכל המכשירים. ננעל לבד אחרי 15 דקות בלי פעילות.', since: '1.7.0' },
     { t: 'set-archive', title: 'ארכיון חודשי', text: 'קבצי מבנה אחיד וגיבוי לכל חודש, במקום אחד.', since: '1.7.0' },
   ],
@@ -2710,7 +2713,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
           if (edit.inboxId) { await inboxCall('inbox-mark', book.id, { id: edit.inboxId, status: 'done', expenseId: r.id }).catch(() => {}); setInboxTick(t => t + 1); }
           flash('ההוצאה נשמרה'); setEdit(null);
         }} />}
-      {!ro && <QuickFab book={book} canPay={!!payOk?.zcredit} canExpense={role === 'owner'} onDoc={(t) => openDoc(t)} onPay={() => openDoc(null, true)}
+      {!ro && <QuickFab book={book} canPay={!!(payOk?.zcredit || payOk?.upay)} canExpense={role === 'owner'} onDoc={(t) => openDoc(t)} onPay={() => openDoc(null, true)}
                         onExpense={() => setEdit({ kind: 'expense', rec: null })} />}
       {edit?.kind === 'supplier' && <SupplierForm rec={edit.rec} onClose={() => setEdit(null)}
         onSave={async (r) => { if (await save('suppliers', r)) { flash('הספק נשמר'); setEdit(null); } }} />}
@@ -4278,7 +4281,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
         {allowedTypes(book).map(t => (
           <button key={t} className={'mg-btn' + (t === allowedTypes(book)[0] ? '' : ' ghost')} onClick={() => setForm({ type: t })}>＋ {DOC_TYPES[t].label}</button>
         ))}
-        {payOk?.zcredit && !ro && <button data-tour="docs-paynew" className="mg-btn" style={{ background: '#1f4e79' }} onClick={() => setPayForm(true)}>💳 דף סליקה</button>}
+        {(payOk?.zcredit || payOk?.upay) && !ro && <button data-tour="docs-paynew" className="mg-btn" style={{ background: '#1f4e79' }} onClick={() => setPayForm(true)}>💳 דף סליקה</button>}
       </div>
       <PayList book={book} list={payreqs} onCancel={onPayCancel} onRefresh={onPayRefresh} flash={flash} ro={ro} />
       <div data-tour="docs-filters" style={{ ...row, marginBottom: 12 }}>
@@ -4342,7 +4345,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
           : 'חשבונית שנשלחת דיגיטלית צריכה חתימה אלקטרונית מאובטחת. עד שתוגדר תעודה: מדפיסים ומוסרים ביד, או שולחים PDF רק למטרות ניסיון.'}
         {' '}מסמך שהופק לא נמחק ולא נערך; טעות מתקנים בחשבונית זיכוי.
       </div>
-      {payForm && <PayForm book={book} docs={docs} customers={customers} items={items} flash={flash} onCreated={onPayCreated} onClose={() => setPayForm(false)} />}
+      {payForm && <PayForm book={book} payOk={payOk} docs={docs} customers={customers} items={items} flash={flash} onCreated={onPayCreated} onClose={() => setPayForm(false)} />}
       {form && <DocForm book={book} docs={docs} customers={customers} items={items} preset={form} itaReady={!!ita?.connected} series={series} onClose={() => setForm(null)}
                         onIssue={async (rec) => { const d = await onIssue(rec); if (d) { setForm(null); setDone(d); } return d; }} />}
       {done && <IssuedPanel d={docs.find(x => x.id === done.id) || done} book={book} busy={busyId === done.id} canShareFiles={canShareFiles} canMail={canMail}
@@ -6293,7 +6296,11 @@ function LedgerTab({ book, data, ledger, pick }) {
 const PAY_STATUS = { open: ['ממתין לתשלום', 'warn'], paid: ['שולם', 'ok'], cancelled: ['בוטל', ''], mismatch: ['סכום שונה · לבדוק', 'bad'] };
 const payText = (book, p) => `שלום ${p.customer?.name || ''},\nקישור לתשלום ל-${book.legalName || book.name} על סך ${fmt(p.total)}:\n${p.link}\nהחשבונית תישלח אליך מיד אחרי התשלום.`;
 
-function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, flash }) {
+function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, flash, payOk = null }) {
+  /* Which company clears this page: the one set up, or the business's choice
+     when both are. */
+  const provs = [payOk?.zcredit && ['zcredit', 'זד קרדיט'], payOk?.upay && ['upay', 'יופיי']].filter(Boolean);
+  const [provider, setProvider] = useState(provs[0]?.[0] || 'zcredit');
   const rate = rateOf(book);
   const [cust, setCust] = useState({ name: '', taxId: '', phone: '', email: '', address: '' });
   const [incl, setIncl] = useState(true);
@@ -6319,10 +6326,11 @@ function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, f
   const create = async () => {
     setBusy(true);
     try {
-      const r = await fnCall({ action: 'pay-create', book: book.id, customer: cust, incl, maxPayments, note,
+      const r = await fnCall({ action: 'pay-create', book: book.id, provider, customer: cust, incl, maxPayments, note,
         lines: lines.filter(l => String(l.desc).trim() && Number(l.qty) > 0 && Number(l.price) > 0).map(l => ({ desc: String(l.desc).trim(), qty: Number(l.qty), price: r2(l.price), itemId: l.itemId || '', sku: l.sku || '' })) });
       onCreated(r.payreq, cust); setDone(r.payreq);
-    } catch (e) { flash(e.message === 'no-zcredit' ? 'לעסק הזה עוד לא הוגדר מפתח זד קרדיט (גיבוי וענן ← דפי סליקה)' : 'יצירת הקישור נכשלה · ' + e.message); }
+    } catch (e) { flash(e.message === 'no-zcredit' ? 'לעסק הזה עוד לא הוגדר מפתח זד קרדיט (גיבוי וענן ← דפי סליקה)'
+      : e.message === 'no-upay' ? 'לעסק הזה עוד לא הוגדרו פרטי יופיי (גיבוי וענן ← דפי סליקה)' : 'יצירת הקישור נכשלה · ' + e.message); }
     setBusy(false);
   };
   if (done) return (
@@ -6344,6 +6352,11 @@ function PayForm({ book, docs, customers = [], items = [], onCreated, onClose, f
     <Box title="דף סליקה חדש" onClose={onClose} wide
          footer={<><button className="mg-btn" disabled={busy || !ok} onClick={create}>{busy ? 'יוצר…' : `צור קישור לתשלום · ${fmt(tot.total)}`}</button>
                    <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
+      {provs.length > 1 && (
+        <div style={{ ...row, marginBottom: 10 }}>
+          <b style={{ fontSize: 14 }}>סליקה דרך:</b>
+          {provs.map(([id, n]) => <button key={id} type="button" className={'mg-btn sm' + (provider === id ? '' : ' ghost')} onClick={() => setProvider(id)}>{n}</button>)}
+        </div>)}
       <div style={grid}>
         <Field label="שם הלקוח *"><input list="tz-pay-known" value={cust.name} onChange={e => pickName(e.target.value)} />
           <datalist id="tz-pay-known">{Object.keys(known).map(n => <option key={n} value={n} />)}</datalist></Field>
@@ -6422,8 +6435,17 @@ function PayCard({ server, books, user, flash, onServer }) {
   const mine = books.filter(b => (b.owners || []).includes(String(user.email || '').toLowerCase()));
   const [st, setSt] = useState({});
   const [keys, setKeys] = useState({});
+  const [ups, setUps] = useState({});          // uPay: { [book]: { email, key } }
   const [busy, setBusy] = useState('');
   const admin = !!server?.pay?.admin;
+  const saveUp = async (b, clear) => {
+    setBusy('up:' + b.id);
+    const u = ups[b.id] || {};
+    try { await fnCall({ action: 'up-key', book: b.id, email: clear ? '' : (u.email || st[b.id]?.upayEmail || ''), key: clear ? '' : u.key || '' });
+          setUps(x => ({ ...x, [b.id]: {} })); flash(clear ? 'פרטי יופיי הוסרו' : 'פרטי יופיי נשמרו'); load(); }
+    catch (e) { flash('השמירה נכשלה · ' + (e.message === 'key' ? 'צריך אימייל תקין ומפתח API' : e.message)); }
+    setBusy('');
+  };
   const load = () => mine.forEach(b => fnCall({ action: 'pay-status', book: b.id }).then(r => setSt(x => ({ ...x, [b.id]: r }))).catch(() => {}));
   useEffect(() => { if (cloud && admin) load(); }, [admin, books.length]);
   const uploadSA = async (file) => {
@@ -6440,7 +6462,7 @@ function PayCard({ server, books, user, flash, onServer }) {
   };
   return (
     <div data-tour="set-pay" className="mg-card">
-      <h3 style={{ marginTop: 0 }}>דפי סליקה · זד קרדיט</h3>
+      <h3 style={{ marginTop: 0 }}>דפי סליקה · זד קרדיט ויופיי</h3>
       {!server ? <p style={{ marginTop: 0 }}>זמין רק בהתקנה מ-GitHub, עם שרת.</p> : !cloud ? <p style={{ marginTop: 0 }}>צריך להיות מחובר לענן.</p> : <>
         <p style={{ marginTop: 0, fontSize: 14 }}>שולחים ללקוח קישור, הוא משלם בכרטיס, ומיד מופקת חשבונית מס קבלה חתומה ונשלחת אליו. שני דברים מגדירים פעם אחת:</p>
         <div style={{ padding: '8px 0', borderBottom: '1px solid #f0ebe0' }}>
@@ -6461,6 +6483,21 @@ function PayCard({ server, books, user, flash, onServer }) {
               <button className="mg-btn sm" disabled={busy === b.id || (keys[b.id] || '').trim().length < 8} onClick={() => saveKey(b)}>שמור</button>
               {st[b.id]?.zcredit && <button className="mg-btn ghost sm" disabled={busy === b.id} onClick={() => saveKey(b, true)}>הסר</button>}
             </div>))}
+          <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid #f0ebe0' }}>
+            <b>3. יופיי (uPay) לכל עסק · רשות</b>
+            <div style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 8px', lineHeight: 1.7 }}>האימייל של חשבון יופיי ומפתח API מיופיי. כל תשלום נבדק מול יופיי לפני שהחשבונית מופקת. כשמוגדרים גם זד קרדיט וגם יופיי, בוחרים בכל דף סליקה דרך מי.</div>
+            {!admin ? <div className="mg-empty">קודם מעלים את מפתח השירות.</div> : mine.map(b => (
+              <div key={b.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', flexWrap: 'wrap' }}>
+                <b style={{ minWidth: 110 }}>{b.name}</b>
+                {st[b.id]?.upay ? <span className="mg-chip ok">מוגדר · {st[b.id].upayEmail}</span> : <span className="mg-chip">לא מוגדר</span>}
+                <input dir="ltr" type="email" autoComplete="off" style={{ flex: 1, minWidth: 150 }} placeholder="אימייל חשבון יופיי"
+                       value={ups[b.id]?.email ?? ''} onChange={e => setUps(x => ({ ...x, [b.id]: { ...(x[b.id] || {}), email: e.target.value } }))} />
+                <input dir="ltr" type="text" autoComplete="off" spellCheck={false} style={{ flex: 1, minWidth: 150, WebkitTextSecurity: 'disc' }} placeholder={st[b.id]?.upay ? 'מפתח חדש להחלפה' : 'מפתח API'}
+                       value={ups[b.id]?.key || ''} onChange={e => setUps(x => ({ ...x, [b.id]: { ...(x[b.id] || {}), key: e.target.value } }))} />
+                <button className="mg-btn sm" disabled={busy === 'up:' + b.id || (ups[b.id]?.key || '').trim().length < 6 || !/@/.test(ups[b.id]?.email || st[b.id]?.upayEmail || '')} onClick={() => saveUp(b)}>שמור</button>
+                {st[b.id]?.upay && <button className="mg-btn ghost sm" disabled={busy === 'up:' + b.id} onClick={() => saveUp(b, true)}>הסר</button>}
+              </div>))}
+          </div>
           {admin && Object.values(st).some(x => x && (!x.mail || !x.sign)) && <div className="mg-note warn" style={{ marginTop: 8 }}>
             כדי שהחשבונית תישלח ללקוח לבד צריך בשרת גם תעודת חתימה וגם הגדרות מייל (SMTP). בלעדיהן המסמך מופק, אבל שולחים אותו ידנית.</div>}
         </div>
