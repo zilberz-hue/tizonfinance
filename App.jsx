@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.39.2';
+const VERSION = '1.40.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -236,7 +236,7 @@ async function storeRead(tenant, name) {
   return s.docs.map(d => ({ ...d.data(), id: d.id }));
 }
 
-const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive', 'recurring', 'custpack'];
+const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive', 'recurring', 'custpack', 'retainers'];
 
 /* History imported from iCount is kept packed: a few hundred documents to a
    record in books/{book}/archive, instead of one record each. Thousands of
@@ -582,7 +582,7 @@ function buildLedger(book, data) {
      dealer, whose receipt is the document of the sale. Test documents never. */
   const fromDocs = (data?.documents || []).filter(d => (d.series === 'live' || d.series === 'import') && !d.cancelled).flatMap(d => {
     const sign = d.type === '330' ? -1 : 1;
-    const counts = ['305', '320', '330'].includes(d.type) || (d.type === '400' && book?.dealerType === 'exempt' && !d.refId);
+    const counts = ['305', '320', '330'].includes(d.type) || (d.type === '400' && book?.dealerType === 'exempt' && !d.refId && !d.deposit);
     if (!counts) return [];
     return [{ id: 'd:' + d.id, src: 'doc', date: d.date, desc: `${docTitle(d)} · ${d.customer?.name || ''}`,
               cat: 'מסמכים שהופקו', pay: (d.payments || []).map(p => p.kind).join(', '),
@@ -759,6 +759,10 @@ input:focus,select:focus{border-color:var(--gold)}
 .seg button{flex:1;border:0;background:none;padding:9px;border-radius:9px;cursor:pointer;font-weight:700;color:var(--muted)}
 .seg button.on{background:#fff;color:#6e4d22;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 .exp-ranges{display:flex;flex-wrap:wrap;gap:6px}
+.more-docs{position:relative}.more-docs>summary{list-style:none;cursor:pointer}.more-docs>summary::-webkit-details-marker{display:none}
+.more-docs-pop{position:absolute;z-index:40;top:calc(100% + 6px);inset-inline-start:0;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 32px rgba(60,40,10,.16);padding:8px;min-width:230px;display:grid;gap:2px}
+.more-docs-pop button{background:none;border:0;text-align:right;padding:9px 12px;border-radius:9px;font:inherit;font-size:15px;cursor:pointer;color:#2c2821}.more-docs-pop button:hover{background:var(--soft)}
+.mdp-h{font-size:12px;font-weight:800;color:var(--muted);padding:8px 12px 2px}.mdp-note{font-size:12px;color:var(--muted);padding:8px 12px 4px;line-height:1.5;max-width:260px}
 .coach{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.coach > *,.coach-grid > *{min-width:0}.coach .mg-h{margin-bottom:0}
 .coach-goal .cg-top{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:space-between}
 .coach-goal .lb{font-size:13.5px;color:var(--muted)}.cg-big{font-size:40px;font-weight:900;color:#2f5d46;direction:ltr;unicode-bidi:isolate;line-height:1.15}
@@ -1247,6 +1251,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.40.0', date: '02.10.26', items: ['מסמכים חדשים ("＋ מסמכים נוספים" בלשונית מסמכים): הצעת מחיר, הזמנה, תעודת משלוח והזמנת רכש. לא מסמכי מס ולא הכנסה; מהם מפיקים חשבונית בלחיצה "→ חשבונית".', 'קבלה על פיקדון (לא נספרת כהכנסה), הפקדת בנק של מזומן וצ׳קים שעוד לא הופקדו, החזרת שיק (פותחת שוב את החוב) וביטול יתרה, מהשורה של המסמך.', 'ריטיינרים: חיוב חודשי קבוע ללקוח. כל חודש הם ממתינים להפקה, ולחיצה אחת מפיקה את כולם.', 'במבנה האחיד נכנסים הזמנה (100), תעודת משלוח (200), הזמנת רכש (500) והפקדת בנק (420) לפי הקודים הרשמיים.'] },
   { v: '1.39.2', date: '02.10.26', items: ['מסמך שנחתם דיגיטלית נושא חותמת נראית: "🔏 חתום דיגיטלית" עם שם בעל התעודה, במקום שורת החתימה. החתימה עצמה בתוך הקובץ, ורואים אותה ב-Adobe Reader.'] },
   { v: '1.39.1', date: '02.10.26', items: ['PDF של מסמך: עמוד אחד כשהמסמך נכנס בעמוד (בלי עמוד שני ריק).'] },
   { v: '1.39.0', date: '02.10.26', items: ['שם חדש: Tizon Finance · הנהלת חשבונות, חשבוניות וליווי פיננסי למטפלים. השם מופיע במסך, במסמכים, במיילים, בדוחות ובקובצי המבנה האחיד. הנתונים, הכתובת והגיבויים לא השתנו.'] },
@@ -1450,6 +1455,7 @@ const TOURS = {
     { t: 'book-tabs', title: 'העסקים שלך', text: 'יש לך הרשאה להפיק מסמכים ולנהל לקוחות. שתי הלשוניות כאן.', since: '1.7.0', roles: ['clerk'] },
     { t: 'docs-mode', title: 'ניסיון או אמיתי', text: 'במצב ניסיון המסמכים מסומנים T- ולא נספרים. במצב אמיתי הם מסמכי מס: מספור רציף, בלי מחיקה ובלי עריכה.', since: '1.2.0' },
     { t: 'docs-new', title: 'הפקת מסמך', text: 'בוחרים סוג: חשבונית מס, קבלה, חשבונית מס קבלה, זיכוי ועוד. הסוגים מותאמים לסוג העוסק.', since: '1.2.0', roles: WRITERS },
+    { t: 'docs-more', title: 'מסמכים נוספים', text: 'הצעת מחיר, הזמנה, תעודת משלוח, הזמנת רכש, קבלה על פיקדון, הפקדת בנק וריטיינרים.', since: '1.40.0' },
     { t: 'docs-filters', title: 'סינון', text: 'לפי חודש, סוג ומקור (Tizon Finance או iCount). כאן רואים גם כמה חשבוניות עוד פתוחות.', since: '1.2.0' },
     { t: 'docs-table', title: 'המסמכים', text: 'מכל מסמך אפשר להפיק PDF חתום, להדפיס ולשלוח במייל או בוואטסאפ. הדפסה חוזרת מסומנת "העתק".', since: '1.2.0' },
     { t: 'docs-paynew', title: 'דף סליקה', text: 'קישור לתשלום בכרטיס (זד קרדיט) ששולחים ללקוח בוואטסאפ או במייל. כשהוא משלם, החשבונית מופקת ונשלחת אליו לבד.', since: '1.9.0', roles: WRITERS },
@@ -3746,6 +3752,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
                                   ita={ita} onRequestAlloc={requestAlloc} onManualAlloc={(d, no) => setAlloc(d, no, 'manual')}
                                   onLog={log} server={server} ro={ro} flash={flash}
                                   payreqs={data.payreqs || []} payOk={payOk} onPayCreated={payCreated} onPayCancel={payCancel} onPayRefresh={payRefresh} onPayReplace={payReplace}
+                                  retainers={data.retainers || []} onRetSave={(r) => save('retainers', r)} onRetDel={(r) => remove('retainers', r.id, `הריטיינר של ${r.customer?.name || ''}`)}
                                   onSetup={role === 'owner' ? () => { try { sessionStorage.setItem('tzbooks_bset', 'pay'); } catch {} setSub('bset'); } : null}
                                   icount={role === 'owner' && cloud && server && (book.icountAuto || book.icountSyncAt || data.documents?.some(d => d.source === 'icount-api')) ? { ...ic, err: ic.err || (!ic.msg && book.icountErr) || '', sync: () => icSync(true) } : null} />}
       {sub === 'ledger' && <LedgerTab book={book} data={data} ledger={ledger} pick={ledgerPick} />}
@@ -5084,7 +5091,18 @@ const DOC_TYPES = {
   400: { label: 'קבלה', short: 'קבלה', lines: false, pay: true, vat: false },
   330: { label: 'חשבונית זיכוי', short: 'זיכוי', lines: true, pay: false, vat: true, credit: true },
   300: { label: 'חשבון עסקה', short: 'עסקה', lines: true, pay: false, vat: true },
+  /* Before billing: not tax documents, never income; turned into an invoice with a click. */
+  Q: { label: 'הצעת מחיר', short: 'הצעה', lines: true, pay: false, vat: true, pre: true, internal: true },
+  100: { label: 'הזמנה', short: 'הזמנה', lines: true, pay: false, vat: true, pre: true },
+  200: { label: 'תעודת משלוח', short: 'משלוח', lines: true, pay: false, vat: true, pre: true },
+  500: { label: 'הזמנת רכש', short: 'הזמנת רכש', lines: true, pay: false, vat: true, pre: true, supplier: true },
+  /* Money: a bank deposit of cash and cheques; a cheque that came back; a balance written off. */
+  420: { label: 'הפקדת בנק', short: 'הפקדה', lines: false, pay: true, vat: false, money: true },
+  CR: { label: 'החזרת שיק', short: 'החזרת שיק', lines: false, pay: false, vat: false, money: true, internal: true },
+  WO: { label: 'ביטול יתרה', short: 'ביטול יתרה', lines: false, pay: false, vat: false, money: true, internal: true },
 };
+const PRE_TYPES = ['Q', '100', '200', '500'];
+const docLabel = (d) => d?.deposit ? 'קבלה על פיקדון' : (DOC_TYPES[d?.type]?.label || 'מסמך');
 const allowedTypes = (book) => book.dealerType === 'exempt' ? ['400', '300'] : ['320', '305', '400', '330', '300'];
 /* Invoices with VAT above this, before VAT, to a dealer, need an allocation
    number (from 1.6.2026). Kept in one place because it keeps changing. */
@@ -5122,7 +5140,7 @@ const PAY_KINDS = ['מזומן', 'העברה בנקאית', 'כרטיס אשרא
 const docSeries = (book) => (cloud && book.docMode === 'live' && book.docApproved) ? 'live' : 'test';
 const docNum = (d) => (d.series === 'test' ? 'T-' : '') + d.number;
 const isImported = (d) => d?.series === 'import';
-const docTitle = (d) => `${DOC_TYPES[d.type]?.label || 'מסמך'} ${docNum(d)}${isImported(d) ? ' (iCount)' : ''}`;
+const docTitle = (d) => `${docLabel(d)} ${docNum(d)}${isImported(d) ? ' (iCount)' : ''}`;
 
 /* Totals of a document from its lines. Prices typed with or without VAT. */
 function docTotals(lines, incl, rate) {
@@ -5143,7 +5161,10 @@ async function stampOf(d) {
 function openOf(inv, docs) {
   const paid = docs.filter(d => d.refId === inv.id && d.type === '400').reduce((a, d) => a + d.total + (Number(d.withholding) || 0), 0);
   const cred = docs.filter(d => d.refId === inv.id && d.type === '330').reduce((a, d) => a + d.total, 0);
-  return r2(inv.total - paid - cred);
+  /* A cheque that came back opens the debt again; a balance written off closes it. */
+  const back = docs.filter(d => d.type === 'CR' && d.openRef === inv.id && !d.cancelled).reduce((a, d) => a + d.total, 0);
+  const wo = docs.filter(d => d.type === 'WO' && d.refId === inv.id && !d.cancelled).reduce((a, d) => a + d.total, 0);
+  return r2(inv.total - paid - cred + back - wo);
 }
 
 /* ------------------------------------------------------------------ print */
@@ -5177,16 +5198,19 @@ ${d.series === 'test' ? '<div class="wm">מסמך ניסיון · לא לצור�
 <div>${esc(DEALERS[book.dealerType] || '')} ${esc(book.taxId || '')}</div>
 <div>${esc(book.address || '')}</div><div>${esc([book.phone, book.email].filter(Boolean).join(' · '))}</div></div>
 ${book.logo ? `<img class="logo" src="${book.logo}">` : ''}</div>
-<h1>${esc(T.label)} מס׳ ${esc(docNum(d))}<span class="copy">${copy ? 'העתק נאמן למקור' : 'מקור'}</span></h1>
+<h1>${esc(docLabel(d))} מס׳ ${esc(docNum(d))}<span class="copy">${copy ? 'העתק נאמן למקור' : 'מקור'}</span></h1>
 <div class="meta"><div><span class="lb">לכבוד</span><br><b>${esc(c.name)}</b>${c.taxId ? `<br>ח.פ./ת.ז. ${esc(c.taxId)}` : ''}${c.address ? `<br>${esc(c.address)}` : ''}${c.phone ? `<br>${esc(c.phone)}` : ''}</div>
 <div><span class="lb">תאריך</span><br><b>${esc(heDate(d.date))}</b>${d.allocationNo ? `<br><span class="lb">מספר הקצאה</span><br><b>${esc(String(d.allocationNo).slice(-9))}</b>` : ''}</div></div>
-${d.refId ? `<div class="ref">${d.type === '330' ? 'זיכוי בגין' : 'תשלום עבור'} ${esc(d.refTitle || '')}</div>` : ''}
+${d.refId || d.fromTitle ? `<div class="ref">${d.type === '330' ? 'זיכוי בגין' : d.type === 'CR' ? 'שיק שחזר מתוך' : d.type === 'WO' ? 'ביטול יתרה של' : d.refId ? 'תשלום עבור' : 'על פי'} ${esc(d.refTitle || d.fromTitle || '')}</div>` : ''}
+${d.type === 'Q' ? `<div class="ref">הצעת המחיר בתוקף ${esc(String(d.validDays || 30))} יום מתאריך ההצעה. זה אינו מסמך מס.</div>` : T.pre ? '<div class="ref">זה אינו מסמך מס.</div>' : ''}
+${d.deposit ? '<div class="ref">הסכום התקבל כפיקדון ויוחזר או יקוזז לפי ההסכם. זו אינה קבלה על הכנסה.</div>' : ''}
 ${T.lines ? `<table><thead><tr><th>תיאור</th><th class="n">כמות</th><th class="n">מחיר ליחידה</th><th class="n">סה״כ</th></tr></thead><tbody>${lines}</tbody></table>
 <div class="tot">${d.vatRate ? `<div><span>${d.incl ? 'סה״כ לפני מע״מ' : 'סה״כ'}</span><span>${m(d.net)}</span></div><div><span>מע״מ ${d.vatRate}%</span><span>${m(d.vat)}</span></div>` : ''}
-<div class="g"><span>${d.type === '330' ? 'סה״כ זיכוי' : 'סה״כ לתשלום'}</span><span>${m(d.total)}</span></div></div>` : ''}
-${T.pay && pays ? `<h3 style="margin:18px 0 0;font-size:15px">פרטי התשלום</h3><table><thead><tr><th>אמצעי</th><th>תאריך</th><th>פרטים</th><th class="n">סכום</th></tr></thead><tbody>${pays}</tbody></table>
+<div class="g"><span>${d.type === '330' ? 'סה״כ זיכוי' : T.pre ? 'סה״כ' : 'סה״כ לתשלום'}</span><span>${m(d.total)}</span></div></div>` : ''}
+${(T.pay || d.type === 'CR') && pays ? `<h3 style="margin:18px 0 0;font-size:15px">פרטי התשלום</h3><table><thead><tr><th>אמצעי</th><th>תאריך</th><th>פרטים</th><th class="n">סכום</th></tr></thead><tbody>${pays}</tbody></table>
 ${d.withholding ? `<div class="tot"><div><span>ניכוי במקור</span><span>${m(d.withholding)}</span></div></div>` : ''}
-${!T.lines ? `<div class="tot"><div class="g"><span>סה״כ התקבל</span><span>${m(d.total)}</span></div></div>` : ''}` : ''}
+${!T.lines ? `<div class="tot"><div class="g"><span>${d.type === '420' ? 'סה״כ הופקד' : d.type === 'CR' ? 'סכום השיק שחזר' : 'סה״כ התקבל'}</span><span>${m(d.total)}</span></div></div>` : ''}` : ''}
+${d.type === 'WO' ? `<div class="tot"><div class="g"><span>יתרה שבוטלה</span><span>${m(d.total)}</span></div></div>` : ''}
 ${d.notes ? `<div class="notes">${esc(d.notes)}</div>` : ''}
 ${signer ? `<div class="dsig"><span style="font-size:20px">🔏</span><span><b>חתום דיגיטלית</b><br>${esc(signer.name || '')}${signer.self ? ' · תעודה עצמית' : ''} · ${esc(new Date().toLocaleDateString('he-IL'))}</span></div>` : '<div class="sign">חתימה</div>'}
 <div class="foot">${isImported(d) ? `<span>העתק של מסמך שהופק במקור ב-iCount · הודפס מ-Tizon Finance ${VERSION} · ${esc(new Date().toLocaleString('he-IL'))}</span><span></span>`
@@ -5236,9 +5260,157 @@ function IssuedPanel({ d, book, busy, canShareFiles, canMail, onShare, onMail, o
   );
 }
 
+/* ---------------------------------------------- money documents
+   A bank deposit (420) of the cash and cheques received and not yet
+   deposited; a cheque that came back (it opens the debt again); a balance
+   written off (it closes it). Each is a numbered document, like the rest. */
+const isChequeKind = (k) => k === 'צ׳ק';
+function undeposited(docs, series) {
+  const done = new Set(docs.filter(d => d.type === '420' && !d.cancelled).flatMap(d => d.deposited || []));
+  const back = new Set(docs.filter(d => d.type === 'CR' && !d.cancelled).map(d => d.chequeKey));
+  return docs.filter(d => d.series === series && !d.cancelled && ['320', '400'].includes(d.type))
+    .flatMap(d => (d.payments || []).map((p, i) => ({ key: `${d.id}#${i}`, d, p })))
+    .filter(x => (x.p.kind === 'מזומן' || isChequeKind(x.p.kind)) && !done.has(x.key) && !back.has(x.key) && Number(x.p.amount) > 0)
+    .sort((a, b) => String(a.p.date || a.d.date).localeCompare(String(b.p.date || b.d.date)));
+}
+const newMoneyDoc = (series, extra) => ({ id: uid('doc'), series, date: todayIso(), lines: [], incl: false, vatRate: 0, vat: 0, payments: [], notes: '',
+  createdBy: cloud?.auth?.currentUser?.email || '', printCount: 0, createdAt: new Date().toISOString(), ...extra });
+
+function DepositForm({ docs, series, onIssue, onClose }) {
+  const list = useMemo(() => undeposited(docs, series), [docs, series]);
+  const [sel, setSel] = useState(() => new Set(list.map(x => x.key)));
+  const [date, setDate] = useState(todayIso());
+  const [bank, setBank] = useState('');
+  const [busy, setBusy] = useState(false);
+  const chosen = list.filter(x => sel.has(x.key));
+  const total = r2(chosen.reduce((a, x) => a + (Number(x.p.amount) || 0), 0));
+  const tog = (k) => setSel(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const issue = async () => {
+    if (!window.confirm(`להפיק הפקדת בנק של ${fmt(total)} (${chosen.length} פריטים)?`)) return;
+    setBusy(true);
+    const rec = newMoneyDoc(series, { type: '420', date, customer: { name: bank.trim() ? `הפקדה · ${bank.trim()}` : 'הפקדה לבנק' },
+      payments: chosen.map(x => ({ kind: x.p.kind, amount: r2(x.p.amount), date: x.p.date || x.d.date, details: [x.p.details, docTitle(x.d), x.d.customer?.name].filter(Boolean).join(' · ') })),
+      net: total, total, deposited: chosen.map(x => x.key) });
+    try { const d = await onIssue(rec); if (d) onClose(d); } catch (e) { alert('ההפקה נכשלה · ' + dbErr(e)); }
+    setBusy(false);
+  };
+  return <Box title="🏦 הפקדת בנק" onClose={() => onClose()} wide footer={<><button className="mg-btn" disabled={busy || !chosen.length} onClick={issue}>{busy ? 'מפיק…' : `הפק הפקדה · ${fmt(total)}`}</button><button className="mg-btn ghost" onClick={() => onClose()}>ביטול</button></>}>
+    <p className="coach-p">מזומן וצ׳קים שהתקבלו בקבלות ועוד לא הופקדו. מסמנים מה נכנס לבנק היום.</p>
+    <div style={row}><Field label="תאריך ההפקדה"><input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
+      <Field label="בנק / חשבון (לא חובה)"><input value={bank} onChange={e => setBank(e.target.value)} placeholder="לאומי 12-345-678901" /></Field></div>
+    <div className="mg-tblwrap" style={{ marginTop: 10 }}><table className="mg-tbl"><thead><tr><th></th><th>תאריך</th><th>אמצעי</th><th>פרטים</th><th>מסמך</th><th>סכום</th></tr></thead><tbody>
+      {list.map(x => <tr key={x.key}><td data-select="1"><input type="checkbox" style={{ width: 'auto' }} checked={sel.has(x.key)} onChange={() => tog(x.key)} /></td>
+        <td>{heDate(x.p.date || x.d.date)}</td><td>{x.p.kind}</td><td>{x.p.details || '—'}</td><td>{docTitle(x.d)} · {x.d.customer?.name}</td><td><b>{fmt(x.p.amount)}</b></td></tr>)}
+      {!list.length && <tr><td colSpan={6}><div className="mg-empty">אין מזומן או צ׳קים שממתינים להפקדה.</div></td></tr>}
+    </tbody></table></div>
+  </Box>;
+}
+
+function ChequeReturnForm({ rec, docs, onIssue, onClose }) {
+  const back = new Set(docs.filter(d => d.type === 'CR' && !d.cancelled).map(d => d.chequeKey));
+  const cheques = (rec.payments || []).map((p, i) => ({ i, p, key: `${rec.id}#${i}` })).filter(x => isChequeKind(x.p.kind) && !back.has(x.key));
+  const [pick, setPick] = useState(cheques[0]?.i ?? -1);
+  const [date, setDate] = useState(todayIso());
+  const [why, setWhy] = useState('אין כיסוי מספיק');
+  const [busy, setBusy] = useState(false);
+  const ch = cheques.find(x => x.i === Number(pick));
+  const issue = async () => {
+    if (!ch || !window.confirm(`לרשום שהצ׳ק של ${rec.customer?.name || ''} על סך ${fmt(ch.p.amount)} חזר?`)) return;
+    setBusy(true);
+    const amt = r2(ch.p.amount);
+    const d = newMoneyDoc(rec.series, { type: 'CR', date, customer: { ...rec.customer }, refId: rec.id, refTitle: docTitle(rec), openRef: rec.type === '400' ? (rec.refId || '') : '',
+      payments: [{ ...ch.p, amount: amt }], net: amt, total: amt, chequeKey: ch.key, notes: why.trim() });
+    try { const r = await onIssue(d); if (r) onClose(r); } catch (e) { alert('ההפקה נכשלה · ' + dbErr(e)); }
+    setBusy(false);
+  };
+  return <Box title="↩ החזרת שיק" onClose={() => onClose()} footer={<><button className="mg-btn" disabled={busy || !ch} onClick={issue}>{busy ? 'רושם…' : 'רשום החזרה'}</button><button className="mg-btn ghost" onClick={() => onClose()}>ביטול</button></>}>
+    <div className="mg-note" style={{ marginBottom: 10 }}>מתוך <b>{docTitle(rec)}</b> · {rec.customer?.name}. הסכום חוזר לחוב של הלקוח{rec.type === '400' && rec.refTitle ? ` ופותח שוב את ${rec.refTitle}` : ''}.</div>
+    {cheques.length ? <div style={grid}>
+      <Field label="הצ׳ק"><select value={pick} onChange={e => setPick(e.target.value)}>{cheques.map(x => <option key={x.i} value={x.i}>{fmt(x.p.amount)} · {heDate(x.p.date)} · {x.p.details || 'צ׳ק'}</option>)}</select></Field>
+      <Field label="תאריך ההחזרה"><input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
+      <Field label="סיבה"><input value={why} onChange={e => setWhy(e.target.value)} /></Field></div> : <div className="mg-empty">אין במסמך הזה צ׳קים שלא חזרו.</div>}
+  </Box>;
+}
+
+function WriteOffForm({ inv, docs, onIssue, onClose }) {
+  const open = openOf(inv, docs);
+  const [amt, setAmt] = useState(String(open));
+  const [why, setWhy] = useState('');
+  const [busy, setBusy] = useState(false);
+  const a = r2(Number(amt) || 0);
+  const issue = async () => {
+    if (!window.confirm(`לבטל יתרה של ${fmt(a)} ב${docTitle(inv)}?`)) return;
+    setBusy(true);
+    const d = newMoneyDoc(inv.series, { type: 'WO', customer: { ...inv.customer }, refId: inv.id, refTitle: docTitle(inv), net: a, total: a, notes: why.trim() });
+    try { const r = await onIssue(d); if (r) onClose(r); } catch (e) { alert('ההפקה נכשלה · ' + dbErr(e)); }
+    setBusy(false);
+  };
+  return <Box title="✂ ביטול יתרה" onClose={() => onClose()} footer={<><button className="mg-btn" disabled={busy || a <= 0 || a > open + 0.009} onClick={issue}>{busy ? 'רושם…' : 'בטל יתרה'}</button><button className="mg-btn ghost" onClick={() => onClose()}>ביטול</button></>}>
+    <div className="mg-note" style={{ marginBottom: 10 }}><b>{docTitle(inv)}</b> · {inv.customer?.name} · פתוח {fmt(open)}. ביטול יתרה סוגר חוב שלא ייגבה (הפרש קטן, הנחה בדיעבד, חוב אבוד). זה לא מבטל את החשבונית ולא משנה את המע״מ שלה; לזה יש חשבונית זיכוי.</div>
+    <div style={grid}><Field label="סכום לביטול"><input inputMode="decimal" value={amt} onChange={e => setAmt(e.target.value)} /></Field>
+      <Field label="סיבה"><input value={why} onChange={e => setWhy(e.target.value)} placeholder="למשל: הפרש עיגול / חוב אבוד" /></Field></div>
+  </Box>;
+}
+
+/* ---------------------------------------------------------- retainers
+   A fixed charge a customer pays every month (a membership, a monthly
+   programme). Each month's invoices wait here; one click issues them all.
+   Nothing is issued without that click. */
+const retDue = (rules, month = thisMonth()) => (rules || []).filter(r => r.active !== false && (r.startMonth || '0000-00') <= month && (!r.endMonth || r.endMonth >= month) && (r.lastMonth || '') < month
+  && Number(todayIso().slice(8, 10)) >= Math.min(28, Number(r.day) || 1));
+function RetainersBox({ book, rules, docs, customers, onSave, onDel, onIssueOne, onClose, flash }) {
+  const types = allowedTypes(book).filter(t => ['305', '320', '400', '300'].includes(t));
+  const blank = { id: '', customer: { name: '', email: '', phone: '', taxId: '' }, desc: '', price: '', incl: true, type: types[0], payKind: 'הוראת קבע', day: 1, active: true, startMonth: thisMonth() };
+  const [edit, setEdit] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const due = retDue(rules);
+  const runAll = async () => {
+    if (!window.confirm(`להפיק ${due.length} מסמכים לחודש ${monthName(thisMonth())}?`)) return;
+    setBusy(true); let n = 0;
+    for (const r of due) { if (await onIssueOne(r)) n++; else break; }
+    setBusy(false); flash(`הופקו ${n} מתוך ${due.length}`);
+  };
+  const custOpts = (customers || []).filter(c => c.name).slice(0, 4000).map(c => ({ key: c.id, label: c.name, c, hay: [searchNorm(c.name), String(c.phone || '').replace(/\D/g, ''), normEmail(c.email)] }));
+  return <Box title="🔁 ריטיינרים · חיוב חודשי קבוע" onClose={onClose} wide footer={<button className="mg-btn ghost" onClick={onClose}>סגור</button>}>
+    {due.length > 0 && <div className="mg-note warn" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span style={{ flex: 1 }}><b>{due.length} ממתינים להפקה</b> ל{monthName(thisMonth())}: {due.map(r => r.customer?.name).join(', ')} · סה״כ {fmt(due.reduce((a, r) => a + (Number(r.price) || 0), 0))}</span>
+      <button className="mg-btn" disabled={busy} onClick={runAll}>{busy ? 'מפיק…' : `🧾 הפק את כולם (${due.length})`}</button></div>}
+    <div className="mg-tblwrap"><table className="mg-tbl"><thead><tr><th>לקוח</th><th>תיאור</th><th>סכום</th><th>מסמך</th><th>יום בחודש</th><th>הופק לאחרונה</th><th></th></tr></thead><tbody>
+      {(rules || []).map(r => <tr key={r.id} style={r.active === false ? { opacity: .5 } : undefined}><td><b>{r.customer?.name}</b></td><td>{r.desc}</td><td>{fmt(r.price)}{r.incl ? '' : ' + מע״מ'}</td>
+        <td>{DOC_TYPES[r.type]?.short}</td><td>{r.day}</td><td>{r.lastMonth ? monthName(r.lastMonth) : '—'}</td>
+        <td style={{ whiteSpace: 'nowrap' }}><button className="mg-btn ghost sm" onClick={() => setEdit({ ...r })}>עריכה</button> <button className="mg-btn ghost sm" onClick={() => onDel(r)}>מחק</button></td></tr>)}
+      {!(rules || []).length && <tr><td colSpan={7}><div className="mg-empty">עוד אין ריטיינרים. מוסיפים לקוח שמשלם סכום קבוע כל חודש.</div></td></tr>}
+    </tbody></table></div>
+    {!edit && <button className="mg-btn" style={{ marginTop: 10 }} onClick={() => setEdit({ ...blank })}>＋ ריטיינר חדש</button>}
+    {edit && <div className="mg-card" style={{ marginTop: 12 }}>
+      <div style={grid}>
+        <div style={{ gridColumn: '1 / -1' }}><Field label="לקוח"><SearchPick value={edit.customer.name} options={custOpts} placeholder="שם הלקוח…"
+          onType={v => setEdit(e => ({ ...e, customer: { ...e.customer, name: v } }))}
+          onPick={o => setEdit(e => ({ ...e, customer: { name: o.c.name, email: o.c.email || '', phone: o.c.phone || '', taxId: o.c.taxId || '', address: [o.c.address, o.c.city].filter(Boolean).join(', ') } }))} /></Field></div>
+        <Field label="תיאור בחשבונית"><input value={edit.desc} onChange={e => setEdit(x => ({ ...x, desc: e.target.value }))} placeholder="ליווי חודשי" /></Field>
+        <Field label="סכום"><input inputMode="decimal" value={edit.price} onChange={e => setEdit(x => ({ ...x, price: e.target.value }))} /></Field>
+        {rateOf(book) > 0 && <Field label="הסכום"><select value={edit.incl ? '1' : ''} onChange={e => setEdit(x => ({ ...x, incl: !!e.target.value }))}><option value="1">כולל מע״מ</option><option value="">לפני מע״מ</option></select></Field>}
+        <Field label="מסמך"><select value={edit.type} onChange={e => setEdit(x => ({ ...x, type: e.target.value }))}>{types.map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>
+        {DOC_TYPES[edit.type]?.pay && <Field label="אמצעי תשלום"><select value={edit.payKind} onChange={e => setEdit(x => ({ ...x, payKind: e.target.value }))}>{['הוראת קבע', ...PAY_KINDS].map(k => <option key={k}>{k}</option>)}</select></Field>}
+        <Field label="יום בחודש"><input inputMode="numeric" value={edit.day} onChange={e => setEdit(x => ({ ...x, day: e.target.value }))} /></Field>
+        <Field label="מחודש"><input type="month" value={edit.startMonth || ''} onChange={e => setEdit(x => ({ ...x, startMonth: e.target.value }))} /></Field>
+        <Field label="עד חודש (לא חובה)"><input type="month" value={edit.endMonth || ''} onChange={e => setEdit(x => ({ ...x, endMonth: e.target.value }))} /></Field>
+        <Field label="פעיל"><select value={edit.active === false ? '' : '1'} onChange={e => setEdit(x => ({ ...x, active: !!e.target.value }))}><option value="1">כן</option><option value="">מושהה</option></select></Field>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button className="mg-btn" disabled={!edit.customer.name.trim() || !(Number(edit.price) > 0) || !edit.desc.trim()} onClick={async () => { if (await onSave({ ...edit, id: edit.id || uid('ret'), price: r2(edit.price), day: Math.min(28, Math.max(1, Number(edit.day) || 1)) })) setEdit(null); }}>שמור</button>
+        <button className="mg-btn ghost" onClick={() => setEdit(null)}>ביטול</button></div>
+    </div>}
+    <p className="coach-p" style={{ marginTop: 12 }}>כל חודש, מהיום שנקבע, הריטיינרים מופיעים כאן וברשימת המסמכים כממתינים. ההפקה רק בלחיצה שלך. חיוב בכרטיס אוטומטי דורש הרשאה בחברת הסליקה; עד אז רושמים כאן את אמצעי התשלום שבפועל.</p>
+  </Box>;
+}
+
 function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue, onPrinted, onSent, onLog, server, ro, flash, ita, onRequestAlloc, onManualAlloc,
-                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh, onSetup, icount = null, onPayReplace = null }) {
+                  payreqs = [], payOk = null, onPayCreated, onPayCancel, onPayRefresh, onSetup, icount = null, onPayReplace = null,
+                  retainers = [], onRetSave, onRetDel }) {
   const [busyId, setBusyId] = useState('');
+  const [money, setMoney] = useState(null);          // { kind: 'CR' | 'WO' | '420', d }
+  const [retOpen, setRetOpen] = useState(false);
   const [payForm, setPayForm] = useState(false);
   const [form, setForm] = useState(null);
   const [done, setDone] = useState(null);
@@ -5246,6 +5418,19 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
   const [type, setType] = useState('');
   const [src, setSrc] = useState('');
   const series = docSeries(book);
+  const undepN = useMemo(() => undeposited(docs, series).length, [docs, series]);
+  const retDueN = retDue(retainers).length;
+  /* One retainer, this month: its document, then the month marked done. */
+  const issueRetainer = async (r) => {
+    const rate = rateOf(book), T = DOC_TYPES[r.type] || {};
+    const lines = T.lines ? [{ desc: r.desc, qty: 1, price: r2(r.price) }] : [];
+    const t = T.lines ? docTotals(lines, !!r.incl, T.vat ? rate : 0) : { net: r2(r.price), vat: 0, total: r2(r.price) };
+    const rec = { id: `ret_${r.id}_${thisMonth()}`, type: r.type, series, date: todayIso(), customer: { ...r.customer }, lines, incl: !!r.incl, vatRate: T.lines && T.vat ? rate : 0,
+      net: t.net, vat: t.vat, total: t.total, payments: T.pay ? [{ kind: r.payKind || 'הוראת קבע', amount: t.total, date: todayIso(), details: '' }] : [],
+      notes: `${r.desc} · ${monthName(thisMonth())}`, retainer: r.id, createdBy: cloud?.auth?.currentUser?.email || '', printCount: 0, createdAt: new Date().toISOString() };
+    try { const d = await onIssue(rec); if (!d) return false; await onRetSave({ ...r, lastMonth: thisMonth() }); return true; }
+    catch (e) { flash('הפקת הריטיינר נכשלה · ' + dbErr(e)); return false; }
+  };
   /* The quick button at the top of the business opens a new document here at once. */
   useEffect(() => {
     if (!quick || ro) return;
@@ -5358,7 +5543,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
             const credited = docs.some(x => x.refId === d.id && x.type === '330');
             return (
               <tr key={d.id}>
-                <td><b>{DOC_TYPES[d.type]?.label}</b> <span dir="ltr">{docNum(d)}</span>{d.series === 'test' && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>ניסיון</span>}
+                <td><b>{docLabel(d)}</b> <span dir="ltr">{docNum(d)}</span>{d.series === 'test' && <span className="mg-chip warn" style={{ marginInlineStart: 6 }}>ניסיון</span>}
                   {isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 6 }}>iCount</span>}
                   {d.cancelled && <span className="mg-chip bad" style={{ marginInlineStart: 6 }}>מבוטל</span>}
                   {d.allocationNo && <span className="mg-chip ok" style={{ marginInlineStart: 6 }} title={d.allocationNo}>הקצאה {String(d.allocationNo).slice(-9)}</span>}
@@ -5369,6 +5554,11 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
                 <td>{isImported(d) ? <span className="mg-chip">היסטוריה</span>
                   : credited ? <span className="mg-chip bad">זוכתה</span>
                   : d.type === '305' ? (open > 0.009 ? <span className="mg-chip warn">פתוחה · {fmt(open)}</span> : <span className="mg-chip ok">שולמה</span>)
+                  : DOC_TYPES[d.type]?.pre ? (() => { const to = docs.find(x => x.fromId === d.id); return to ? <span className="mg-chip ok">הופקה {docTitle(to)}</span> : <span className="mg-chip">{d.type === '500' ? 'נשלחה לספק' : 'ממתינה'}</span>; })()
+                  : d.type === '420' ? <span className="mg-chip ok">הופקד · {(d.payments || []).length} פריטים</span>
+                  : d.type === 'CR' ? <span className="mg-chip bad">שיק חזר</span>
+                  : d.type === 'WO' ? <span className="mg-chip">יתרה בוטלה</span>
+                  : docs.some(x => x.type === 'CR' && x.refId === d.id && !x.cancelled) ? <span className="mg-chip bad">שיק חזר</span>
                   : <span className="mg-chip ok">הופק</span>}
                   {(d.printCount || 0) > 0 && !isImported(d) && <span className="mg-chip" style={{ marginInlineStart: 4 }}>הודפס</span>}</td>
                 <td>{isImported(d) ? <><button className="mg-btn ghost sm keep" onClick={() => printHTML(docHTML(book, d, true))}>🖨 העתק</button>
@@ -5388,6 +5578,11 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
                     : d.customer?.phone && <button className="mg-btn ghost sm" onClick={() => send(d, 'wa')}>וואטסאפ</button>}
                   {d.customer?.email && <button className="mg-btn ghost sm" onClick={() => send(d, 'mail')}>מייל</button>}
                   {d.type === '305' && d.series === series && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setForm({ type: '400', ref: d })}>קבלה</button>}
+                  {!ro && DOC_TYPES[d.type]?.pre && d.type !== '500' && d.series === series && !docs.some(x => x.fromId === d.id) &&
+                    <button className="mg-btn sm" onClick={() => setForm({ type: allowedTypes(book)[0], from: d })}>→ חשבונית</button>}
+                  {!ro && d.type === '305' && d.series === series && open > 0.009 && <button className="mg-btn ghost sm" onClick={() => setMoney({ kind: 'WO', d })}>ביטול יתרה</button>}
+                  {!ro && ['320', '400'].includes(d.type) && d.series === series && (d.payments || []).some(p => isChequeKind(p.kind)) &&
+                    <button className="mg-btn ghost sm" onClick={() => setMoney({ kind: 'CR', d })}>החזרת שיק</button>}
                   {['305', '320'].includes(d.type) && d.series === series && !credited && book.dealerType !== 'exempt' &&
                     <button className="mg-btn ghost sm" onClick={() => setForm({ type: '330', ref: d })}>זיכוי</button>}
                   </>}
@@ -5408,7 +5603,22 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
           <button key={t} className={'mg-btn' + (t === allowedTypes(book)[0] ? '' : ' ghost')} onClick={() => setForm({ type: t })}>＋ {DOC_TYPES[t].label}</button>
         ))}
         {(payOk?.zcredit || payOk?.upay) && !ro && <button data-tour="docs-paynew" className="mg-btn" style={{ background: '#1f4e79' }} onClick={() => setPayForm(true)}>💳 דף סליקה</button>}
+        {!ro && <details data-tour="docs-more" className="more-docs">
+          <summary className="mg-btn ghost">＋ מסמכים נוספים ▾</summary>
+          <div className="more-docs-pop" onClick={e => { if (e.target.closest('button')) e.currentTarget.parentElement.removeAttribute('open'); }}>
+            <div className="mdp-h">לפני חיוב</div>
+            {PRE_TYPES.map(t => <button key={t} onClick={() => setForm({ type: t })}>{DOC_TYPES[t].label}</button>)}
+            <div className="mdp-h">כספים</div>
+            <button onClick={() => setForm({ type: '400', deposit: true })}>קבלה על פיקדון</button>
+            <button onClick={() => setMoney({ kind: '420' })}>הפקדת בנק{undepN ? ` (${undepN} ממתינים)` : ''}</button>
+            <div className="mdp-h">חיוב קבוע</div>
+            <button onClick={() => setRetOpen(true)}>ריטיינרים{retDueN ? ` (${retDueN} להפקה)` : ''}</button>
+            <div className="mdp-note">החזרת שיק וביטול יתרה: מהשורה של הקבלה או החשבונית ברשימה.</div>
+          </div></details>}
       </div>
+      {!ro && retDueN > 0 && <div className="mg-note warn" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ flex: 1 }}>🔁 <b>{retDueN} ריטיינרים</b> ממתינים להפקה ל{monthName(thisMonth())}.</span>
+        <button className="mg-btn sm" onClick={() => setRetOpen(true)}>לריטיינרים</button></div>}
       {icount && <div data-tour="docs-icount" className={'mg-note' + (icount.err ? ' bad' : '')} style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 14 }}>
         <span style={{ flex: 1, minWidth: 180 }}>🔗 <b>iCount</b> · {icount.busy ? 'מושך מסמכים…' : icount.err ? icount.err : icount.msg ? icount.msg : icount.at ? `עודכן ${new Date(icount.at).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'עוד לא נמשך'}</span>
         <button className="mg-btn sm keep" disabled={icount.busy} onClick={icount.sync}>{icount.busy ? '…' : '↻ משוך מ-iCount'}</button>
@@ -5419,7 +5629,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
       <div data-tour="docs-filters" style={{ ...row, marginBottom: 12 }}>
         <Field label="חודש"><input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
         <Field label="סוג"><select value={type} onChange={e => setType(e.target.value)}>
-          <option value="">הכול</option>{allowedTypes(book).map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>
+          <option value="">הכול</option>{[...new Set([...allowedTypes(book), ...docs.map(d => d.type)])].filter(t => DOC_TYPES[t]).map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>
         <Field label="קיבוץ"><select value={groupBy} onChange={e => setGroup(e.target.value)}>
           <option value="">ללא</option><option value="month">📁 לפי חודש</option><option value="cust">📁 לפי לקוח</option><option value="type">📁 לפי סוג</option></select></Field>
         {hasImp && <Field label="מקור"><select value={src} onChange={e => setSrc(e.target.value)}>
@@ -5447,6 +5657,10 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
           : 'חשבונית שנשלחת דיגיטלית צריכה חתימה אלקטרונית מאובטחת. עד שתוגדר תעודה: מדפיסים ומוסרים ביד, או שולחים PDF רק למטרות ניסיון.'}
         {' '}מסמך שהופק לא נמחק ולא נערך; טעות מתקנים בחשבונית זיכוי.
       </div>
+      {money?.kind === '420' && <DepositForm docs={docs} series={series} onIssue={onIssue} onClose={(d) => { setMoney(null); if (d) flash(`${docTitle(d)} הופקה`); }} />}
+      {money?.kind === 'CR' && <ChequeReturnForm rec={money.d} docs={docs} onIssue={onIssue} onClose={(d) => { setMoney(null); if (d) flash(`${docTitle(d)} נרשמה`); }} />}
+      {money?.kind === 'WO' && <WriteOffForm inv={money.d} docs={docs} onIssue={onIssue} onClose={(d) => { setMoney(null); if (d) flash(`${docTitle(d)} נרשם`); }} />}
+      {retOpen && <RetainersBox book={book} rules={retainers} docs={docs} customers={customers} onSave={onRetSave} onDel={onRetDel} onIssueOne={issueRetainer} flash={flash} onClose={() => setRetOpen(false)} />}
       {payForm && <PayForm book={book} payOk={payOk} docs={docs} customers={customers} items={items} flash={flash} preset={payForm.preset || null}
                            onCreated={(r, c) => { onPayCreated(r, c); if (payForm.preset) onPayReplace(payForm.preset, r); }} onClose={() => setPayForm(false)} />}
       {form && <DocForm book={book} docs={docs} customers={customers} items={items} preset={form} itaReady={!!ita?.connected} series={series} onClose={() => setForm(null)}
@@ -5526,6 +5740,9 @@ function SearchPick({ value, onType, options, onPick, placeholder, disabled, ren
 function DocForm({ book, docs, customers = [], items = [], preset, series, onIssue, onClose, itaReady = false }) {
   const rate = rateOf(book);
   const ref = preset.ref || null;
+  /* Turned from a quote, order or delivery note: its customer and lines come along. */
+  const from = preset.from || null;
+  const deposit = !!preset.deposit;
   const [type, setType] = useState(preset.type);
   const T = DOC_TYPES[type];
   /* A credit note follows the invoice it credits, even if the rate changed since. */
@@ -5533,9 +5750,10 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   /* One id for this document however many times issuing is tried: a retry after a timeout finds it issued. */
   const docId = useRef(uid('doc'));
   const [date, setDate] = useState(todayIso());
-  const [cust, setCust] = useState(() => ref ? { ...ref.customer } : { name: '', taxId: '', address: '', phone: '', email: '' });
-  const [incl, setIncl] = useState(ref ? !!ref.incl : true);
-  const [lines, setLines] = useState(() => ref && type === '330' ? ref.lines.map(l => ({ ...l })) : [{ desc: '', qty: 1, price: '' }]);
+  const [cust, setCust] = useState(() => ref ? { ...ref.customer } : from ? { ...from.customer } : { name: '', taxId: '', address: '', phone: '', email: '' });
+  const [incl, setIncl] = useState(ref ? !!ref.incl : from ? !!from.incl : true);
+  const [lines, setLines] = useState(() => ref && type === '330' ? ref.lines.map(l => ({ ...l })) : from ? (from.lines || []).map(l => ({ ...l })) : [{ desc: '', qty: 1, price: '' }]);
+  const [validDays, setValidDays] = useState(30);
   const tot = T.lines ? docTotals(lines, incl, vatRate) : null;
   const refOpen = ref && type === '400' ? openOf(ref, docs) : 0;
   const [pays, setPays] = useState(() => [{ kind: 'העברה בנקאית', amount: ref && type === '400' ? refOpen : '', date: todayIso(), details: '' }]);
@@ -5602,7 +5820,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   if (cashOver && series === 'live') problems.push(`מזומן ${fmt(cash)} מעל המותר בעסקה של ${fmt(dealValue)} (עד ${fmt(cashMax)}, לפי החוק לצמצום השימוש במזומן)`);
 
   const issue = async () => {
-    if (!window.confirm(`להפיק ${T.label} על סך ${fmt(total)} ל${cust.name}?\nאחרי ההפקה אי אפשר לערוך או למחוק את המסמך.`)) return;
+    if (!window.confirm(`להפיק ${deposit ? 'קבלה על פיקדון' : T.label} על סך ${fmt(total)} ל${cust.name}?\nאחרי ההפקה אי אפשר לערוך או למחוק את המסמך.`)) return;
     setBusy(true); setErr('');
     const cleanLines = T.lines ? lines.filter(l => String(l.desc).trim()).map(l => clean({ desc: String(l.desc).trim(), qty: Number(l.qty) || 0, price: r2(l.price),
                                                                                         ...(l.itemId ? { itemId: l.itemId, sku: l.sku || '' } : {}) })) : [];
@@ -5614,6 +5832,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
       allocationNo: alloc.trim(), notes: notes.trim(), withholding: T.pay ? whAmt : 0,
       createdBy: cloud?.auth?.currentUser?.email || '',
       refId: ref?.id || '', refTitle: ref ? docTitle(ref) : '',
+      ...(from ? { fromId: from.id, fromTitle: docTitle(from) } : {}), ...(deposit ? { deposit: true } : {}), ...(type === 'Q' ? { validDays: Number(validDays) || 30 } : {}),
       printCount: 0, createdAt: new Date().toISOString(),
     };
     try { await onIssue(rec); } catch (e) { setErr('ההפקה נכשלה · ' + dbErr(e)); }
@@ -5649,15 +5868,19 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   const setPay = (i, k, v) => setPays(ps => ps.map((p, j) => j === i ? { ...p, [k]: v } : p));
 
   return (
-    <Box title={`${T.label}${series === 'test' ? ' · ניסיון' : ''}`} onClose={onClose} wide
+    <Box title={`${deposit ? 'קבלה על פיקדון' : T.label}${series === 'test' ? ' · ניסיון' : ''}`} onClose={onClose} wide
          footer={<><button className="mg-btn" disabled={busy || problems.length > 0} onClick={issue}>{busy ? 'מפיק…' : 'הפק מסמך'}</button>
                    <button className="mg-btn ghost" onClick={onClose}>ביטול</button></>}>
       {ref && <div className="mg-note" style={{ marginBottom: 12 }}>{type === '330' ? 'זיכוי בגין' : 'תשלום עבור'} <b>{docTitle(ref)}</b> · {fmt(ref.total)}{type === '400' ? ` · יתרה ${fmt(refOpen)}` : ''}</div>}
+      {from && <div className="mg-note" style={{ marginBottom: 12 }}>על פי <b>{docTitle(from)}</b>: הלקוח והשורות הועתקו, ואפשר לשנות לפני ההפקה.</div>}
+      {deposit && <div className="mg-note" style={{ marginBottom: 12 }}>קבלה על כסף שהתקבל <b>כפיקדון</b> (לא הכנסה). המספור משותף לקבלות. כשהפיקדון מקוזז מול שירות, מפיקים חשבונית כרגיל.</div>}
+      {T.pre && <div className="mg-note" style={{ marginBottom: 12 }}>{T.label} אינה מסמך מס ולא נספרת כהכנסה.{type !== '500' ? ' מתוכה אפשר להפיק חשבונית בלחיצה.' : ''}</div>}
       <div style={grid}>
-        {!ref && <Field label="סוג מסמך"><select value={type} onChange={e => setType(e.target.value)}>
-          {allowedTypes(book).filter(t => t !== '330').map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>}
+        {!ref && !deposit && <Field label="סוג מסמך"><select value={type} onChange={e => setType(e.target.value)}>
+          {[...allowedTypes(book).filter(t => t !== '330'), ...PRE_TYPES].map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>}
+        {type === 'Q' && <Field label="תוקף ההצעה (ימים)"><input inputMode="numeric" value={validDays} onChange={e => setValidDays(e.target.value)} /></Field>}
         <Field label="תאריך"><input type="date" value={date} min={lastDate || undefined} onChange={e => setDate(e.target.value)} /></Field>
-        <div data-tour="doc-cust" style={{ gridColumn: '1 / -1' }}><Field label="לקוח · חיפוש לפי שם, טלפון, אימייל או ח.פ.">
+        <div data-tour="doc-cust" style={{ gridColumn: '1 / -1' }}><Field label={`${T.supplier ? 'ספק' : 'לקוח'} · חיפוש לפי שם, טלפון, אימייל או ח.פ.`}>
           <SearchPick value={cust.name} onType={typeName} onPick={pickCust} options={custOpts} disabled={!!ref} autoFocus={!ref}
                       placeholder="הקלד שם או טלפון…" emptyHint="לקוח חדש: המשך להקליד את השם ומלא את הפרטים למטה"
                       renderSub={o => [o.val.phone, o.val.email, o.val.taxId && 'ח.פ. ' + o.val.taxId, o.val.address].filter(Boolean).join(' · ') || (o.key.startsWith('doc:') ? 'ממסמך קודם' : '')} />
@@ -5833,6 +6056,7 @@ function buildJournal(book, ownDocs, ledger, from, to) {
   A('1040', 'שיקים לגבייה', '100', 'רכוש שוטף'); A('1050', 'ארנקים דיגיטליים', '100', 'רכוש שוטף'); A('1100', 'לקוחות', '100', 'רכוש שוטף');
   A('1410', 'מע״מ תשומות', '100', 'רכוש שוטף'); A('1500', 'ניכוי במקור מלקוחות', '100', 'רכוש שוטף'); A('2210', 'מע״מ עסקאות', '200', 'התחייבויות שוטפות');
   A('4000', 'הכנסות חייבות', '400', 'הכנסות'); A('4100', 'הכנסות פטורות', '400', 'הכנסות');
+  A('2300', 'פיקדונות מלקוחות', '200', 'התחייבויות שוטפות');
   const custKey = (c) => { const t = digitsOf(c?.taxId); const k = t || normName(c?.name).replace(/\s/g, '').slice(0, 12) || 'X'; return ('C' + k).slice(0, 15); };
   const cust = (c) => A(custKey(c), String(c?.name || 'לקוח').slice(0, 50), '100', 'רכוש שוטף',
     { parent: '1100', street: c?.address || '', osek: digitsOf(c?.taxId).length === 9 ? digitsOf(c.taxId) : '' }).key;
@@ -5851,9 +6075,9 @@ function buildJournal(book, ownDocs, ledger, from, to) {
   ownDocs.filter(d => (d.series === 'live' || d.series === 'sample') && !d.cancelled && inRange(d.date)).forEach(d => {
     ownIds.add(d.id);
     const sign = d.type === '330' ? -1 : 1, num = docNum(d);
-    if (['305', '320', '330'].includes(d.type) || (d.type === '400' && book.dealerType === 'exempt' && !d.refId)) {
+    if (['305', '320', '330'].includes(d.type) || (d.type === '400' && book.dealerType === 'exempt' && !d.refId && !d.deposit)) {
       const c = cust(d.customer);
-      entry(d.date, num, Number(d.type), `${DOC_TYPES[d.type]?.label} ${num} ${d.customer?.name || ''}`, [
+      entry(d.date, num, Number(d.type), `${docLabel(d)} ${num} ${d.customer?.name || ''}`, [
         { acc: c, side: 1, amt: sign * d.total },
         { acc: d.vat ? '4000' : '4100', side: 2, amt: sign * (d.total - d.vat) },
         { acc: '2210', side: 2, amt: sign * d.vat },
@@ -5863,9 +6087,13 @@ function buildJournal(book, ownDocs, ledger, from, to) {
       const c = cust(d.customer);
       const got = d.payments.map(p => ({ acc: PAY_ACC[p.kind] || '1020', side: 1, amt: Number(p.amount) || 0 }));
       const wh = Number(d.withholding) || 0;
-      entry(d.date, docNum(d), Number(d.type), `תקבול ${docNum(d)} ${d.customer?.name || ''}`,
-        [...got, { acc: '1500', side: 1, amt: wh }, { acc: c, side: 2, amt: got.reduce((a, x) => a + x.amt, 0) + wh }]);
+      entry(d.date, docNum(d), Number(d.type), `${d.deposit ? 'פיקדון' : 'תקבול'} ${docNum(d)} ${d.customer?.name || ''}`,
+        [...got, { acc: '1500', side: 1, amt: wh }, { acc: d.deposit ? '2300' : c, side: 2, amt: got.reduce((a, x) => a + x.amt, 0) + wh }]);
     }
+    /* A deposit: the cash and cheques move to the bank. */
+    if (d.type === '420' && (d.payments || []).length)
+      entry(d.date, docNum(d), 420, `הפקדה לבנק ${docNum(d)}`, [{ acc: '1020', side: 1, amt: d.total },
+        ...d.payments.map(p => ({ acc: PAY_ACC[p.kind] || '1010', side: 2, amt: Number(p.amount) || 0 }))]);
   });
   ledger.income.filter(i => inRange(i.date) && !(i.src === 'doc' && ownIds.has(String(i.id).slice(2)))).forEach(i => {
     entry(i.date, i.docNo || '', 0, i.desc, [
@@ -5905,7 +6133,7 @@ function buildUnified(book, docs, soft, from, to, opts = {}) {
      documents with the same type and number cannot both be in the file: the
      simulator ties every line to the first one. They are reported, not hidden. */
   const seenId = new Set(), seenNum = new Map(), dups = [];
-  const sorted = [...docs].filter(d => !seenId.has(d.id) && seenId.add(d.id))
+  const sorted = [...docs].filter(d => DOC_TYPES[d.type] && !DOC_TYPES[d.type].internal).filter(d => !seenId.has(d.id) && seenId.add(d.id))
     .sort((a, b) => (a.date + a.type + String(a.number).padStart(9, '0')).localeCompare(b.date + b.type + String(b.number).padStart(9, '0')))
     .filter(d => { const k = d.type + '|' + docNum(d); if (seenNum.has(k)) { dups.push({ type: d.type, num: docNum(d), date: d.date, first: seenNum.get(k).date, name: d.customer?.name || '' }); return false; } seenNum.set(k, d); return true; });
   const byType = {};
@@ -6039,7 +6267,7 @@ function exportSheets(book, data, ledger, from, to, withTest) {
   const out = ledger.outgo.filter(e => inR(e.date)).slice().reverse();
   const S = {};
   S.docs = { name: 'מסמכים', rows: [['תאריך', 'סוג', 'מספר', 'סדרה', 'לקוח', 'ח.פ. / ת.ז.', 'לפני מע״מ', 'מע״מ', 'סה״כ', 'ניכוי במקור', 'אמצעי תשלום', 'בגין', 'מספר הקצאה', 'מבוטל'],
-    ...docs.map(d => [d.date, DOC_TYPES[d.type]?.label || d.type, docNum(d), SERIES_LABEL[d.series] || d.series || '', d.customer?.name || '', d.customer?.taxId || '',
+    ...docs.map(d => [d.date, docLabel(d), docNum(d), SERIES_LABEL[d.series] || d.series || '', d.customer?.name || '', d.customer?.taxId || '',
       r2(d.net ?? (d.total - (d.vat || 0))), r2(d.vat || 0), r2(d.total), r2(d.withholding || 0) || '', (d.payments || []).map(p => p.kind).join(', '), d.refTitle || '',
       d.allocationNo || '', d.cancelled ? 'כן' : ''])] };
   S.lines = { name: 'שורות מסמכים', rows: [['תאריך', 'סוג', 'מספר', 'לקוח', 'תיאור', 'כמות', 'מחיר', 'מחיר כולל מע״מ', 'סה״כ שורה'],
@@ -6566,7 +6794,7 @@ function ICountImport({ book, data, cols, flash, onDone, onLog }) {
         <div className="mg-tblwrap" style={{ marginBottom: 10 }}><table className="mg-tbl">
           <thead><tr><th>מסמך</th><th>תאריך</th><th>לקוח</th><th>סה״כ</th></tr></thead>
           <tbody>{plan.sales.slice(0, 6).map(d => (
-            <tr key={d.id}><td>{DOC_TYPES[d.type]?.label} {d.number}</td><td>{heDate(d.date)}</td><td>{d.customer?.name}</td><td>{fmt(d.total)}</td></tr>))}
+            <tr key={d.id}><td>{docLabel(d)} {d.number}</td><td>{heDate(d.date)}</td><td>{d.customer?.name}</td><td>{fmt(d.total)}</td></tr>))}
           </tbody></table></div>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14, marginBottom: 10 }}>
           <input type="checkbox" style={{ width: 'auto' }} checked={reverse} onChange={e => setReverse(e.target.checked)} />
@@ -7498,6 +7726,8 @@ function customerMoves(book, docs, who, withTest, idx) {
       out.push({ date: d.date, ref: t, desc: 'תקבול' + (d.refTitle ? ` · ${d.refTitle}` : '') + (wh ? ` (כולל ניכוי במקור ${fmt(wh)})` : ''), dr: 0, cr: r2((Number(d.total) || 0) + wh), docId: d.id });
     }
     if (d.type === '330') out.push({ date: d.date, ref: t, desc: 'זיכוי' + (d.refTitle ? ` · ${d.refTitle}` : ''), dr: 0, cr: r2(d.total), docId: d.id });
+    if (d.type === 'CR') out.push({ date: d.date, ref: t, desc: 'שיק שחזר' + (d.refTitle ? ` · ${d.refTitle}` : ''), dr: r2(d.total), cr: 0, docId: d.id });
+    if (d.type === 'WO') out.push({ date: d.date, ref: t, desc: 'ביטול יתרה' + (d.refTitle ? ` · ${d.refTitle}` : ''), dr: 0, cr: r2(d.total), docId: d.id });
   });
   return out.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (b.dr - a.dr));
 }
