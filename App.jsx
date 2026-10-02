@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.45.3';
+const VERSION = '1.46.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1119,6 +1119,10 @@ li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
 .coach-sugg{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}@media (max-width:640px){.coach-sugg.ask{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}.coach-sugg.ask .mg-chipbtn{flex:0 0 auto;white-space:nowrap}}.coach-sugg .mg-chipbtn{font-size:13.5px;padding:6px 12px}
 .coach-in{display:flex;gap:8px;align-items:flex-end}.coach-in textarea{flex:1;min-width:0;resize:vertical}
 .mic{flex:0 0 auto;min-width:44px;font-size:18px;padding:6px 10px}.mic.rec{background:#b3412f;color:#fff;border-color:#b3412f;animation:micp 1.2s infinite}@keyframes micp{50%{box-shadow:0 0 0 6px rgba(179,65,47,.18)}}
+@media (max-width:640px){.coach-ai .coach-in{flex-wrap:wrap}.coach-ai .coach-in textarea{flex:1 1 100%}.coach-ai .coach-in > .mg-btn:last-child{flex:1}}
+.cf-list{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px}.cf-chip{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:12px;padding:5px 8px;background:#fff;max-width:100%}
+.cf-chip img{width:44px;height:44px;object-fit:cover;border-radius:8px}.cf-ic{font-size:26px}.cf-t{display:flex;flex-direction:column;min-width:0}.cf-t b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}.cf-t small{font-size:12px;color:var(--muted)}
+.cf-chip button{border:0;background:none;cursor:pointer;color:var(--muted)}.mic.disabled{opacity:.5;pointer-events:none}.cm-pics{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}.cm-pics img{max-width:160px;max-height:120px;border-radius:8px;border:2px solid rgba(255,255,255,.4)}
 .cm-plan{display:block;margin-top:8px;font-size:13px}.cp-n{font-size:13px;color:var(--muted);margin-bottom:8px}
 .cp-goals{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:8px 0}.cp-goals div{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px}.cp-goals b{display:block;color:#2f5d46;font-size:12.5px}
 .cp-acts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
@@ -1582,6 +1586,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.46.0', date: '02.10.26', items: ['📎 צירוף קבצים למאמן: תמונה, צילום מסך (אפשר להדביק עם Ctrl+V), PDF, אקסל או טקסט. תמונה מכווצת כבר במכשיר (למשל מ-3 MB לכ-300 KB) לפני השליחה, ורואים כמה.', 'המאמן מנתח את הקובץ: למשל צילום של רישום שגוי, והוא אומר מה לא תקין, למה, ואיך מתקנים (איזה מסך, איזה שדה, מה הערך הנכון).'] },
   { v: '1.45.3', date: '02.10.26', items: [
     'רווח שלילי (הפסד) מוצג בשורה אחת עם סימן המינוס. בכרטיס צר המינוס ירד לשורה נפרדת ונראה כמו סכום חיובי.',
     'האייקונים בתפריטים ובכפתורים (🧾, 👥 ועוד) מוצגים גם ב-Windows 7, ולא כריבועים ריקים.'] },
@@ -3029,7 +3034,7 @@ async function coachCall(body, background) {
   if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
   return j;
 }
-const COACH_ERR = { empty: 'המודל החזיר תשובה ריקה גם אחרי ניסיון חוזר. נסה שוב בעוד דקה.', 'no-key': 'עוד אין מפתח API למאמן.', 'bad-key': 'Anthropic דחו את המפתח. בדוק שהעתקת אותו נכון ושיש בחשבון יתרה.', 'owners only': 'המאמן פתוח רק לבעלי עסק.',
+const COACH_ERR = { 'file-type': 'סוג הקובץ לא נתמך. אפשר תמונה, PDF, אקסל או טקסט.', 'file-size': 'הקובץ גדול מדי גם אחרי כיווץ.', empty: 'המודל החזיר תשובה ריקה גם אחרי ניסיון חוזר. נסה שוב בעוד דקה.', 'no-key': 'עוד אין מפתח API למאמן.', 'bad-key': 'Anthropic דחו את המפתח. בדוק שהעתקת אותו נכון ושיש בחשבון יתרה.', 'owners only': 'המאמן פתוח רק לבעלי עסק.',
   'no-service-account': 'חסר מפתח שירות של Firebase בשרת.', 'key-format': 'המפתח צריך להתחיל ב-sk-ant-', model: 'המודל לא ענה כרגע. נסה שוב בעוד דקה.', timeout: 'התשובה מתעכבת. נסה לרענן בעוד כמה דקות.',
   credit: 'אין מספיק יתרה בחשבון Anthropic. טוענים ב-console.anthropic.com ← Billing (אחרי רכישה זה לפעמים לוקח כמה דקות להיכנס).',
   'bad-model': 'Anthropic לא מכירים את שם המודל. אפשר להגדיר אחר ב-Netlify (COACH_MODEL).', busy: 'יותר מדי בקשות ברגע זה. נסה שוב בעוד דקה.', overloaded: 'השרתים של Anthropic עמוסים כרגע. נסה שוב בעוד כמה דקות.' };
@@ -3230,6 +3235,38 @@ function CoachPlan({ area, p, onDel, onRedo, wait, flash, open }) {
 }
 
 const PLAN_ASK = /(בנה|תבנה|תכין|הכן|צור|תן)\s+(לי\s+)?(תוכנית|תכנית|צ[׳']?קליסט|רשימת משימות)|^(תוכנית|תכנית)\s/;
+/* Files for the coach: shrunk here, before they leave the device. A picture
+   to at most 1600 pixels as JPEG (a screenshot stays readable, a phone photo
+   drops from megabytes to a few hundred KB); a PDF as it is, up to 3.5 MB; a
+   spreadsheet or text as text. */
+const kb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+async function shrinkImage(file, max = 1600, q = 0.82) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    const dataUrl = c.toDataURL('image/jpeg', q);
+    return { mime: 'image/jpeg', data: dataUrl.split(',')[1], preview: dataUrl, after: Math.round(dataUrl.length * 0.75) };
+  } finally { URL.revokeObjectURL(url); }
+}
+async function coachFile(file) {
+  const name = file.name || 'צילום מסך.png', before = file.size || 0;
+  if (/^image\//.test(file.type)) { const r = await shrinkImage(file); return { name: name.replace(/\.\w+$/, '') + '.jpg', before, ...r }; }
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(name)) {
+    if (before > 3.5 * 1048576) throw new Error(`${name}: קובץ PDF גדול מ-3.5 MB. אפשר לצלם את העמוד הרלוונטי במקום.`);
+    return { name, before, after: before, mime: 'application/pdf', data: b64(await file.arrayBuffer()) };
+  }
+  if (/\.(xlsx|xls)$/i.test(name)) {
+    const X = await import('xlsx'); const wb = X.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true });
+    const text = wb.SheetNames.slice(0, 3).map(n => `# ${n}\n` + X.utils.sheet_to_csv(wb.Sheets[n])).join('\n').slice(0, 60000);
+    return { name, before, after: text.length, mime: 'text/csv', text };
+  }
+  if (/^text\/|\.(csv|txt|json|md)$/i.test(file.type + ' ' + name)) { const text = (await file.text()).slice(0, 60000); return { name, before, after: text.length, mime: 'text/plain', text }; }
+  throw new Error(`${name}: אפשר לצרף תמונה, PDF, אקסל או טקסט.`);
+}
+
 function SmartCoach({ summary, flash, partial }) {
   const [st, setSt] = useState(null);
   const [err, setErr] = useState('');
@@ -3254,21 +3291,31 @@ function SmartCoach({ summary, flash, partial }) {
     return { state: 'error', error: 'timeout' };
   };
   const [justBuilt, setJustBuilt] = useState('');
+  const [files, setFiles] = useState([]);
+  const addFiles = async (list) => {
+    for (const f of [...list].slice(0, 4 - files.length)) {
+      try { const r = await coachFile(f); setFiles(x => [...x, { ...r, key: uid('f') }].slice(0, 4)); }
+      catch (e) { flash(e.message); }
+    }
+  };
   const send = async (text) => {
-    const t = String(text ?? q).trim(); if (!t || wait) return;
+    const t = String(text ?? q).trim(); if ((!t && !files.length) || wait) return;
     /* Asking for a plan builds one, with its checklist, instead of a chat answer. */
-    if (PLAN_ASK.test(t)) { setQ(''); setChat(c => [...c, { role: 'user', text: t, at: new Date().toISOString() }]); const ok = await plan('t_' + Date.now().toString(36), t.slice(0, 90));
+    if (!files.length && PLAN_ASK.test(t)) { setQ(''); setChat(c => [...c, { role: 'user', text: t, at: new Date().toISOString() }]); const ok = await plan('t_' + Date.now().toString(36), t.slice(0, 90));
       setChat(c => [...c, { role: 'assistant', text: ok ? '✅ בניתי תוכנית עם צ׳קליסט ותאריכים. היא פתוחה למטה, ב**תוכניות עבודה**. לחיצה על 👁 הצג פותחת אותה כדף מעוצב.' : '❌ לא הצלחתי לבנות את התוכנית. הסיבה כתובה למעלה; נסה שוב.', at: new Date().toISOString() }]); return; }
     setQ(''); setWait('chat'); setErr('');
-    const now = new Date().toISOString();
-    setChat(c => [...c, { role: 'user', text: t, at: now }]);
+    const now = new Date().toISOString(), sent = files;
+    setChat(c => [...c, { role: 'user', text: (t || 'נתח את הקובץ המצורף.') + (sent.length ? `\n📎 ${sent.map(f => f.name).join(', ')}` : ''), at: now, pics: sent.filter(f => f.preview).map(f => f.preview) }]);
+    setFiles([]);
     const id = uid('job');
     try {
-      await coachCall({ id, kind: 'chat', text: t, summary }, true);
+      const ids = [];
+      for (const f of sent) ids.push((await coachCall({ action: 'upload', name: f.name, mime: f.mime, ...(f.text != null ? { text: f.text } : { data: f.data }) })).id);
+      await coachCall({ id, kind: 'chat', text: t, summary, files: ids }, true);
       const j = await poll(id);
       if (j.state === 'done') setChat(c => [...c, { role: 'assistant', text: j.text, at: new Date().toISOString() }]);
-      else { setErr(coachErr(j.error, j.detail)); setChat(c => c.slice(0, -1)); setQ(t); }
-    } catch (e) { setErr(coachErr(e.message)); setChat(c => c.slice(0, -1)); setQ(t); }
+      else { setErr(coachErr(j.error, j.detail)); setChat(c => c.slice(0, -1)); setQ(t); setFiles(sent); }
+    } catch (e) { setErr(coachErr(e.message)); setChat(c => c.slice(0, -1)); setQ(t); setFiles(sent); }
     setWait('');
   };
   const [topic, setTopic] = useState('');
@@ -3304,18 +3351,25 @@ function SmartCoach({ summary, flash, partial }) {
     {st?.keyed && !st.failed && <>
       <div className="coach-chat" aria-live="polite">
         {!chat.length && <div className="coach-p">שאל אותי כל דבר על העסק. אני רואה את המספרים שלמעלה: היעד, הקצב, ההוצאות, ההפרשות והאוברדרפט.</div>}
-        {chat.map((m, i) => <div key={i} className={'cm ' + m.role}>{m.role === 'assistant' ? <><CoachText text={m.text} />
+        {chat.map((m, i) => <div key={i} className={'cm ' + m.role}>{m.pics?.length > 0 && <div className="cm-pics">{m.pics.map((p, k) => <img key={k} src={p} alt="" />)}</div>}{m.role === 'assistant' ? <><CoachText text={m.text} />
           {m.text.length > 200 && <button className="mg-linkish cm-plan" disabled={!!wait} onClick={() => plan('chat_' + Date.now().toString(36), (chat[i - 1]?.text || 'תוכנית מהשיחה').slice(0, 70), 'בנה את התוכנית על בסיס התשובה הזו שלך מהשיחה:\n' + m.text.slice(0, 3500))}>📋 הפוך לתוכנית עם צ׳קליסט</button>}</> : m.text}</div>)}
         {wait && wait !== 'chat' && <div className="cm assistant thinking">בונה תוכנית עם צ׳קליסט<span className="dots">…</span></div>}
         {wait === 'chat' && <div className="cm assistant thinking">המאמן חושב<span className="dots">…</span></div>}
         <div ref={endRef} />
       </div>
       <div className="coach-sugg ask">{COACH_ASK.map(s => <button key={s} className="mg-chipbtn" disabled={!!wait} onClick={() => send(s)}>{s}</button>)}</div>
+      {files.length > 0 && <div className="cf-list">{files.map(f => <div key={f.key} className="cf-chip">
+        {f.preview ? <img src={f.preview} alt="" /> : <span className="cf-ic">{/pdf/.test(f.mime) ? '📄' : '📊'}</span>}
+        <span className="cf-t"><b>{f.name}</b><small>{f.preview && f.before > f.after ? `כווץ מ-${kb(f.before)} ל-${kb(f.after)}` : kb(f.after || f.before)}</small></span>
+        <button aria-label="הסר" onClick={() => setFiles(x => x.filter(y => y.key !== f.key))}>✕</button></div>)}</div>}
       <div className="coach-in">
-        <textarea rows={2} value={q} placeholder="מה תרצה לשאול את המאמן?" onChange={e => setQ(e.target.value)}
+        <textarea rows={2} value={q} placeholder={files.length ? 'מה לבדוק בקובץ? (אפשר גם בלי טקסט)' : 'מה תרצה לשאול את המאמן? אפשר להדביק צילום מסך (Ctrl+V)'} onChange={e => setQ(e.target.value)}
+          onPaste={e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } }}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+        <label className={'mg-btn ghost mic' + (wait || files.length >= 4 ? ' disabled' : '')} title="צרף תמונה, PDF או אקסל" aria-label="צרף קובץ" style={{ cursor: 'pointer' }}>📎
+          <input type="file" hidden multiple accept="image/*,application/pdf,.pdf,.xlsx,.xls,.csv,.txt" disabled={!!wait || files.length >= 4} onChange={e => { addFiles(e.target.files || []); e.target.value = ''; }} /></label>
         <MicButton value={q} onChange={setQ} flash={flash} disabled={!!wait} />
-        <button className="mg-btn" disabled={!q.trim() || !!wait} onClick={() => send()}>{wait === 'chat' ? '…' : 'שלח'}</button>
+        <button className="mg-btn" disabled={(!q.trim() && !files.length) || !!wait} onClick={() => send()}>{wait === 'chat' ? '…' : 'שלח'}</button>
       </div>
 
       <h4 style={{ margin: '18px 0 6px' }}>📋 תוכניות עבודה (90 יום, עם צ׳קליסט ותאריכים)</h4>

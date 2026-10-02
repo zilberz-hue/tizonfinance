@@ -10,6 +10,7 @@
    ==========================================================================*/
 export const MODEL = (process.env.COACH_MODEL || 'claude-sonnet-5-5').trim();
 const KEY = 'coach-key';                                    // one key for the whole installation
+const fileKey = (id) => 'coach-file:' + id;
 const chatKey = (e) => 'coach-chat:' + e, planKey = (e) => 'coach-plans:' + e, jobKey = (id) => 'coach-job:' + id;
 const MAX_TURNS = 30;
 
@@ -133,6 +134,16 @@ export async function coachAction(body, email, deps) {
     const j = await st.get(jobKey(String(body.id || '')), { type: 'json' }).catch(() => null);
     return j || { state: 'pending' };
   }
+  /* A file for the next question: an image (already shrunk in the page), a PDF, or text. Kept a day. */
+  if (body.action === 'upload') {
+    const mime = String(body.mime || ''), data = String(body.data || ''), name = String(body.name || 'קובץ').slice(0, 120);
+    const kind = /^image\/(jpeg|png|webp|gif)$/.test(mime) ? 'image' : mime === 'application/pdf' ? 'pdf' : body.text != null ? 'text' : '';
+    if (!kind) throw Object.assign(new Error('file-type'), { status: 400 });
+    if (kind !== 'text' && (!/^[A-Za-z0-9+/=]+$/.test(data) || data.length > 5_000_000)) throw Object.assign(new Error('file-size'), { status: 400 });
+    const id = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    await st.setJSON(fileKey(id), { email, kind, mime, name, data: kind === 'text' ? '' : data, text: kind === 'text' ? String(body.text).slice(0, 60000) : '', at: new Date().toISOString() });
+    return { ok: true, id, kind };
+  }
   if (body.action === 'clear') { await st.setJSON(chatKey(email), []); return { ok: true }; }
   if (body.action === 'del-plan') {
     const plans = (await st.get(planKey(email), { type: 'json' }).catch(() => null)) || {};
@@ -170,13 +181,24 @@ export async function coachRun(body, email, deps) {
       await st.setJSON(jobKey(id), { state: 'done', kind: 'ask', text });
       return;
     }
-    const q = String(body.text || '').trim().slice(0, 2000);
+    const q = String(body.text || '').trim().slice(0, 2000) || (Array.isArray(body.files) && body.files.length ? 'נתח את הקובץ המצורף.' : '');
     if (!q) throw Object.assign(new Error('empty'), { code: 'empty' });
     const chat = (await st.get(chatKey(email), { type: 'json' }).catch(() => null)) || [];
-    const msgs = [...chat.slice(-MAX_TURNS).map(m => ({ role: m.role, content: m.text })), { role: 'user', content: q }];
+    /* Attached files go to the model with this question only; the conversation keeps their names. */
+    const files = [];
+    for (const fid of (Array.isArray(body.files) ? body.files : []).slice(0, 4)) {
+      const f = await st.get(fileKey(String(fid)), { type: 'json' }).catch(() => null);
+      if (f && f.email === email) files.push(f);
+    }
+    const blocks = files.map(f => f.kind === 'image' ? { type: 'image', source: { type: 'base64', media_type: f.mime, data: f.data } }
+      : f.kind === 'pdf' ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } }
+      : { type: 'text', text: `קובץ מצורף "${f.name}":\n${f.text}` });
+    const ask = files.length ? [...blocks, { type: 'text', text: q + '\n\n(צורפו: ' + files.map(f => f.name).join(', ') + '. אם זה צילום מסך של רישום במערכת, אמור מה נראה שגוי, למה, ואיך מתקנים: באיזה מסך, איזה שדה, ומה הערך הנכון.)' }] : q;
+    const msgs = [...chat.slice(-MAX_TURNS).map(m => ({ role: m.role, content: m.text })), { role: 'user', content: ask }];
     const text = await deps.ask({ key, system: SYSTEM + '\n\n' + sum, messages: msgs, maxTokens: 1500 });
     const now = new Date().toISOString();
-    const next = [...chat, { role: 'user', text: q, at: now }, { role: 'assistant', text, at: now }].slice(-MAX_TURNS * 2);
+    const next = [...chat, { role: 'user', text: q + (files.length ? `\n📎 ${files.map(f => f.name).join(', ')}` : ''), at: now }, { role: 'assistant', text, at: now }].slice(-MAX_TURNS * 2);
+    for (const fid of (Array.isArray(body.files) ? body.files : [])) await st.delete(fileKey(String(fid))).catch(() => {});
     await st.setJSON(chatKey(email), next);
     await st.setJSON(jobKey(id), { state: 'done', kind: 'chat', text });
   } catch (e) {
