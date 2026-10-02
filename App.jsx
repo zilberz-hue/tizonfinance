@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.42.1';
+const VERSION = '1.42.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1281,6 +1281,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.42.2', date: '02.10.26', items: ['המאמן: כשהמודל מחזיר תשובה ריקה, השרת מבקש שוב עם יותר מקום, ולא שומר תוכנית ריקה. תוכנית שנשמרה ריקה מסומנת, עם "↻ בנה מחדש".'] },
   { v: '1.42.1', date: '02.10.26', items: ['תוכנית: כפתור "👁 הצג" פותח את התוכנית המעוצבת בתוך האפליקציה, ומשם מורידים או מדפיסים. אחרי הורדה מופיעה הודעה עם שם הקובץ.', 'אוטומטי: כל תוכנית, גם ישנה שנכתבה כטקסט, מקבלת צ׳קליסט עם תאריכים. כשמבקשים בשיחה "תבנה לי תוכנית…" המאמן בונה תוכנית עם צ׳קליסט ופותח אותה.'] },
   { v: '1.42.0', date: '02.10.26', items: ['מיקרופון במאמן החכם (🎤): מדברים בעברית והטקסט נכנס לתיבה. גם בהערה לתוכנית ובנושא תוכנית.', 'תוכניות עם צ׳קליסט: כל תוכנית נבנית בשלבים, עם משימות, תאריך יעד לכל משימה, יעדים ל-30/60/90 יום ומה מודדים. מסמנים מה בוצע (מסונכרן לכל המכשירים) ורואים התקדמות ואיחורים.', 'תוכנית לכל נושא שתכתוב, וכפתור "📋 הפוך לתוכנית עם צ׳קליסט" מתחת לתשובה ארוכה בשיחה.', 'הורדת תוכנית כקובץ HTML מעוצב עם צ׳קליסט שעובד גם מחוץ לאפליקציה, והדפסה.'] },
   { v: '1.41.0', date: '02.10.26', items: ['מסלול השקה (בתפריט הצד, 🚀): צ׳קליסט עם תאריכים מהפיילוט ועד שהקליניקה עובדת על Tizon Finance — הכנה, תיק הרישום ברשות המסים, עבודה במקביל ל-iCount, והמעבר. הערות, שינוי תאריכים ומשימות משלך, מסונכרן לכל המכשירים, ואפשר להדפיס.'] },
@@ -2676,7 +2677,7 @@ async function coachCall(body, background) {
   if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
   return j;
 }
-const COACH_ERR = { 'no-key': 'עוד אין מפתח API למאמן.', 'bad-key': 'Anthropic דחו את המפתח. בדוק שהעתקת אותו נכון ושיש בחשבון יתרה.', 'owners only': 'המאמן פתוח רק לבעלי עסק.',
+const COACH_ERR = { empty: 'המודל החזיר תשובה ריקה גם אחרי ניסיון חוזר. נסה שוב בעוד דקה.', 'no-key': 'עוד אין מפתח API למאמן.', 'bad-key': 'Anthropic דחו את המפתח. בדוק שהעתקת אותו נכון ושיש בחשבון יתרה.', 'owners only': 'המאמן פתוח רק לבעלי עסק.',
   'no-service-account': 'חסר מפתח שירות של Firebase בשרת.', 'key-format': 'המפתח צריך להתחיל ב-sk-ant-', model: 'המודל לא ענה כרגע. נסה שוב בעוד דקה.', timeout: 'התשובה מתעכבת. נסה לרענן בעוד כמה דקות.',
   credit: 'אין מספיק יתרה בחשבון Anthropic. טוענים ב-console.anthropic.com ← Billing (אחרי רכישה זה לפעמים לוקח כמה דקות להיכנס).',
   'bad-model': 'Anthropic לא מכירים את שם המודל. אפשר להגדיר אחר ב-Netlify (COACH_MODEL).', busy: 'יותר מדי בקשות ברגע זה. נסה שוב בעוד דקה.', overloaded: 'השרתים של Anthropic עמוסים כרגע. נסה שוב בעוד כמה דקות.' };
@@ -2812,12 +2813,13 @@ function CoachPlan({ area, p, onDel, onRedo, wait, flash, open }) {
     <summary><b>{p.label}</b> <small>· {new Date(p.at).toLocaleDateString('he-IL')}</small>
       {d && <span className={'mg-chip ' + (pct === 100 ? 'ok' : late ? 'bad' : '')} style={{ marginInlineStart: 8 }}>{pct}%{late ? ` · ${late} באיחור` : ''}</span>}</summary>
     <div className="cp-acts">
-      <button className="mg-btn sm" onClick={() => setView(true)}>👁 הצג</button>
+      {(d || String(p.text || '').trim()) && <><button className="mg-btn sm" onClick={() => setView(true)}>👁 הצג</button>
       <button className="mg-btn ghost sm" onClick={download}>⬇ קובץ HTML</button>
-      <button className="mg-btn ghost sm" onClick={() => printHTML(html())}>🖨 הדפס</button>
+      <button className="mg-btn ghost sm" onClick={() => printHTML(html())}>🖨 הדפס</button></>}
       {onRedo && <button className="mg-btn ghost sm" disabled={!!wait} onClick={onRedo}>↻ בנה מחדש</button>}
       <button className="mg-btn ghost sm" onClick={onDel}>מחק</button></div>
-    {!d && <CoachText text={p.text} />}
+    {!d && String(p.text || '').trim() && <CoachText text={p.text} />}
+    {!d && !String(p.text || '').trim() && <div className="mg-note warn" style={{ marginTop: 8 }}>התוכנית הזו נשמרה ריקה (תקלה שתוקנה). לחץ "↻ בנה מחדש" או מחק אותה.</div>}
     {d && <div className="cp">
       <div className="ln-bar" style={{ margin: '8px 0 4px' }}><i style={{ width: pct + '%', background: 'linear-gradient(90deg,#2f5d46,#7aa37f)' }} /></div>
       <div className="cp-n">{n} מתוך {tasks.length} משימות{d.fromText && ' · נבנה אוטומטית מהטקסט; "↻ בנה מחדש" ייתן גם יעדים ומדדים'}</div>

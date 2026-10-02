@@ -57,19 +57,30 @@ const planAsText = (d) => [d.summary, '', ...d.goals.map(g => `- ${g.when}: ${g.
 
 /* One call to the model. */
 export async function askClaude({ key, system, messages, maxTokens = 1500, fetchImpl = fetch }) {
-  const r = await fetchImpl('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const msg = String(j?.error?.message || ('anthropic ' + r.status));
-    const code = r.status === 401 ? 'bad-key' : /credit balance|billing|purchase credits/i.test(msg) ? 'credit'
-      : r.status === 404 || /model/i.test(msg) && r.status === 400 ? 'bad-model' : r.status === 429 ? 'busy' : r.status === 529 || r.status >= 500 ? 'overloaded' : 'model';
-    throw Object.assign(new Error(msg), { status: r.status === 401 ? 400 : 502, code, detail: msg });
+  /* An answer can come back without text: the model used up its room before
+     writing (stop_reason max_tokens). Then ask again with more room, so the
+     page never gets an empty plan. */
+  let room = maxTokens, last = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetchImpl('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: MODEL, max_tokens: room, system, messages }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = String(j?.error?.message || ('anthropic ' + r.status));
+      const code = r.status === 401 ? 'bad-key' : /credit balance|billing|purchase credits/i.test(msg) ? 'credit'
+        : r.status === 404 || /model/i.test(msg) && r.status === 400 ? 'bad-model' : r.status === 429 ? 'busy' : r.status === 529 || r.status >= 500 ? 'overloaded' : 'model';
+      throw Object.assign(new Error(msg), { status: r.status === 401 ? 400 : 502, code, detail: msg });
+    }
+    const text = (j.content || []).filter(x => x.type === 'text').map(x => x.text).join('\n').trim();
+    last = { stop: j.stop_reason, types: (j.content || []).map(x => x.type).join(',') || 'none' };
+    console.log('coach answer', JSON.stringify({ ...last, chars: text.length, room }));
+    if (text) return text;
+    room = Math.min(32000, room * 2);
   }
-  return (j.content || []).filter(x => x.type === 'text').map(x => x.text).join('\n').trim();
+  throw Object.assign(new Error('empty'), { code: 'empty', detail: `stop=${last?.stop} content=${last?.types}` });
 }
 
 const summaryText = (s) => 'סיכום המספרים העדכני מהמערכת (נכון לעכשיו):\n' + String(s || '').slice(0, 12000);
@@ -114,7 +125,8 @@ export async function coachRun(body, email, deps) {
     const sum = summaryText(body.summary);
     if (body.kind === 'plan') {
       const area = String(body.area || '').slice(0, 60), label = PLAN_AREAS[area] || String(body.label || area).slice(0, 120);
-      const raw = await deps.ask({ key, system: SYSTEM + '\n\n' + sum, messages: [{ role: 'user', content: planPrompt(area, label) + (body.note ? '\nהערה ממני: ' + String(body.note).slice(0, 4000) : '') }], maxTokens: 5000 });
+      const raw = await deps.ask({ key, system: SYSTEM + '\n\n' + sum, messages: [{ role: 'user', content: planPrompt(area, label) + (body.note ? '\nהערה ממני: ' + String(body.note).slice(0, 4000) : '') }], maxTokens: 8000 });
+      if (!String(raw || '').trim()) throw Object.assign(new Error('empty'), { code: 'empty' });
       const data = parsePlan(raw);
       const plans = (await st.get(planKey(email), { type: 'json' }).catch(() => null)) || {};
       plans[area || label] = { label: data?.title || label, text: data ? planAsText(data) : raw, data: data || undefined, at: new Date().toISOString() };
