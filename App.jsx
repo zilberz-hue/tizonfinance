@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.36.0';
+const VERSION = '1.36.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1247,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.36.1', date: '02.10.26', items: ['מבנה אחיד, לפי דוח הסימולטור: מספר עוסק של יצרן התוכנה (ברירת מחדל: מספר העוסק של העסק) ושם תוכנת הכיווץ נכתבים ב-INI.TXT.', 'מסמך שמופיע פעמיים נכנס פעם אחת, ומסמכים שונים עם אותו סוג ומספר מוצגים לבדיקה במקום להיכנס לקובץ.'] },
   { v: '1.36.0', date: '02.10.26', items: ['הלקוחות נשמרים בחבילות, כמו היסטוריית המסמכים: פתיחת עסק קוראת כמה רשומות במקום רשומה לכל לקוח (אלפים בחנות). הטעינה מהירה יותר, והמכסה היומית של Firebase מספיקה להרבה יותר כניסות.', 'בפעם הראשונה שבעל העסק נכנס, הלקוחות מתארגנים בחבילות לבד. שום דבר לא משתנה בעבודה: חיפוש, עריכה, מיזוג ומחיקה כרגיל.'] },
   { v: '1.35.3', date: '02.10.26', items: ['iCount: כשהמכסה היומית של Firebase נגמרת, ההודעה אומרת את זה במקום "עומס ב-Google".'] },
   { v: '1.35.2', date: '02.10.26', items: ['המאמן החכם: הודעת שגיאה ברורה כשאין יתרה בחשבון Anthropic, כשהשרתים עמוסים או כששם המודל לא מוכר, עם ההודעה המקורית מ-Anthropic.'] },
@@ -5852,7 +5853,13 @@ function buildUnified(book, docs, soft, from, to, opts = {}) {
       + fX('', 10) + fX('', 30) + fX('', 8) + fX('', 30) + fX('', 2) + fX(a.parent || '', 15) + fS(0, 12, 2) + fS(a.dr, 12, 2) + fS(a.cr, 12, 2)
       + fN(0, 4) + fN(a.osek || 0, 9) + fX('', 7) + fS(0, 12, 2) + fX('', 3) + fX('', 16)));
   }
-  const sorted = [...docs].sort((a, b) => (a.date + a.type + String(a.number).padStart(9, '0')).localeCompare(b.date + b.type + String(b.number).padStart(9, '0')));
+  /* The same document twice (an id seen before) goes in once. Two different
+     documents with the same type and number cannot both be in the file: the
+     simulator ties every line to the first one. They are reported, not hidden. */
+  const seenId = new Set(), seenNum = new Map(), dups = [];
+  const sorted = [...docs].filter(d => !seenId.has(d.id) && seenId.add(d.id))
+    .sort((a, b) => (a.date + a.type + String(a.number).padStart(9, '0')).localeCompare(b.date + b.type + String(b.number).padStart(9, '0')))
+    .filter(d => { const k = d.type + '|' + docNum(d); if (seenNum.has(k)) { dups.push({ type: d.type, num: docNum(d), date: d.date, first: seenNum.get(k).date, name: d.customer?.name || '' }); return false; } seenNum.set(k, d); return true; });
   const byType = {};
   sorted.forEach(d => {
     const sign = d.type === '330' ? -1 : 1;
@@ -5894,13 +5901,13 @@ function buildUnified(book, docs, soft, from, to, opts = {}) {
   const addr = String(book.address || '');
   const street = addr.split(',')[0] || '', city = addr.split(',').slice(1).join(',').trim();
   const ini = ['A000' + fX('', 5) + fN(total, 15) + osek + mainId + OF_CONST + fN(soft.regNo, 8) + fX('Tizon Books', 20) + fX(VERSION, 20)
-    + fN(soft.makerId, 9) + fX(soft.makerName || 'Tizon Health', 20) + '2' + fX(dir.replace(/\//g, '\\'), 50) + (journal ? '2' : '0') + (journal ? '1' : '0')
+    + fN(digitsOf(soft.makerId) || digitsOf(book.taxId), 9) + fX(soft.makerName || 'Tizon Health', 20) + '2' + fX(dir.replace(/\//g, '\\'), 50) + (journal ? '2' : '0') + (journal ? '1' : '0')
     + fN(0, 9) + fN(0, 9) + fX('', 10) + fX(book.legalName || book.name, 50) + fX(street, 50) + fX('', 10) + fX(city, 30) + fX('', 8)
-    + fN(0, 4) + fN(ymd(from), 8) + fN(ymd(to), 8) + fN(ymd(now.toISOString()), 8) + stamp.slice(4) + '0' + '1' + fX('', 20)
+    + fN(0, 4) + fN(ymd(from), 8) + fN(ymd(to), 8) + fN(ymd(now.toISOString()), 8) + stamp.slice(4) + '0' + '1' + fX('fflate ZIP', 20)
     + fX('ILS', 3) + '0' + fX('', 46)];
   ['B100', 'B110', 'C100', 'D110', 'D120'].forEach(code => { if (counts[code]) ini.push(code + fN(counts[code], 15)); });
   const bytes = (lines) => new Uint8Array(enc8859(lines.join('\r\n') + '\r\n'));
-  return { dir, ini: bytes(ini), data: bytes(recs), counts: { ...counts, total }, byType, journal, lengths: { A000: ini[0].length } , recs, iniLines: ini };
+  return { dir, ini: bytes(ini), data: bytes(recs), counts: { ...counts, total }, byType, journal, lengths: { A000: ini[0].length } , recs, iniLines: ini, dups };
 }
 
 /* ---------------------------------------------------- monthly archive */
@@ -6060,7 +6067,7 @@ function ExportTab({ book, data, ledger, flash, onLog, onSub, user }) {
     const u = buildUnified(book, liveDocs, lsGet(SOFT_KEY, book.software || {}), from, to, { ledger });
     saveBytes(`OPENFRMT-${osek}-${from}_${to}.zip`, zipSync({ [`${u.dir}/INI.TXT`]: u.ini, [`${u.dir}/BKMVDATA.TXT`]: u.data }), 'application/zip');
     await onLog?.({ action: 'export-unified', title: `${from} עד ${to} · ${liveDocs.length} מסמכים`, series: 'live' });
-    flash(`מבנה אחיד ירד · ${u.counts.total} רשומות`);
+    flash(u.dups.length ? `מבנה אחיד ירד · ${u.counts.total} רשומות · ⚠ ${u.dups.length} מסמכים עם מספר כפול לא נכנסו (פרטים בלשונית רשות המסים)` : `מבנה אחיד ירד · ${u.counts.total} רשומות`);
   });
   const pack = () => go('pack', async () => {
     const { zipSync, strToU8 } = await import('fflate');
@@ -6205,6 +6212,10 @@ function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
           <button className="mg-btn keep" disabled={!osekOk || !pick.length} onClick={run}>⬇ הפק קבצים</button>
           <button className="mg-btn ghost keep" disabled={!last} onClick={printSummary}>🖨 פלט סיכום</button>
         </div>
+        {last?.dups?.length > 0 && <div className="mg-note bad" style={{ marginTop: 10 }}>
+          <b>{last.dups.length} מסמכים עם אותו סוג ומספר כמו מסמך אחר</b>, ולכן לא נכנסו לקובץ (הסימולטור היה מסמן אותם כשגיאה):
+          <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>{last.dups.map((x, i) => <li key={i}>{DOC_TYPES[x.type]?.label} {x.num} · {heDate(x.date)}{x.name ? ' · ' + x.name : ''} (כבר קיים מ-{heDate(x.first)})</li>)}</ul>
+          צלם את זה ושלח לי: מספר כפול הוא משהו שצריך לבדוק.</div>}
         {last && <div className="mg-note" style={{ marginTop: 10 }}>
           {Object.entries(last.counts).filter(([k]) => k !== 'total').map(([k, v]) => `${k}: ${v}`).join(' · ')} · סה״כ {last.counts.total}
           {last.journal && (() => { const dr = last.journal.accounts.reduce((a, x) => a + x.dr, 0), cr = last.journal.accounts.reduce((a, x) => a + x.cr, 0);
