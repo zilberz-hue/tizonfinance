@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.42.2';
+const VERSION = '1.42.3';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1281,6 +1281,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.42.3', date: '02.10.26', items: ['תוכנית שהגיעה כקוד (בגלל מירכאות כמו מע"מ, או תשובה שנקטעה) מוצגת עכשיו כצ׳קליסט רגיל, גם תוכנית שכבר שמורה. המאמן גם מתבקש לכתוב מע״מ עם ״.'] },
   { v: '1.42.2', date: '02.10.26', items: ['המאמן: כשהמודל מחזיר תשובה ריקה, השרת מבקש שוב עם יותר מקום, ולא שומר תוכנית ריקה. תוכנית שנשמרה ריקה מסומנת, עם "↻ בנה מחדש".'] },
   { v: '1.42.1', date: '02.10.26', items: ['תוכנית: כפתור "👁 הצג" פותח את התוכנית המעוצבת בתוך האפליקציה, ומשם מורידים או מדפיסים. אחרי הורדה מופיעה הודעה עם שם הקובץ.', 'אוטומטי: כל תוכנית, גם ישנה שנכתבה כטקסט, מקבלת צ׳קליסט עם תאריכים. כשמבקשים בשיחה "תבנה לי תוכנית…" המאמן בונה תוכנית עם צ׳קליסט ופותח אותה.'] },
   { v: '1.42.0', date: '02.10.26', items: ['מיקרופון במאמן החכם (🎤): מדברים בעברית והטקסט נכנס לתיבה. גם בהערה לתוכנית ובנושא תוכנית.', 'תוכניות עם צ׳קליסט: כל תוכנית נבנית בשלבים, עם משימות, תאריך יעד לכל משימה, יעדים ל-30/60/90 יום ומה מודדים. מסמנים מה בוצע (מסונכרן לכל המכשירים) ורואים התקדמות ואיחורים.', 'תוכנית לכל נושא שתכתוב, וכפתור "📋 הפוך לתוכנית עם צ׳קליסט" מתחת לתשובה ארוכה בשיחה.', 'הורדת תוכנית כקובץ HTML מעוצב עם צ׳קליסט שעובד גם מחוץ לאפליקציה, והדפסה.'] },
@@ -2753,7 +2754,40 @@ function textToPlan(text) {
   if (!st.length) return null;
   return { title: '', summary: summary.join(' ').slice(0, 1500), goals: [], measure: [], budget: '', stages: st, fromText: true };
 }
-const planData = (p) => p.data || textToPlan(p.text);
+/* The model's JSON, read leniently: Hebrew abbreviations written with a plain
+   quote (מע"מ, ש"ח) become ״, code fences are dropped, and an answer cut off
+   in the middle is closed at its last complete part. */
+function readJSONLoose(raw) {
+  let t = String(raw || '').replace(/```(?:json)?/gi, '');
+  const a = t.indexOf('{'); if (a < 0) return null; t = t.slice(a);
+  t = t.replace(/([֐-׿])"(?=[֐-׿])/g, '$1״').replace(/([֐-׿])'(?=[֐-׿\s])/g, '$1׳');
+  const tryParse = (x) => { try { return JSON.parse(x); } catch { return undefined; } };
+  const b = t.lastIndexOf('}'); let j = b > 0 ? tryParse(t.slice(0, b + 1)) : undefined; if (j !== undefined) return j;
+  /* Cut off: close what is open, from the last complete object backwards. */
+  const closers = (s) => { const st = []; let q = false, esc = false;
+    for (const c of s) { if (q) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') q = false; continue; }
+      if (c === '"') q = true; else if (c === '{') st.push('}'); else if (c === '[') st.push(']'); else if (c === '}' || c === ']') st.pop(); }
+    return q ? null : st.reverse().join(''); };
+  for (let i = t.length - 1, n = 0; i > 0 && n < 400; i--) {
+    if (t[i] !== '}' && t[i] !== ']') continue; n++;
+    const head = t.slice(0, i + 1), c = closers(head); if (c === null) continue;
+    j = tryParse(head + c); if (j !== undefined) return j;
+  }
+  return null;
+}
+/* The same shape the server makes (netlify/coach-core.mjs parsePlan). */
+function planFromJSON(text) {
+  const j = readJSONLoose(text); if (!j || typeof j !== 'object' || !Array.isArray(j.stages)) return null;
+  const str = (x, n = 600) => String(x ?? '').trim().slice(0, n);
+  const stages = j.stages.slice(0, 10).map(st => ({ title: str(st?.title, 120),
+    tasks: (Array.isArray(st?.tasks) ? st.tasks : []).slice(0, 12).map(k => ({ t: str(k?.t, 300), detail: str(k?.detail), owner: str(k?.owner, 40),
+      day: Math.max(0, Math.min(365, Math.round(Number(k?.day) || 0))) })).filter(k => k.t) })).filter(st => st.tasks.length);
+  if (!stages.length) return null;
+  return { title: str(j.title, 140), summary: str(j.summary, 1500), budget: str(j.budget, 600),
+    goals: (Array.isArray(j.goals) ? j.goals : []).slice(0, 6).map(g => ({ when: str(g?.when, 40), goal: str(g?.goal, 300) })).filter(g => g.goal),
+    measure: (Array.isArray(j.measure) ? j.measure : []).slice(0, 10).map(m => str(m, 300)).filter(Boolean), stages };
+}
+const planData = (p) => p.data || (/^\s*(?:```(?:json)?\s*)?\{/.test(String(p.text || '')) ? planFromJSON(p.text) : null) || textToPlan(p.text);
 const planTasks = (p) => (planData(p)?.stages || []).flatMap((st, i) => st.tasks.map((k, j) => ({ ...k, id: `s${i}t${j}`, due: addDaysIso(String(p.at || todayIso()).slice(0, 10), k.day || 0) })));
 const escH = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function planHTML(area, p, done) {

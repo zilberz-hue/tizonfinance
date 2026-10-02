@@ -34,15 +34,35 @@ const planPrompt = (area, label) => `בנה תוכנית עבודה ל-90 יום
  "stages":[{"title":"שבוע 1 · ...","tasks":[{"t":"פעולה קונקרטית אחת","day":2,"detail":"איך בדיוק, כמה זה אמור להביא או לחסוך","owner":"אני"}]}],
  "measure":["מה מודדים כל שבוע, עם מספר יעד"],
  "budget":"תקציב אם רלוונטי, או מחרוזת ריקה"}
-כללים: 4 עד 6 שלבים (שבועות 1-4 בנפרד, ואחר כך חודש 2 וחודש 3). 3 עד 6 משימות בכל שלב. "day" הוא מספר הימים מהיום (0 עד 90) שעד אליו המשימה צריכה להיות גמורה. כל משימה היא פעולה אחת שאפשר לסמן כבוצעה.`;
+כללים: בתוך הטקסט אל תשתמש במירכאות רגילות ("); בקיצורים כתוב ״ (מע״מ, ש״ח). 4 עד 6 שלבים (שבועות 1-4 בנפרד, ואחר כך חודש 2 וחודש 3). 3 עד 6 משימות בכל שלב. "day" הוא מספר הימים מהיום (0 עד 90) שעד אליו המשימה צריכה להיות גמורה. כל משימה היא פעולה אחת שאפשר לסמן כבוצעה.`;
 
 /* The plan as data: the model answers in JSON; anything that does not read
    as a plan is kept as text, so nothing is lost. */
+/* The model's JSON, read leniently: Hebrew abbreviations written with a plain
+   quote (מע"מ, ש"ח) become ״, code fences are dropped, and an answer cut off
+   in the middle is closed at its last complete part. */
+function readJSONLoose(raw) {
+  let t = String(raw || '').replace(/```(?:json)?/gi, '');
+  const a = t.indexOf('{'); if (a < 0) return null; t = t.slice(a);
+  t = t.replace(/([֐-׿])"(?=[֐-׿])/g, '$1״').replace(/([֐-׿])'(?=[֐-׿\s])/g, '$1׳');
+  const tryParse = (x) => { try { return JSON.parse(x); } catch { return undefined; } };
+  const b = t.lastIndexOf('}'); let j = b > 0 ? tryParse(t.slice(0, b + 1)) : undefined; if (j !== undefined) return j;
+  /* Cut off: close what is open, from the last complete object backwards. */
+  const closers = (s) => { const st = []; let q = false, esc = false;
+    for (const c of s) { if (q) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') q = false; continue; }
+      if (c === '"') q = true; else if (c === '{') st.push('}'); else if (c === '[') st.push(']'); else if (c === '}' || c === ']') st.pop(); }
+    return q ? null : st.reverse().join(''); };
+  for (let i = t.length - 1, n = 0; i > 0 && n < 400; i--) {
+    if (t[i] !== '}' && t[i] !== ']') continue; n++;
+    const head = t.slice(0, i + 1), c = closers(head); if (c === null) continue;
+    j = tryParse(head + c); if (j !== undefined) return j;
+  }
+  return null;
+}
 export function parsePlan(raw) {
-  const t = String(raw || ''), a = t.indexOf('{'), b = t.lastIndexOf('}');
-  if (a < 0 || b <= a) return null;
   try {
-    const j = JSON.parse(t.slice(a, b + 1)), str = (x, n = 600) => String(x ?? '').trim().slice(0, n);
+    const j = readJSONLoose(raw); if (!j || typeof j !== 'object') return null;
+    const str = (x, n = 600) => String(x ?? '').trim().slice(0, n);
     const stages = (Array.isArray(j.stages) ? j.stages : []).slice(0, 10).map(st => ({ title: str(st.title, 120),
       tasks: (Array.isArray(st.tasks) ? st.tasks : []).slice(0, 12).map(k => ({ t: str(k.t, 300), detail: str(k.detail), owner: str(k.owner, 40),
         day: Math.max(0, Math.min(365, Math.round(Number(k.day) || 0))) })).filter(k => k.t) })).filter(st => st.tasks.length);
