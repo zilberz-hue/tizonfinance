@@ -24,6 +24,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import LOGO from './logo.png';
 import MARK from './mark.png';
+import { agingOf, agingTotals, remindPlan, remindCfg, reminderText, waLink, standingText, monthHe } from './netlify/collect-core.mjs';
 import { initializeApp } from 'firebase/app';
 import {
   initializeFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, query, where, runTransaction
@@ -32,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.42.3';
+const VERSION = '1.43.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -236,7 +237,7 @@ async function storeRead(tenant, name) {
   return s.docs.map(d => ({ ...d.data(), id: d.id }));
 }
 
-const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive', 'recurring', 'custpack', 'retainers'];
+const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive', 'recurring', 'custpack', 'retainers', 'remind', 'standing', 'ccrecon'];
 
 /* History imported from iCount is kept packed: a few hundred documents to a
    record in books/{book}/archive, instead of one record each. Thousands of
@@ -786,6 +787,29 @@ li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
 .ln-add{display:flex;flex-wrap:wrap;gap:6px}.ln-add input:first-child{flex:1 1 200px;min-width:0;padding:7px 9px;border:1px solid #d5dbe2;border-radius:8px;font:inherit}
 @media (max-width:640px){.ln-row{flex-wrap:wrap}.ln-t{flex:1 1 calc(100% - 40px)}.ln-due{margin-inline-start:28px}.ln-nx{flex-wrap:wrap}.ln-nx span:nth-child(2){flex:1 1 calc(100% - 40px)}.ln-nx .mg-chip{margin-inline-start:26px}.ln-w,.ln-note,.ln-act,.ln-edit{margin-inline-start:0}}
 @media print{.no-print,.side,.ln-act{display:none!important}.launch .mg-card{break-inside:avoid;box-shadow:none}}
+.collect{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.collect > *{min-width:0}
+.col-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}.col-acts{display:flex;gap:6px}
+.aging-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:6px 0 10px}
+.aging-sum > div{display:flex;flex-direction:column;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:8px 10px}.aging-sum span{font-size:12.5px;color:var(--muted)}.aging-sum b{font-size:18px}
+.aging-sum .tot{background:#2f5d46;color:#fff;border-color:#2f5d46}.aging-sum .tot span,.aging-sum .tot small{color:#dfeadf}.aging-sum .warn b{color:#a6701b}.aging-sum .bad b{color:#b3412f}.aging-sum .ok b{color:#2f7d5b}
+.aging-bar{display:flex;height:10px;border-radius:99px;overflow:hidden;gap:2px;margin-bottom:10px}.aging-bar i{display:block}.aging-bar .b0{background:#7aa37f}.aging-bar .b30{background:#e0b65a}.aging-bar .b60{background:#d98b3a}.aging-bar .b90{background:#b3412f}
+.col-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}.col-test{font-size:13px;color:var(--muted);display:flex;gap:4px;align-items:center;margin-inline-start:auto;white-space:nowrap}.col-test input{width:16px;height:16px;flex:0 0 auto;margin:0}
+.aging-list{display:flex;flex-direction:column}.ag-row{border-top:1px solid #f1e9da}.ag-row:first-child{border-top:0}
+.ag-main{display:grid;grid-template-columns:minmax(0,1.4fr) auto minmax(0,2fr) minmax(0,1.2fr);gap:10px;align-items:center;padding:10px 2px;cursor:pointer}
+.ag-who{display:flex;flex-direction:column;min-width:0}.ag-who small,.ag-st small{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-amt{display:flex;flex-direction:column;align-items:flex-end}.ag-amt b{font-size:16px}.ag-amt small{font-size:12px;color:var(--muted)}.ag-amt .warn{color:#a6701b}.ag-amt .bad{color:#b3412f}
+.ag-b{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.ag-b span{display:flex;flex-direction:column;font-size:12.5px;color:#b9ae98;text-align:center}.ag-b em{font-style:normal;font-size:11px}
+.ag-b span.on{color:#2a2a2a;font-weight:700}.ag-b span.on.b30,.ag-b span.on.b60{color:#a6701b}.ag-b span.on.b90{color:#b3412f}
+.ag-st{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.ag-more{padding:4px 2px 12px}.ag-more ul{list-style:none;margin:0 0 8px;padding:0}.ag-more li{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:5px 0;font-size:14px;border-bottom:1px dashed #efe6d4}
+.ag-acts,.st-acts,.cc-acts{display:flex;flex-wrap:wrap;gap:6px}
+.pend-row,.st-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 0;border-top:1px solid #f1e9da}.pend-row > span{flex:1;min-width:0}
+.st-row.off{opacity:.6}.st-who{flex:1 1 220px;display:flex;flex-direction:column;min-width:0}.st-who small{color:var(--muted);font-size:12.5px}
+.col-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:8px 12px;margin:10px 0}.col-grid input,.col-grid select{width:100%}
+.col-switch{display:flex;gap:8px;align-items:center;margin:6px 0;font-size:14px}.col-switch input{width:18px;height:18px;flex:0 0 auto}
+.cc-list{display:flex;flex-direction:column}.cc-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 2px;border-top:1px solid #f1e9da;font-size:14px}.cc-row > span:nth-child(3){flex:1;min-width:0}
+.cc-row.bad b{color:#b3412f}.cc-row.warn b{color:#a6701b}.cc-row small{color:var(--muted)}.cc-acts select{max-width:260px}
+@media (max-width:760px){.aging-sum{grid-template-columns:repeat(3,minmax(0,1fr))}.aging-sum .tot{grid-column:1/-1}.aging-sum b{font-size:16px}.cc-row > span:nth-child(3){flex-basis:100%}.ag-main{grid-template-columns:minmax(0,1fr) auto}.ag-b{grid-column:1/-1}.ag-st{grid-column:1/-1;flex-direction:row;flex-wrap:wrap;align-items:center}}
 .coach{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.coach > *,.coach-grid > *{min-width:0}.coach .mg-h{margin-bottom:0}
 .coach-goal .cg-top{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:space-between}
 .coach-goal .lb{font-size:13.5px;color:var(--muted)}.cg-big{font-size:40px;font-weight:900;color:#2f5d46;direction:ltr;unicode-bidi:isolate;line-height:1.15}
@@ -1281,6 +1305,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.43.0', date: '02.10.26', items: ['לשונית חדשה 📬 גבייה: דוח גיול חובות (מי חייב, כמה ומאיזה זמן: עד 30, 31–60, 61–90, מעל 90 יום), עם הדפסה וייצוא.', 'תזכורות אוטומטיות: כל יום א׳–ה׳ בשעה שבוחרים השרת שולח ללקוחות החייבים תזכורת במייל, עם קישור לתשלום בכרטיס. תשלום בקישור מפיק קבלה על החשבוניות. ללקוח בלי מייל ההודעה מוכנה לשליחה בוואטסאפ בלחיצה. מספר תזכורות, מרווח, סכום מינימלי, ו"בלי תזכורות" ללקוח מסוים.', 'הוראות קבע: חיוב חודשי קבוע. ביום שנקבע השרת יוצר קישור לתשלום ושולח ללקוח; כשמשלם, הקבלה מופקת לבד. רואים מי שילם החודש.', 'התאמת סליקת אשראי (בלשונית בנק): מעלים דוח עסקאות או זיכויים מחברת האשראי, והמערכת מראה מה שולם ואין עליו קבלה, איזו קבלה לא הופיעה בדוח, ועמלות.'] },
   { v: '1.42.3', date: '02.10.26', items: ['תוכנית שהגיעה כקוד (בגלל מירכאות כמו מע"מ, או תשובה שנקטעה) מוצגת עכשיו כצ׳קליסט רגיל, גם תוכנית שכבר שמורה. המאמן גם מתבקש לכתוב מע״מ עם ״.'] },
   { v: '1.42.2', date: '02.10.26', items: ['המאמן: כשהמודל מחזיר תשובה ריקה, השרת מבקש שוב עם יותר מקום, ולא שומר תוכנית ריקה. תוכנית שנשמרה ריקה מסומנת, עם "↻ בנה מחדש".'] },
   { v: '1.42.1', date: '02.10.26', items: ['תוכנית: כפתור "👁 הצג" פותח את התוכנית המעוצבת בתוך האפליקציה, ומשם מורידים או מדפיסים. אחרי הורדה מופיעה הודעה עם שם הקובץ.', 'אוטומטי: כל תוכנית, גם ישנה שנכתבה כטקסט, מקבלת צ׳קליסט עם תאריכים. כשמבקשים בשיחה "תבנה לי תוכנית…" המאמן בונה תוכנית עם צ׳קליסט ופותח אותה.'] },
@@ -1439,7 +1464,7 @@ const TOUR_CTX = {
   expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', bset: 'הגדרות העסק', paypages: 'דפי סליקה', pnl: 'רווח והפסד', tax: 'רשות המסים',
   items: 'פריטים', ledger: 'כרטסת', export: 'ייצוא', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
-const BOOK_CTX = ['dash', 'docs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'export', 'import'];
+const BOOK_CTX = ['dash', 'docs', 'collect', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'export', 'import'];
 const WRITERS = ['owner', 'clerk'];
 
 const TOURS = {
@@ -1534,6 +1559,12 @@ const TOURS = {
     { t: 'bank-tools', title: 'דף בנק', text: 'מורידים מהבנק CSV ומעלים כאן. "התאמה אוטומטית" מחפשת הכנסה או הוצאה באותו סכום, עד שבוע מהתאריך.', since: '1.0.0', roles: ['owner'] },
     { t: 'bank-stats', title: 'המצב', text: 'כמה שורות מותאמות וכמה עוד פתוחות.', since: '1.0.0' },
     { t: 'bank-table', title: 'השורות', text: 'שורה שלא הותאמה לבד מתאימים ידנית.', since: '1.0.0' },
+    { t: 'cc-recon', title: 'התאמת סליקת אשראי', text: 'מעלים דוח עסקאות או זיכויים מחברת האשראי, ורואים מה שולם ואין עליו קבלה, איזו קבלה לא הגיעה, ועמלות.', since: '1.43.0' },
+  ],
+  collect: [
+    { t: 'aging', title: 'גיול חובות', text: 'מי חייב, כמה ומאיזה זמן. לחיצה על לקוח פותחת את החשבוניות הפתוחות ושליחת תזכורת בוואטסאפ או במייל.', since: '1.43.0' },
+    { t: 'remind-set', title: 'תזכורות אוטומטיות', text: 'כשמפעילים, השרת שולח תזכורות לבד, עם קישור לתשלום שמפיק קבלה. קובעים אחרי כמה ימים, כל כמה, ועד כמה פעמים.', since: '1.43.0' },
+    { t: 'standing', title: 'הוראות קבע', text: 'חיוב חודשי קבוע: ביום שנקבע נוצר קישור לתשלום ונשלח ללקוח. כשמשלם, הקבלה מופקת לבד.', since: '1.43.0' },
   ],
   vat: [
     { t: 'vat-period', title: 'תקופת הדיווח', text: 'חודשי או דו-חודשי, ובחירת התקופה. מכאן גם יוצא הדוח לרואה החשבון.', since: '1.0.0' },
@@ -4010,10 +4041,10 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     patch('documents', list => list.map(x => x.id === d.id ? { ...x, printCount: n } : x));
   };
 
-  const TAB_GROUP = { docs: 'עבודה יומית', paypages: 'עבודה יומית', customers: 'עבודה יומית', items: 'עבודה יומית',
+  const TAB_GROUP = { docs: 'עבודה יומית', paypages: 'עבודה יומית', collect: 'עבודה יומית', customers: 'עבודה יומית', items: 'עבודה יומית',
     income: 'כספים', expenses: 'כספים', suppliers: 'כספים', bank: 'כספים', ledger: 'כספים',
     vat: 'דוחות ומיסים', pay: 'דוחות ומיסים', pnl: 'דוחות ומיסים', tax: 'דוחות ומיסים', export: 'כלים', import: 'כלים' };
-  const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ...(ro ? [] : [['paypages', '💳 סליקה' + ((data.payreqs || []).filter(p => p.status === 'open').length ? ` (${(data.payreqs || []).filter(p => p.status === 'open').length})` : '')]]), ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
+  const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ...(ro ? [] : [['paypages', '💳 סליקה' + ((data.payreqs || []).filter(p => p.status === 'open').length ? ` (${(data.payreqs || []).filter(p => p.status === 'open').length})` : '')]]), ...(clerk ? [] : [['collect', '📬 גבייה']]), ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
     ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ['export', 'ייצוא'], ...(ro ? [] : [['import', 'ייבוא']])]
     .filter(([k]) => !clerk || ['docs', 'paypages', 'customers', 'items'].includes(k));
 
@@ -4098,6 +4129,9 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       {sub === 'bank' && <BankTab bank={data.banktx || []} income={ledger.income} outgo={ledger.outgo} flash={flash}
         onSave={(r) => save('banktx', r)} onDel={(r) => remove('banktx', r.id, 'השורה')}
         onBulk={async (recs) => { let ok = 0; for (const r of recs) if (await save('banktx', r)) ok++; return ok; }} />}
+      {sub === 'bank' && <CardReconCard book={book} data={data} save={save} remove={remove} flash={flash} ro={ro} />}
+      {sub === 'collect' && <CollectTab book={book} data={data} save={save} remove={remove} patch={patch} flash={flash} payOk={payOk} ro={ro}
+        onPayCreated={payCreated} onLedger={(r) => { const c = (data.customers || []).find(x => normName(x.name) === normName(r.customer.name)); setLedgerPick({ kind: 'cust', id: c ? c.id : 'doc:' + normName(r.customer.name), n: Date.now() }); setSub('ledger'); }} />}
       {sub === 'vat' && <VatTab totals={tot} rate={rate} book={book} />}
       {sub === 'bset' && <><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}><h3 style={{ margin: 0, flex: 1 }}>⚙ הגדרות · {book.name}</h3>
         <button className="mg-btn ghost sm" onClick={() => setSub('dash')}>סגור</button></div>
@@ -4853,6 +4887,361 @@ function SupplierForm({ rec, onSave, onClose }) {
 }
 
 /* --------------------------------------------------------------------- בנק */
+/* ---------------------------------------------------------- collection
+   Who owes what and since when (aging), payment reminders and standing
+   orders. The rules are shared with the server (netlify/collect-core.mjs),
+   which sends the reminders and the monthly links on its own. */
+const payProvider = (payOk) => payOk?.zcredit ? 'zcredit' : payOk?.upay ? 'upay' : '';
+/* A window opened inside the click, so the browser does not block it, and pointed at WhatsApp once the link is ready. */
+const openLater = () => { try { return window.open('about:blank', '_blank'); } catch { return null; } };
+const sendTo = (w, url) => { if (w && !w.closed) w.location.href = url; else window.open(url, '_blank'); };
+
+function CollectTab({ book, data, save, remove, patch, flash, payOk, ro, onLedger, onPayCreated }) {
+  const today = todayIso();
+  const [withTest, setWithTest] = useState(false);
+  const [cfg, setCfg] = useState(() => remindCfg(book));
+  const [openRow, setOpenRow] = useState('');
+  const [busy, setBusy] = useState('');
+  const [show, setShow] = useState('all');
+  const docs = data.documents || [];
+  const rows = useMemo(() => agingOf(docs, { today, withTest, exempt: book.dealerType === 'exempt' }), [docs, withTest, book.dealerType, today]);
+  const tot = agingTotals(rows);
+  const log = useMemo(() => Object.fromEntries((data.remind || []).map(x => [x.key, x])), [data.remind]);
+  const plan = useMemo(() => remindPlan(rows, cfg, log, today), [rows, cfg, log, today]);
+  const pending = (data.remind || []).filter(x => x.pending && rows.some(r => r.key === x.key));
+  const prov = payProvider(payOk);
+  const saveCfg = async (p) => {
+    const n = { ...cfg, ...p }; setCfg(n);
+    try { await DB.patch('books', book.id, { remind: clean(n) }); book.remind = n; } catch (e) { flash('השמירה נכשלה · ' + dbErr(e)); }
+  };
+  const logId = (k) => k.replace(/[^\w@.:-]/g, '_').slice(0, 140);
+  const markSent = async (r, extra = {}) => {
+    const L = log[r.key] || {};
+    await save('remind', { ...L, id: logId(r.key), key: r.key, name: r.customer.name, phone: r.customer.phone || '', email: r.customer.email || '',
+      n: (L.n || 0) + 1, last: today, pending: false, due: r.due ?? r.bal, at: new Date().toISOString(), ...extra,
+      hist: [...(L.hist || []).slice(-9), { at: new Date().toISOString(), due: r.due ?? r.bal, by: extra.by || 'app' }] });
+  };
+  /* A payment link for the whole debt: paying it issues a receipt for these invoices. */
+  const debtLink = async (r) => {
+    if (!prov || !cfg.payLink || !cloud) return null;
+    const items = r.items?.length ? r.items : r.open, due = r2(items.reduce((a, x) => a + x.left, 0));
+    const L = log[r.key] || {};
+    if (L.link && L.payId && Math.abs((L.due || 0) - due) < 0.01 && (data.payreqs || []).some(p => p.id === L.payId && p.status === 'open')) return L.link;
+    const res = await fnCall({ action: 'pay-create', book: book.id, provider: prov, customer: r.customer, incl: true, maxPayments: 1, debt: true, origin: 'remind',
+      debtRefs: items.map(x => ({ id: x.id, title: x.title, amount: x.left })), title: `תשלום חוב · ${r.customer.name}`,
+      lines: [{ desc: ('תשלום חוב: ' + items.map(x => x.title).join(', ')).slice(0, 190), qty: 1, price: due }] });
+    onPayCreated?.(res.payreq, r.customer);
+    return { link: res.link, payId: res.id };
+  };
+  const remindWA = async (r) => {
+    if (!r.customer.phone) { flash('אין טלפון ללקוח הזה'); return; }
+    const w = openLater(); setBusy(r.key);
+    try {
+      const L = await debtLink(r).catch(e => { flash('קישור תשלום לא נוצר · ' + e.message); return null; });
+      const link = typeof L === 'string' ? L : L?.link || '';
+      const rr = { ...r, items: r.items?.length ? r.items : r.open, due: r.due ?? r.bal };
+      const msg = reminderText(book, rr, link, (log[r.key]?.n) || 0);
+      sendTo(w, waLink(r.customer.phone, msg.text));
+      await markSent(rr, { by: 'whatsapp', ...(L && typeof L === 'object' ? { link: L.link, payId: L.payId } : {}) });
+    } catch (e) { w?.close?.(); flash('לא נשלח · ' + e.message); }
+    setBusy('');
+  };
+  const remindMail = async (r) => {
+    if (!r.customer.email) { flash('אין אימייל ללקוח הזה'); return; }
+    setBusy(r.key);
+    try {
+      const L = await debtLink(r).catch(() => null);
+      const link = typeof L === 'string' ? L : L?.link || '';
+      const rr = { ...r, items: r.items?.length ? r.items : r.open, due: r.due ?? r.bal };
+      const msg = reminderText(book, rr, link, (log[r.key]?.n) || 0);
+      window.location.href = `mailto:${encodeURIComponent(r.customer.email)}?subject=${encodeURIComponent(msg.subject)}&body=${encodeURIComponent(msg.text)}`;
+      await markSent(rr, { by: 'mail', ...(L && typeof L === 'object' ? { link: L.link, payId: L.payId } : {}) });
+    } catch (e) { flash('לא נשלח · ' + e.message); }
+    setBusy('');
+  };
+  const skipSet = new Set(cfg.skip || []);
+  const toggleSkip = (k) => saveCfg({ skip: skipSet.has(k) ? [...skipSet].filter(x => x !== k) : [...skipSet, k] });
+  const willSend = plan.filter(r => r.send);
+  const list = plan.filter(r => show === 'all' || (show === 'b60' ? r.age > 60 : show === 'send' ? r.send : true));
+  const exportCSV = () => downloadCSV(`aging-${book.name}-${today}.csv`, [['לקוח', 'טלפון', 'אימייל', 'סה״כ', 'עד 30 יום', '31 עד 60', '61 עד 90', 'מעל 90', 'החוב הישן ביותר', 'תזכורות'],
+    ...rows.map(r => [r.customer.name, r.customer.phone || '', r.customer.email || '', r.bal, r.b0, r.b30, r.b60, r.b90, heDate(r.oldest), (log[r.key]?.n || 0)])]);
+  const printAging = () => printHTML(ledgerHTML(book, `דוח גיול חובות · ${book.name}`, `נכון ל-${heDate(today)}`,
+    [{ t: 'לקוח' }, { t: 'סה״כ', n: 1 }, { t: 'עד 30 יום', n: 1 }, { t: '31 עד 60', n: 1 }, { t: '61 עד 90', n: 1 }, { t: 'מעל 90', n: 1 }, { t: 'מתאריך' }], rows.map(r => [r.customer.name, fmt(r.bal), r.b0 ? fmt(r.b0) : '', r.b30 ? fmt(r.b30) : '', r.b60 ? fmt(r.b60) : '', r.b90 ? fmt(r.b90) : '', heDate(r.oldest)]),
+    ['סה״כ', fmt(tot.bal), fmt(tot.b0), fmt(tot.b30), fmt(tot.b60), fmt(tot.b90), '']));
+
+  return (<div className="collect">
+    <div data-tour="aging" className="mg-card">
+      <div className="col-head"><h3 style={{ margin: 0 }}>📬 גיול חובות</h3>
+        <div className="col-acts"><button className="mg-btn ghost sm" onClick={printAging}>🖨 הדפס</button><button className="mg-btn ghost sm" onClick={exportCSV}>⬇ ייצוא</button></div></div>
+      <div className="aging-sum">
+        <div className="tot"><span>סה״כ חובות פתוחים</span><b>{fmt(tot.bal)}</b><small>{rows.length} לקוחות</small></div>
+        {[['b0', 'עד 30 יום', ''], ['b30', '31 עד 60', 'warn'], ['b60', '61 עד 90', 'warn'], ['b90', 'מעל 90', 'bad']].map(([k, l, c]) => <div key={k} className={c}><span>{l}</span><b>{fmt(tot[k])}</b></div>)}
+      </div>
+      {tot.bal > 0 && <div className="aging-bar">{['b0', 'b30', 'b60', 'b90'].map(k => tot[k] > 0 && <i key={k} className={k} style={{ flex: tot[k] }} title={fmt(tot[k])} />)}</div>}
+      <div className="col-filters">
+        {[['all', 'הכל'], ['send', `לתזכורת היום (${willSend.length})`], ['b60', 'מעל 60 יום']].map(([k, l]) => <button key={k} className={'mg-chipbtn' + (show === k ? ' on' : '')} onClick={() => setShow(k)}>{l}</button>)}
+        <label className="col-test"><input type="checkbox" checked={withTest} onChange={e => setWithTest(e.target.checked)} /> כולל מסמכי ניסיון</label>
+      </div>
+      {!rows.length && <div className="mg-empty">אין חובות פתוחים. 🎉</div>}
+      {rows.length > 0 && <div className="aging-list">
+        {list.map(r => { const L = log[r.key] || {}, op = openRow === r.key; return (
+          <div key={r.key} className={'ag-row' + (op ? ' open' : '')}>
+            <div className="ag-main" onClick={() => setOpenRow(op ? '' : r.key)}>
+              <div className="ag-who"><b>{r.customer.name}</b><small>{[r.customer.phone, r.customer.email].filter(Boolean).join(' · ') || 'אין פרטי קשר'}</small></div>
+              <div className="ag-amt"><b>{fmt(r.bal)}</b><small className={r.age > 90 ? 'bad' : r.age > 30 ? 'warn' : ''}>{r.age} ימים</small></div>
+              <div className="ag-b">{[['b0', 'עד 30'], ['b30', '31 עד 60'], ['b60', '61 עד 90'], ['b90', 'מעל 90']].map(([k, l]) => <span key={k} className={r[k] ? 'on ' + k : ''}><em>{l}</em>{r[k] ? fmt(r[k]) : '—'}</span>)}</div>
+              <div className="ag-st">{skipSet.has(r.key) ? <span className="mg-chip">בלי תזכורות</span>
+                : r.send ? <span className="mg-chip warn">{cfg.on ? (cfg.mode === 'auto' ? 'תזכורת תצא היום' : 'מוכן לתזכורת') : 'אפשר להזכיר'}</span>
+                : <span className="mg-chip">{r.why}</span>}
+                {L.n > 0 && <small>{L.n} תזכורות · אחרונה {heDate(L.last)}</small>}</div>
+            </div>
+            {op && <div className="ag-more">
+              <ul>{r.open.map(x => <li key={x.id + x.date}><span>{x.title} · {heDate(x.date)}</span><span>{x.left < x.amount ? `נותר ${fmt(x.left)} מתוך ${fmt(x.amount)}` : fmt(x.left)}</span><span className="mg-chip">{x.age} ימים</span></li>)}</ul>
+              {!ro && <div className="ag-acts">
+                <button className="mg-btn sm" disabled={!r.customer.phone || busy === r.key} onClick={() => remindWA(r)}>💬 תזכורת בוואטסאפ</button>
+                <button className="mg-btn ghost sm" disabled={!r.customer.email || busy === r.key} onClick={() => remindMail(r)}>✉ במייל</button>
+                {onLedger && <button className="mg-btn ghost sm" onClick={() => onLedger(r)}>כרטסת</button>}
+                <button className="mg-btn ghost sm" onClick={() => toggleSkip(r.key)}>{skipSet.has(r.key) ? 'החזר לתזכורות' : '🚫 בלי תזכורות'}</button></div>}
+              {prov && cfg.payLink && <div className="mg-hint">התזכורת כוללת קישור לתשלום בכרטיס. תשלום בו מפיק קבלה על החשבוניות האלה.</div>}
+            </div>}
+          </div>); })}
+      </div>}
+      <div className="mg-hint" style={{ marginTop: 8 }}>החוב מחושב מכל המסמכים (כולל מה שנמשך מ-iCount): חשבוניות פחות קבלות וזיכויים. התשלומים נזקפים קודם לחשבוניות הישנות.</div>
+    </div>
+
+    {pending.length > 0 && !ro && <div className="mg-card">
+      <h3 style={{ marginTop: 0 }}>⏳ תזכורות שהוכנו ומחכות לך ({pending.length})</h3>
+      <p className="mg-hint" style={{ marginTop: 0 }}>ללקוחות בלי אימייל, או במצב "אני שולח": השרת הכין את ההודעה והקישור, ואתה שולח בלחיצה.</p>
+      {pending.map(x => { const r = rows.find(z => z.key === x.key); return <div key={x.key} className="pend-row">
+        <span><b>{x.name}</b> · {fmt(x.due)}</span>
+        {x.phone && <button className="mg-btn sm" onClick={() => remindWA(r)}>💬 שלח בוואטסאפ</button>}
+        {x.email && <button className="mg-btn ghost sm" onClick={() => remindMail(r)}>✉ במייל</button>}
+        <button className="mg-btn ghost sm" onClick={() => save('remind', { ...x, pending: false })}>דלג</button></div>; })}
+    </div>}
+
+    {!ro && <div data-tour="remind-set" className="mg-card">
+      <h3 style={{ marginTop: 0 }}>🔔 תזכורות אוטומטיות</h3>
+      <label className="col-switch"><input type="checkbox" checked={!!cfg.on} onChange={e => saveCfg({ on: e.target.checked, from: cfg.from || (e.target.checked ? today : '') })} />
+        <b>{cfg.on ? 'פעיל' : 'כבוי'}</b> · {cfg.on ? `כל יום א׳–ה׳ ב-${cfg.hour}:00 השרת בודק מי חייב ושולח תזכורת` : 'כשמפעילים, השרת שולח תזכורות לבד'}</label>
+      <div className="col-grid">
+        <Field label="איך שולחים"><select value={cfg.mode} onChange={e => saveCfg({ mode: e.target.value })}>
+          <option value="auto">אוטומטי: במייל ישירות ללקוח</option><option value="approve">אני שולח: השרת מכין, אני לוחץ שלח</option></select></Field>
+        <Field label="תזכורת ראשונה אחרי (ימים)"><input type="number" min="0" value={cfg.after} onChange={e => saveCfg({ after: Number(e.target.value) || 0 })} /></Field>
+        <Field label="ואז כל (ימים)"><input type="number" min="1" value={cfg.every} onChange={e => saveCfg({ every: Math.max(1, Number(e.target.value) || 7) })} /></Field>
+        <Field label="עד כמה תזכורות"><input type="number" min="1" max="10" value={cfg.max} onChange={e => saveCfg({ max: Math.max(1, Number(e.target.value) || 3) })} /></Field>
+        <Field label="חוב מינימלי (₪)"><input type="number" min="0" value={cfg.min} onChange={e => saveCfg({ min: Number(e.target.value) || 0 })} /></Field>
+        <Field label="שעה"><select value={cfg.hour} onChange={e => saveCfg({ hour: Number(e.target.value) })}>{[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map(h => <option key={h} value={h}>{h}:00</option>)}</select></Field>
+        <Field label="רק חשבוניות מתאריך"><input type="date" value={cfg.from || ''} onChange={e => saveCfg({ from: e.target.value })} /></Field>
+        <Field label="לא חשבוניות ישנות מ- (ימים)"><input type="number" min="30" value={cfg.maxAge} onChange={e => saveCfg({ maxAge: Number(e.target.value) || 365 })} /></Field>
+      </div>
+      <label className="col-switch"><input type="checkbox" checked={cfg.payLink !== false} disabled={!prov} onChange={e => saveCfg({ payLink: e.target.checked })} />
+        לצרף קישור לתשלום בכרטיס {prov ? `(דרך ${prov === 'zcredit' ? 'זד קרדיט' : 'יופיי'}). תשלום בו מפיק קבלה לבד.` : '(צריך להגדיר דף סליקה בהגדרות העסק)'}</label>
+      <div className="mg-note" style={{ marginTop: 10 }}>
+        {cfg.on ? <>היום {willSend.length ? <>יקבלו תזכורת: <b>{willSend.map(r => `${r.customer.name} (${fmt(r.due)})`).join(', ')}</b>.</> : 'אף לקוח לא עומד בתנאים לתזכורת.'}
+          {' '}ללקוח בלי אימייל ההודעה מוכנה כאן לשליחה בוואטסאפ. אחרי כל סבב מגיע אליך סיכום במייל.</>
+          : <>התאריך "רק חשבוניות מתאריך" נקבע להיום כשמפעילים, כדי שחובות ישנים (למשל מ-iCount) לא יקבלו תזכורת בלי שבדקת אותם.</>}</div>
+      <div className="mg-hint">וואטסאפ ומסרונים נשלחים מהטלפון שלך בלחיצה (שליחה אוטומטית בוואטסאפ דורשת חשבון וואטסאפ עסקי עם ממשק, ואפשר לחבר בהמשך).</div>
+    </div>}
+
+    <StandingBox book={book} data={data} save={save} remove={remove} flash={flash} payOk={payOk} ro={ro} onPayCreated={onPayCreated} />
+  </div>);
+}
+
+/* Standing orders: a fixed monthly charge. On its day the server makes a
+   payment page and mails the link; paying it issues the receipt. */
+function StandingBox({ book, data, save, remove, flash, payOk, ro, onPayCreated }) {
+  const rules = data.standing || [];
+  const prov = payProvider(payOk), month = thisMonth();
+  const [edit, setEdit] = useState(null);
+  const [busy, setBusy] = useState('');
+  const custs = data.customers || [];
+  const blank = { id: '', customer: { name: '', phone: '', email: '', taxId: '' }, desc: 'ליווי חודשי', amount: '', day: 1, provider: prov || 'zcredit', mail: true, active: true, startMonth: month, endMonth: '' };
+  const statusOf = (r) => { const h = (r.hist || []).find(x => x.month === month); if (!h) return null; const p = (data.payreqs || []).find(x => x.id === h.payId); return { ...h, st: p?.status || 'open', p }; };
+  const syncFlag = async (list) => { const on = list.some(r => r.active !== false); if (!!book.standingOn !== on) { try { await DB.patch('books', book.id, { standingOn: on }); book.standingOn = on; } catch { /* ignore */ } } };
+  const saveRule = async () => {
+    const r = { ...edit, id: edit.id || uid('st'), amount: r2(edit.amount), day: Math.min(28, Math.max(1, Number(edit.day) || 1)) };
+    if (!r.customer.name.trim() || !(r.amount > 0)) { flash('חסר שם לקוח או סכום'); return; }
+    if (await save('standing', r)) { setEdit(null); flash('הוראת הקבע נשמרה'); syncFlag([...rules.filter(x => x.id !== r.id), r]); }
+  };
+  const makeNow = async (r) => {
+    if (!prov) { flash('צריך להגדיר דף סליקה בהגדרות העסק'); return; }
+    setBusy(r.id);
+    try {
+      const res = await fnCall({ action: 'pay-create', book: book.id, provider: r.provider || prov, customer: r.customer, incl: true, maxPayments: 1, origin: 'standing:' + r.id,
+        note: `הוראת קבע · ${monthHe(month)}`, title: `${r.desc || 'תשלום חודשי'} · ${monthHe(month)}`, lines: [{ desc: r.desc || 'תשלום חודשי', qty: 1, price: r.amount }] });
+      onPayCreated?.(res.payreq, r.customer);
+      await save('standing', { ...r, lastMonth: month, hist: [...(r.hist || []).slice(-23), { month, payId: res.id, link: res.link, mailed: false, at: new Date().toISOString() }] });
+      flash('הקישור לחודש הזה נוצר');
+    } catch (e) { flash('הקישור לא נוצר · ' + e.message); }
+    setBusy('');
+  };
+  const share = (r, h) => { const msg = standingText(book, r, h.link, month); const u = waLink(r.customer.phone, msg.text); if (u) window.open(u, '_blank'); else flash('אין טלפון ללקוח'); };
+  const pickCust = (name) => { const c = custs.find(x => x.name === name); setEdit(e => ({ ...e, customer: c ? { name: c.name, phone: c.phone || '', email: c.email || '', taxId: c.taxId || '' } : { ...e.customer, name } })); };
+  const sum = r2(rules.filter(r => r.active !== false).reduce((a, r) => a + (Number(r.amount) || 0), 0));
+  return (<div data-tour="standing" className="mg-card">
+    <div className="col-head"><h3 style={{ margin: 0 }}>🔁 הוראות קבע</h3>{!ro && <button className="mg-btn sm" onClick={() => setEdit(blank)}>＋ הוראת קבע</button>}</div>
+    <p className="mg-hint">בכל חודש, ביום שנקבע, השרת יוצר ללקוח קישור לתשלום ושולח לו במייל (ללקוח בלי מייל, שולחים מכאן בוואטסאפ). כשהלקוח משלם, הקבלה מופקת לבד.
+      {rules.length > 0 && <> סה״כ פעילות: <b>{fmt(sum)}</b> בחודש.</>}</p>
+    {!prov && <div className="mg-note warn">כדי ליצור קישורים צריך להגדיר דף סליקה (זד קרדיט או יופיי) בהגדרות העסק.</div>}
+    {rules.length === 0 && <div className="mg-empty">אין עדיין הוראות קבע.</div>}
+    {rules.slice().sort((a, b) => (a.day || 1) - (b.day || 1)).map(r => { const s = statusOf(r); return (
+      <div key={r.id} className={'st-row' + (r.active === false ? ' off' : '')}>
+        <div className="st-who"><b>{r.customer.name}</b><small>{r.desc} · {fmt(r.amount)} · כל {r.day} בחודש{r.endMonth ? ` · עד ${monthHe(r.endMonth)}` : ''}{r.active === false ? ' · מושהית' : ''}</small></div>
+        <div className="st-now">{s ? (s.st === 'paid' ? <span className="mg-chip ok">שולם החודש ✓</span> : s.st === 'cancelled' ? <span className="mg-chip">בוטל</span> : <span className="mg-chip warn">ממתין לתשלום{s.mailed ? ' · נשלח במייל' : ''}</span>)
+          : <span className="mg-chip">{Number(todayIso().slice(8, 10)) >= (r.day || 1) ? 'ייווצר בשעה הקרובה' : `ייווצר ב-${r.day} לחודש`}</span>}</div>
+        {!ro && <div className="st-acts">
+          {s && s.st === 'open' && r.customer.phone && <button className="mg-btn ghost sm" onClick={() => share(r, s)}>💬 וואטסאפ</button>}
+          {s && s.st === 'open' && <button className="mg-btn ghost sm" onClick={() => { navigator.clipboard?.writeText(s.link); flash('הקישור הועתק'); }}>🔗 העתק</button>}
+          {!s && r.active !== false && <button className="mg-btn ghost sm" disabled={busy === r.id} onClick={() => makeNow(r)}>צור קישור עכשיו</button>}
+          <button className="mg-btn ghost sm" onClick={() => setEdit({ ...blank, ...r })}>עריכה</button></div>}
+      </div>); })}
+    {edit && <div className="mg-mod" onClick={() => setEdit(null)}><div className="mg-mod-in" onClick={e => e.stopPropagation()}>
+      <div className="mg-mod-h"><h3>{edit.id ? 'עריכת הוראת קבע' : 'הוראת קבע חדשה'}</h3><button className="sf-x" onClick={() => setEdit(null)}>✕</button></div>
+      <div className="mg-mod-b">
+        <Field label="לקוח"><input list="st-custs" value={edit.customer.name} onChange={e => pickCust(e.target.value)} placeholder="שם הלקוח" />
+          <datalist id="st-custs">{custs.slice(0, 500).map(c => <option key={c.id} value={c.name} />)}</datalist></Field>
+        <div className="col-grid">
+          <Field label="טלפון"><input dir="ltr" value={edit.customer.phone} onChange={e => setEdit({ ...edit, customer: { ...edit.customer, phone: e.target.value } })} /></Field>
+          <Field label="אימייל"><input dir="ltr" value={edit.customer.email} onChange={e => setEdit({ ...edit, customer: { ...edit.customer, email: e.target.value } })} /></Field>
+          <Field label="על מה"><input value={edit.desc} onChange={e => setEdit({ ...edit, desc: e.target.value })} /></Field>
+          <Field label="סכום לחודש (כולל מע״מ)"><input type="number" min="1" value={edit.amount} onChange={e => setEdit({ ...edit, amount: e.target.value })} /></Field>
+          <Field label="יום בחודש"><input type="number" min="1" max="28" value={edit.day} onChange={e => setEdit({ ...edit, day: e.target.value })} /></Field>
+          <Field label="ספק סליקה"><select value={edit.provider} onChange={e => setEdit({ ...edit, provider: e.target.value })}>
+            {payOk?.zcredit && <option value="zcredit">זד קרדיט</option>}{payOk?.upay && <option value="upay">יופיי</option>}{!prov && <option value="zcredit">זד קרדיט</option>}</select></Field>
+          <Field label="מחודש"><input type="month" value={edit.startMonth} onChange={e => setEdit({ ...edit, startMonth: e.target.value })} /></Field>
+          <Field label="עד חודש (לא חובה)"><input type="month" value={edit.endMonth || ''} onChange={e => setEdit({ ...edit, endMonth: e.target.value })} /></Field>
+        </div>
+        <label className="col-switch"><input type="checkbox" checked={edit.mail !== false} onChange={e => setEdit({ ...edit, mail: e.target.checked })} /> לשלוח את הקישור ללקוח במייל</label>
+        <label className="col-switch"><input type="checkbox" checked={edit.active !== false} onChange={e => setEdit({ ...edit, active: e.target.checked })} /> פעילה</label>
+      </div>
+      <div className="mg-mod-f"><button className="mg-btn" onClick={saveRule}>שמור</button><button className="mg-btn ghost" onClick={() => setEdit(null)}>ביטול</button>
+        {edit.id && <button className="mg-btn ghost" style={{ marginInlineStart: 'auto' }} onClick={async () => { await remove('standing', edit.id, `הוראת הקבע של ${edit.customer.name}`); setEdit(null); syncFlag(rules.filter(x => x.id !== edit.id)); }}>מחק</button>}</div>
+    </div></div>}
+    <div className="mg-hint" style={{ marginTop: 8 }}>חיוב אוטומטי של כרטיס שמור, בלי שהלקוח לוחץ, יתווסף אחרי שזד קרדיט יפעילו במסוף שמירת כרטיס (טוקן) וישלחו את תיעוד הממשק.</div>
+  </div>);
+}
+
+/* ------------------------------------------------- card clearing recon
+   The card company's (or the clearing service's) report against the card
+   receipts in the books: what was paid and has no receipt, what has a
+   receipt and never arrived, and what the fees were. */
+function parseCardCSV(text) {
+  const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (!lines.length) return [];
+  const sep = [',', ';', '\t'].map(s => [s, lines[0].split(s).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = lines.map(l => splitLine(l, sep));
+  const hi = rows.findIndex(r => r.some(c => /תאריך|date/i.test(c)) && r.some(c => /סכום|amount|sum|סה/i.test(c)));
+  const head = hi >= 0 ? rows[hi] : null;
+  const col = (re, not) => head ? head.findIndex(c => re.test(c) && !(not && not.test(c))) : -1;
+  const cDate = col(/תאריך עסקה|תאריך רכישה|transaction date|^תאריך$|^date$/i) >= 0 ? col(/תאריך עסקה|תאריך רכישה|transaction date|^תאריך$|^date$/i) : col(/תאריך|date/i, /זיכוי|הפקדה|deposit|value/i);
+  const cDep = col(/תאריך זיכוי|תאריך הפקדה|deposit|value date|מועד זיכוי/i);
+  const cAmt = col(/סכום עסקה|סכום החיוב|סכום מקורי|transaction amount|^סכום$|amount|sum|סה"כ|סה״כ/i, /נטו|זיכוי|net|עמל/i);
+  const cNet = col(/נטו|סכום לזיכוי|net|לתשלום/i);
+  const cFee = col(/עמלה|fee|commission/i);
+  const cAuth = col(/אישור|approval|auth/i);
+  const cCard = col(/כרטיס|card|4 ספרות|ספרות/i, /סוג|type|brand/i);
+  const cName = col(/שם|לקוח|customer|name|בית עסק/i);
+  const out = [];
+  rows.slice(hi >= 0 ? hi + 1 : 0).forEach((r, i) => {
+    const date = d10(cDate >= 0 ? r[cDate] : r.find(c => d10(c)));
+    const amount = cAmt >= 0 ? num(r[cAmt]) : r.map(num).find((n, j) => !isNaN(n) && !d10(r[j]));
+    if (!date || isNaN(amount) || !amount) return;
+    const net = cNet >= 0 ? num(r[cNet]) : NaN, fee = cFee >= 0 ? num(r[cFee]) : NaN;
+    out.push({ i, date, amount: r2(amount), net: isNaN(net) ? null : r2(net), fee: !isNaN(fee) ? r2(Math.abs(fee)) : !isNaN(net) ? r2(amount - net) : null,
+      dep: cDep >= 0 ? d10(r[cDep]) || '' : '', auth: cAuth >= 0 ? String(r[cAuth] || '').replace(/\D/g, '') : '',
+      last4: cCard >= 0 ? String(r[cCard] || '').replace(/\D/g, '').slice(-4) : '', name: cName >= 0 ? String(r[cName] || '').slice(0, 60) : '' });
+  });
+  return out;
+}
+/* Card payments in the books, one line per payment. */
+function cardReceipts(docs, withTest) {
+  const out = [];
+  (docs || []).filter(d => !d.cancelled && (withTest || d.series !== 'test') && ['320', '400'].includes(String(d.type))).forEach(d => {
+    (d.payments || []).forEach((p, j) => { if (!/אשראי|credit|card/i.test(String(p.kind || ''))) return;
+      const det = String(p.details || '');
+      out.push({ key: d.id + ':' + j, docId: d.id, title: docTitle(d), date: String(p.date || d.date || '').slice(0, 10), amount: r2(p.amount), name: d.customer?.name || '',
+        auth: (det.match(/אישור\s*(\d+)/) || [])[1] || '', last4: (det.match(/(\d{4})(?!.*\d{4})/) || [])[1] || '' }); });
+  });
+  return out;
+}
+function matchCards(lines, recs, manual = {}, days = 5) {
+  const used = new Set(Object.values(manual)), m = { ...manual };
+  const near = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= days * 86400000;
+  const free = (r) => !used.has(r.key);
+  /* First the approval number, then the same amount and card within the days, then the same amount alone when only one fits. */
+  for (const pass of ['auth', 'card', 'amount']) {
+    lines.forEach(l => {
+      if (m[l.i] || l.ignored) return;
+      const c = recs.filter(r => free(r) && Math.abs(r.amount - l.amount) < 0.011 && (pass === 'auth' ? l.auth && r.auth && l.auth.endsWith(r.auth.slice(-6))
+        : pass === 'card' ? l.last4 && r.last4 === l.last4 && near(r.date, l.date) : near(r.date, l.date)));
+      if (c.length === 1 || (pass === 'auth' && c.length)) { m[l.i] = c[0].key; used.add(c[0].key); }
+    });
+  }
+  return m;
+}
+
+function CardReconCard({ book, data, save, remove, flash, ro }) {
+  const batches = (data.ccrecon || []).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  const [sel, setSel] = useState(batches[0]?.id || '');
+  const [withTest, setWithTest] = useState(false);
+  const [view, setView] = useState('noRec');
+  const b = batches.find(x => x.id === sel) || batches[0];
+  const recs = useMemo(() => cardReceipts(data.documents, withTest), [data.documents, withTest]);
+  const res = useMemo(() => {
+    if (!b) return null;
+    const lines = (b.rows || []).map(l => ({ ...l, ignored: (b.ignore || []).includes(l.i) }));
+    const from = lines.reduce((a, l) => !a || l.date < a ? l.date : a, ''), to = lines.reduce((a, l) => l.date > a ? l.date : a, '');
+    const inRange = recs.filter(r => r.date >= addDaysIso(from, -3) && r.date <= addDaysIso(to, 3));
+    const m = matchCards(lines, inRange, b.manual || {});
+    const matched = lines.filter(l => m[l.i]).map(l => ({ l, r: inRange.find(r => r.key === m[l.i]) }));
+    const noRec = lines.filter(l => !m[l.i] && !l.ignored);
+    const taken = new Set(Object.values(m));
+    const noLine = inRange.filter(r => !taken.has(r.key) && r.date >= from && r.date <= to);
+    const fees = r2(lines.reduce((a, l) => a + (l.fee || 0), 0));
+    return { lines, from, to, matched, noRec, noLine, fees, gross: r2(lines.reduce((a, l) => a + l.amount, 0)), net: lines.every(l => l.net != null) ? r2(lines.reduce((a, l) => a + l.net, 0)) : null };
+  }, [b, recs]);
+  const upload = async (file) => {
+    if (!file) return;
+    const text = await file.text(); const rows = parseCardCSV(text);
+    if (!rows.length) { flash('לא זוהו עסקאות בקובץ. צריך קובץ CSV עם עמודות תאריך וסכום.'); return; }
+    const rec = { id: uid('cc'), name: file.name, at: new Date().toISOString(), rows: rows.slice(0, 3000), manual: {}, ignore: [] };
+    if (await save('ccrecon', rec)) { setSel(rec.id); flash(`נקלטו ${rows.length} עסקאות`); }
+  };
+  const setManual = (i, key) => save('ccrecon', { ...b, manual: { ...(b.manual || {}), [i]: key } });
+  const ignore = (i) => save('ccrecon', { ...b, ignore: [...(b.ignore || []), i] });
+  return (<div data-tour="cc-recon" className="mg-card" style={{ marginTop: 16 }}>
+    <div className="col-head"><h3 style={{ margin: 0 }}>💳 התאמת סליקת אשראי</h3>
+      {!ro && <label className="mg-btn sm" style={{ cursor: 'pointer' }}>⬆ העלאת דוח סליקה (CSV)<input type="file" accept=".csv,text/csv,.txt" hidden onChange={e => { upload(e.target.files?.[0]); e.target.value = ''; }} /></label>}</div>
+    <p className="mg-hint">מורידים מאתר חברת האשראי או מזד קרדיט / יופיי דוח עסקאות או דוח זיכויים כ-CSV, ומעלים כאן. ההתאמה לפי מספר אישור, 4 ספרות וסכום.</p>
+    {batches.length > 1 && <select value={b?.id} onChange={e => setSel(e.target.value)} style={{ marginBottom: 8 }}>{batches.map(x => <option key={x.id} value={x.id}>{x.name} · {new Date(x.at).toLocaleDateString('he-IL')}</option>)}</select>}
+    {!b && <div className="mg-empty">עוד לא הועלה דוח סליקה.</div>}
+    {res && <>
+      <div className="aging-sum">
+        <div className="tot"><span>{heDate(res.from)}–{heDate(res.to)}</span><b>{fmt(res.gross)}</b><small>{res.lines.length} עסקאות</small></div>
+        <div className="ok"><span>הותאמו</span><b>{res.matched.length}</b></div>
+        <div className={res.noRec.length ? 'bad' : ''}><span>שולם, אין קבלה</span><b>{res.noRec.length}</b></div>
+        <div className={res.noLine.length ? 'warn' : ''}><span>קבלה, לא בדוח</span><b>{res.noLine.length}</b></div>
+        {res.fees > 0 && <div><span>עמלות</span><b>{fmt(res.fees)}</b>{res.net != null && <small>נטו {fmt(res.net)}</small>}</div>}
+      </div>
+      <div className="col-filters">
+        {[['noRec', `שולם ואין קבלה (${res.noRec.length})`], ['noLine', `קבלה שלא בדוח (${res.noLine.length})`], ['matched', `הותאמו (${res.matched.length})`]].map(([k, l]) => <button key={k} className={'mg-chipbtn' + (view === k ? ' on' : '')} onClick={() => setView(k)}>{l}</button>)}
+        <label className="col-test"><input type="checkbox" checked={withTest} onChange={e => setWithTest(e.target.checked)} /> כולל מסמכי ניסיון</label>
+      </div>
+      <div className="cc-list">
+        {view === 'noRec' && (res.noRec.length ? res.noRec.map(l => { const cands = recs.filter(r => Math.abs(r.amount - l.amount) < 0.011 && !Object.values(b.manual || {}).includes(r.key)).slice(0, 6); return (
+          <div key={l.i} className="cc-row bad"><span>{heDate(l.date)}</span><b>{fmt(l.amount)}</b><span>{[l.name, l.last4 && '****' + l.last4, l.auth && 'אישור ' + l.auth].filter(Boolean).join(' · ')}</span>
+            {!ro && <span className="cc-acts">{cands.length > 0 && <select defaultValue="" onChange={e => e.target.value && setManual(l.i, e.target.value)}><option value="">התאם לקבלה…</option>{cands.map(c => <option key={c.key} value={c.key}>{c.title} · {heDate(c.date)} · {c.name}</option>)}</select>}
+              <button className="mg-btn ghost sm" onClick={() => ignore(l.i)}>התעלם</button></span>}</div>); }) : <div className="mg-empty">לכל תשלום בדוח יש קבלה. ✓</div>)}
+        {view === 'noLine' && (res.noLine.length ? res.noLine.map(r => <div key={r.key} className="cc-row warn"><span>{heDate(r.date)}</span><b>{fmt(r.amount)}</b><span>{r.title} · {r.name}{r.last4 ? ' · ****' + r.last4 : ''}</span></div>)
+          : <div className="mg-empty">כל קבלה באשראי בתקופה הופיעה בדוח. ✓</div>)}
+        {view === 'matched' && res.matched.map(({ l, r }) => <div key={l.i} className="cc-row ok"><span>{heDate(l.date)}</span><b>{fmt(l.amount)}</b><span>{r?.title} · {r?.name}</span>{l.fee != null && <small>עמלה {fmt(l.fee)}</small>}</div>)}
+      </div>
+      {view === 'noRec' && res.noRec.length > 0 && <div className="mg-hint">תשלום בלי קבלה: כסף שנכנס ולא נרשם. מפיקים עליו קבלה (או מתאימים ידנית לקבלה קיימת).</div>}
+      {!ro && <div style={{ marginTop: 10 }}><button className="mg-linkish" onClick={() => remove('ccrecon', b.id, 'הדוח הזה')}>מחק את הדוח</button></div>}
+    </>}
+  </div>);
+}
+
 function BankTab({ bank, income, outgo, onSave, onDel, onBulk, flash }) {
   const [show, setShow] = useState('open');
   const [add, setAdd] = useState(null);
@@ -5520,7 +5909,9 @@ async function stampOf(d) {
 /* What is still owed on an invoice: its total, less receipts and credit notes
    that point at it. */
 function openOf(inv, docs) {
-  const paid = docs.filter(d => d.refId === inv.id && d.type === '400').reduce((a, d) => a + d.total + (Number(d.withholding) || 0), 0);
+  /* A receipt for one invoice points at it; a receipt for several (a debt paid by link) says how much went to each. */
+  const paid = docs.filter(d => d.type === '400' && !d.cancelled && (d.refId === inv.id && !(d.allocs || []).length)).reduce((a, d) => a + d.total + (Number(d.withholding) || 0), 0)
+    + docs.filter(d => d.type === '400' && !d.cancelled).reduce((a, d) => a + (d.allocs || []).filter(x => x.refId === inv.id).reduce((b, x) => b + (Number(x.amount) || 0), 0), 0);
   const cred = docs.filter(d => d.refId === inv.id && d.type === '330').reduce((a, d) => a + d.total, 0);
   /* A cheque that came back opens the debt again; a balance written off closes it. */
   const back = docs.filter(d => d.type === 'CR' && d.openRef === inv.id && !d.cancelled).reduce((a, d) => a + d.total, 0);

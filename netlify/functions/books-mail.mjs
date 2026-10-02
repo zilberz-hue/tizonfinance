@@ -193,7 +193,10 @@ async function issueForPayment(db, bookId, payId, cb, { now = /* @__PURE__ */ ne
   const bookPath = `books/${bookId}`, payPath = `${bookPath}/payreqs/${payId}`;
   const book0 = await db.get(bookPath);
   if (!book0) return { skip: "no-book" };
-  const series = seriesOf(book0), type = payDocType(book0);
+  /* A page that pays a debt (a reminder's link, or a standing order against
+     invoices) issues a receipt for those invoices, never a second invoice. */
+  const pay0 = await db.get(payPath);
+  const series = seriesOf(book0), type = pay0?.debt ? "400" : payDocType(book0);
   const have = (await db.list(`${bookPath}/documents`, "series", series)).filter((d) => d.type === type).map((d) => Number(d.number) || 0);
   const start = Math.max(series === "live" ? Number(book0.docStart) || 1 : 1, have.length ? Math.max(...have) + 1 : 0);
   return db.tx(async (t) => {
@@ -241,7 +244,11 @@ async function issueForPayment(db, bookId, payId, cb, { now = /* @__PURE__ */ ne
       createdAt: now.toISOString(),
       payId,
       payRef: cb.reference || "",
-      via: pay.provider === "upay" ? "upay" : "zcredit"
+      via: pay.provider === "upay" ? "upay" : "zcredit",
+      ...(Array.isArray(pay.debtRefs) && pay.debtRefs.length ? {
+        allocs: pay.debtRefs.slice(0, 50).map((x) => ({ refId: String(x.id || ""), refTitle: String(x.title || "").slice(0, 60), amount: r2(x.amount) })),
+        ...(pay.debtRefs.length === 1 ? { refId: String(pay.debtRefs[0].id || ""), refTitle: String(pay.debtRefs[0].title || "").slice(0, 60) } : {})
+      } : {})
     };
     rec.stamp = stampOf(rec);
     const d = { ...rec, number: n };
@@ -1708,7 +1715,8 @@ var books_mail_default = async (req) => {
       if (!["owner", "clerk"].includes(role)) return json(403, { error: "role" });
       const provider = body.provider === "upay" ? "upay" : "zcredit";
       if (provider === "upay" ? !await upCredsOf(bookId) : !await zcKeyOf(bookId)) return json(400, { error: provider === "upay" ? "no-upay" : "no-zcredit" });
-      const rate = payDocType(book) === "400" ? 0 : rateOf(book);
+      const isDebt = body.debt === true;
+      const rate = isDebt || payDocType(book) === "400" ? 0 : rateOf(book);
       const lines = (Array.isArray(body.lines) ? body.lines : []).slice(0, 50).map((l) => ({ desc: String(l.desc || "").trim().slice(0, 200), qty: Number(l.qty) || 0, price: r2(l.price), ...l.itemId ? { itemId: String(l.itemId), sku: String(l.sku || "") } : {} })).filter((l) => l.desc && l.qty > 0 && l.price > 0);
       if (!lines.length) return json(400, { error: "lines" });
       const incl = rate ? !!body.incl : true;
@@ -1745,7 +1753,10 @@ var books_mail_default = async (req) => {
         linkKey,
         link,
         provider,
-        docType: payDocType(book)
+        docType: isDebt ? "400" : payDocType(book),
+        ...(isDebt ? { debt: true } : {}),
+        ...(isDebt && Array.isArray(body.debtRefs) && body.debtRefs.length ? { debtRefs: body.debtRefs.slice(0, 50).map((x) => ({ id: String(x.id || ""), title: String(x.title || "").slice(0, 60), amount: r2(x.amount) })) } : {}),
+        ...(body.origin ? { origin: String(body.origin).slice(0, 40) } : {})
       };
       await db.set(`books/${bookId}/payreqs/${id}`, rec);
       await db.set(`books/${bookId}/log/log_${now.getTime().toString(36)}${token(2)}`, {
@@ -1792,6 +1803,42 @@ var books_mail_default = async (req) => {
     return json(e.status || (String(e.code || "").startsWith("ERR_J") ? 401 : 500), { error: String(e.message || e) });
   }
 };
+/* A payment page made by the server itself (a reminder's link, a standing
+   order): the same record the app makes in pay-create, without a person. */
+async function payCreateFor({ bookId, provider, customer: c = {}, lines: ls = [], title = "", note = "", debt = false, debtRefs = null, by = "auto", base = "", maxPayments = 1, origin = "" }) {
+  const db = await adminDb();
+  const book = /^[\w-]{1,80}$/.test(String(bookId)) ? await db.get(`books/${bookId}`) : null;
+  if (!book) throw Object.assign(new Error("no-book"), { status: 404 });
+  const prov = provider === "upay" ? "upay" : provider === "zcredit" ? "zcredit" : (await zcKeyOf(bookId)) ? "zcredit" : (await upCredsOf(bookId)) ? "upay" : "";
+  if (!prov) throw Object.assign(new Error("no-provider"), { status: 400 });
+  if (prov === "upay" ? !await upCredsOf(bookId) : !await zcKeyOf(bookId)) throw Object.assign(new Error(prov === "upay" ? "no-upay" : "no-zcredit"), { status: 400 });
+  const rate = debt || payDocType(book) === "400" ? 0 : rateOf(book);
+  const lines = (Array.isArray(ls) ? ls : []).slice(0, 50).map((l) => ({ desc: String(l.desc || "").trim().slice(0, 200), qty: Number(l.qty) || 1, price: r2(l.price) })).filter((l) => l.desc && l.price > 0);
+  if (!lines.length) throw Object.assign(new Error("lines"), { status: 400 });
+  const tot = totals(lines, true, rate);
+  if (tot.total <= 0 || tot.total > 1e6) throw Object.assign(new Error("total"), { status: 400 });
+  const customer = { name: String(c.name || "").trim().slice(0, 120), taxId: digitsOf(c.taxId).slice(0, 12), phone: String(c.phone || "").trim().slice(0, 30),
+    email: String(c.email || "").trim().toLowerCase().slice(0, 120), address: String(c.address || "").trim().slice(0, 200) };
+  if (!customer.name) throw Object.assign(new Error("name"), { status: 400 });
+  const now = /* @__PURE__ */ new Date();
+  const id = "pay_" + now.getTime().toString(36) + token(3), linkKey = token(8);
+  const link = `${String(base || "").replace(/\/+$/, "")}/p/${bookId}/${id}/${linkKey}`;
+  const rec = { id, status: "open", createdAt: now.toISOString(), createdBy: by, customer, lines, incl: true, vatRate: rate, net: tot.net, vat: tot.vat, total: tot.total,
+    maxPayments: Math.max(1, Math.min(36, Number(maxPayments) || 1)), note: String(note || "").trim().slice(0, 200), title: String(title || lines[0].desc).slice(0, 100),
+    linkKey, link, provider: prov, docType: debt ? "400" : payDocType(book), ...(debt ? { debt: true } : {}),
+    ...(Array.isArray(debtRefs) && debtRefs.length ? { debtRefs: debtRefs.slice(0, 50).map((x) => ({ id: String(x.id || ""), title: String(x.title || "").slice(0, 60), amount: r2(x.amount) })) } : {}),
+    ...(origin ? { origin: String(origin).slice(0, 40) } : {}) };
+  await db.set(`books/${bookId}/payreqs/${id}`, rec);
+  return { id, link, payreq: rec };
+}
+/* Closes a page nobody should pay any more (a newer reminder replaced it). */
+async function payCancelFor(bookId, payId, by = "auto") {
+  const db = await adminDb();
+  const p = await db.get(`books/${bookId}/payreqs/${payId}`).catch(() => null);
+  if (!p || p.status !== "open") return false;
+  await db.update(`books/${bookId}/payreqs/${payId}`, { status: "cancelled", cancelledAt: (/* @__PURE__ */ new Date()).toISOString(), cancelledBy: by });
+  return true;
+}
 export {
   __test,
   certInfo,
@@ -1803,5 +1850,8 @@ export {
   mailReady,
   secrets,
   icountDocs,
-  who
+  who,
+  /* For the scheduled collection (books-collect.mjs): reminders and standing orders. */
+  payCreateFor,
+  payCancelFor
 };
