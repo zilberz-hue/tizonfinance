@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.36.1';
+const VERSION = '1.36.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1247,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.36.2', date: '02.10.26', items: ['מבנה אחיד: "מספר מקשר" ברשומת הכותרת של כל מסמך (C100) נכתב כמו בשורות הפירוט (D110/D120). זה מה שהסימולטור סימן כשגיאה.'] },
   { v: '1.36.1', date: '02.10.26', items: ['מבנה אחיד, לפי דוח הסימולטור: מספר עוסק של יצרן התוכנה (ברירת מחדל: מספר העוסק של העסק) ושם תוכנת הכיווץ נכתבים ב-INI.TXT.', 'מסמך שמופיע פעמיים נכנס פעם אחת, ומסמכים שונים עם אותו סוג ומספר מוצגים לבדיקה במקום להיכנס לקובץ.'] },
   { v: '1.36.0', date: '02.10.26', items: ['הלקוחות נשמרים בחבילות, כמו היסטוריית המסמכים: פתיחת עסק קוראת כמה רשומות במקום רשומה לכל לקוח (אלפים בחנות). הטעינה מהירה יותר, והמכסה היומית של Firebase מספיקה להרבה יותר כניסות.', 'בפעם הראשונה שבעל העסק נכנס, הלקוחות מתארגנים בחבילות לבד. שום דבר לא משתנה בעבודה: חיפוש, עריכה, מיזוג ומחיקה כרגיל.'] },
   { v: '1.35.3', date: '02.10.26', items: ['iCount: כשהמכסה היומית של Firebase נגמרת, ההודעה אומרת את זה במקום "עומס ב-Google".'] },
@@ -5873,7 +5874,7 @@ function buildUnified(book, docs, soft, from, to, opts = {}) {
       + fX('', 30) + fX('', 8) + fX('', 30) + fX('', 2) + fX(c.phone, 15) + fN(custOsek, 9) + fN(ymd(d.date), 8)
       + fS(0, 12, 2) + fX('', 3) + fS(sign * d.net, 12, 2) + fS(0, 12, 2) + fS(sign * d.net, 12, 2) + fS(sign * d.vat, 12, 2)
       + fS(sign * d.total, 12, 2) + fS(d.withholding || 0, 9, 2) + fX(custKey, 15) + fX('', 10) + fX('', 1) + fN(ymd(d.date), 8)
-      + fX('', 7) + fX((d.createdBy || '').split('@')[0], 9) + fN(0, 7) + fX('', 13));
+      + fX('', 7) + fX((d.createdBy || '').split('@')[0], 9) + fN(head, 7) + fX('', 13));   // 1234: the link the detail lines carry
     const ref = d.refId ? docs.find(x => x.id === d.refId) : null;
     (d.lines || []).forEach((l, i) => {
       const unit = d.incl && d.vatRate ? (Number(l.price) || 0) / (1 + d.vatRate / 100) : (Number(l.price) || 0);
