@@ -1031,7 +1031,7 @@ function certInfo(b64, pass) {
   if (!c || !keys.length) throw new Error("no key or certificate in file");
   const cn = c.subject.getField("CN")?.value || "";
   const issuer = c.issuer.getField("CN")?.value || c.issuer.getField("O")?.value || "";
-  return { name: forge.util.decodeUtf8(cn), issuer: forge.util.decodeUtf8(issuer), expires: c.validity.notAfter.toISOString() };
+  return { name: forge.util.decodeUtf8(cn), issuer: forge.util.decodeUtf8(issuer), expires: c.validity.notAfter.toISOString(), self: c.isIssuer(c) };
 }
 /* The certificate's password: from Netlify's settings, or as typed in the app (kept here, with the certificate). */
 async function certPass() {
@@ -1457,6 +1457,36 @@ var books_mail_default = async (req) => {
     if (req.method !== "POST") return json(405, { error: "method" });
     const body = await req.json().catch(() => ({}));
     const email = await who(String(body.idToken || ""));
+    /* A certificate made here, signed by itself: the key never leaves the server.
+       Until one from a certifying authority is uploaded (which replaces it). */
+    if (body.action === "cert-self") {
+      if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
+      if (env("SIGN_P12_PASSWORD")) return json(400, { error: "env-password" });
+      const name = String(body.name || "").trim().slice(0, 64) || email;
+      const taxId = String(body.taxId || "").replace(/\D/g, "").slice(0, 9);
+      const { generateKeyPairSync } = await import("node:crypto");
+      const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048, publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } });
+      const cert = forge.pki.createCertificate();
+      cert.publicKey = forge.pki.publicKeyFromPem(publicKey);
+      cert.serialNumber = "01" + randomBytes(8).toString("hex");
+      cert.validity.notBefore = new Date(Date.now() - 6e4);
+      cert.validity.notAfter = new Date(Date.now() + 3 * 365 * 864e5);
+      const attrs = [{ name: "commonName", value: forge.util.encodeUtf8(name) }, { name: "organizationName", value: forge.util.encodeUtf8(name) },
+        ...(taxId ? [{ name: "serialNumber", value: taxId }] : []), { name: "countryName", value: "IL" }, { name: "emailAddress", value: email }];
+      cert.setSubject(attrs);
+      cert.setIssuer(attrs);
+      cert.setExtensions([{ name: "basicConstraints", cA: false }, { name: "keyUsage", digitalSignature: true, nonRepudiation: true },
+        { name: "extKeyUsage", emailProtection: true }, { name: "subjectKeyIdentifier" }]);
+      const key = forge.pki.privateKeyFromPem(privateKey);
+      cert.sign(key, forge.md.sha256.create());
+      const pass = randomBytes(24).toString("base64url");
+      const p12 = forge.pkcs12.toPkcs12Asn1(key, [cert], pass, { algorithm: "3des" });
+      const b = forge.util.encode64(forge.asn1.toDer(p12).getBytes());
+      const info = certInfo(b, pass);
+      await secrets().set("cert.p12", b);
+      await secrets().set("cert.pass", pass);
+      return json(200, { ok: true, cert: info, by: email });
+    }
     if (body.action === "cert") {
       if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
       const pass = env("SIGN_P12_PASSWORD") || String(body.pass || "");
