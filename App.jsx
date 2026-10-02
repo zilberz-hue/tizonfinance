@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.45.1';
+const VERSION = '1.45.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1059,6 +1059,7 @@ li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
 .seg-edit{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.seg-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:99px;background:#fff;padding:2px 4px 2px 10px}
 .seg-pill input{border:0;background:transparent;width:110px;padding:4px 2px;font:inherit;min-width:0}.seg-pill button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:14px}.seg-pill.add{border-style:dashed}
 .side button.bk.merged{opacity:.6}.side button.bk.merged .lbl::after{content:' · אוחד';font-size:.8em;color:var(--muted)}
+.newver{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:80;background:#2f5d46;color:#fff;border-radius:14px;padding:10px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 6px 24px rgba(0,0,0,.25);font-weight:700;max-width:calc(100vw - 32px)}
 .merge-list{margin:6px 0 12px;padding-inline-start:18px;font-size:14px;line-height:1.8}
 .collect{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.collect > *{min-width:0}
 .col-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}.col-acts{display:flex;gap:6px}
@@ -1578,6 +1579,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.45.2', date: '02.10.26', items: ['כשעולה גרסה חדשה מופיעה הודעה "יש גרסה חדשה" עם כפתור עדכון, בלי לחפש איך לרענן.'] },
   { v: '1.45.1', date: '02.10.26', items: ['עסק שאוחד לא נעלם מהתפריט: הוא מסומן "אוחד", הנתונים שלו שמורים, ובפתיחתו יש כפתור "↩ בטל את האיחוד" שמסיר את העותקים מהעסק השני ומחזיר הכל כמו שהיה.', 'בחלון האיחוד כתוב במפורש איזה עסק נשאר ואיזה מוסתר, ואזהרה כשבעסק שמוסתר יש יותר מסמכים.'] },
   { v: '1.45.0', date: '02.10.26', items: ['🧩 תחומי פעילות: עסק אחד (מספור אחד, מע״מ אחד, קובץ מבנה אחיד אחד) עם תחומים: קליניקה, צמחים, חנות מקוונת, קורסים. לכל תחום הכנסות, הוצאות ורווח, וגרף של 12 חודשים (לשונית תחומים).', 'שיוך אוטומטי: הזמנות מהאתר לחנות המקוונת; מסמך לפי הפריטים או מילים בשורות (למשל צמח, פורמולה, תמצית לצמחים), גם במסמכים מ-iCount; הוצאה לפי הספק, או למשותף. אפשר לבחור תחום בכל מסמך, הוצאה, הכנסה, פריט וספק.', '"נמכר בקליניקה לפי פריט": מה יצא מהמלאי בלי לעבור באתר, לעדכון ידני של המלאי בחנות.', 'איחוד עסקים עם אותו מספר עוסק (הגדרות העסק ← תחומי פעילות): הרשומות מועתקות עם התחום שלהן, החיבור לחנות עובר, והעסק הישן נשאר מוסתר כמו שהיה. נחסם אם בעסק השני יש מסמכים אמיתיים במספור משלו.'] },
   { v: '1.44.1', date: '02.10.26', items: ['נקודות זיכוי: אפשר להקליד מספר עם נקודה עשרונית (2.75) או פסיק (2,5), ולמחוק ולהקליד מחדש. שדה ריק כבר לא מאפס את הזיכוי בחישוב, אלא נחשב 2.25.'] },
@@ -2085,6 +2087,20 @@ function App() {
   const [storeLogin, setStoreLogin] = useState(false);
   const [storeTick, setStoreTick] = useState(0);
   const [server, setServer] = useState(null);
+  /* A newer version on the site: the page's own script differs from the one
+     the site serves now. Checked on return to the tab and every 10 minutes. */
+  const [newVer, setNewVer] = useState(false);
+  useEffect(() => {
+    const mine = [...document.scripts].map(x => x.src).find(x => /\/assets\/.+\.js/.test(x)) || '';
+    if (!mine) return;
+    const check = async () => { try {
+      const t = await (await fetch('/?v=' + Date.now(), { cache: 'no-store' })).text();
+      const m = t.match(/src="([^"]*\/assets\/[^"]+\.js)"/); if (m && !mine.endsWith(m[1])) setNewVer(true);
+    } catch { /* offline */ } };
+    const vis = () => { if (document.visibilityState === 'visible') check(); };
+    check(); const iv = setInterval(check, 10 * 60e3); document.addEventListener('visibilitychange', vis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', vis); };
+  }, []);
   const [locked, setLocked] = useState(() => !!lsGet(PIN_KEY, null) && sessionStorage.getItem(UNLOCK_KEY) !== '1');
   /* After 15 idle minutes, while a code is set (it may be set or removed during the session). */
   useEffect(() => {
@@ -2383,6 +2399,7 @@ function App() {
         </div>
       </aside>
 
+      {newVer && <div className="newver" role="status">🔄 יש גרסה חדשה של Tizon Finance. <button className="mg-btn sm" onClick={() => location.reload()}>עדכן עכשיו</button></div>}
       <main className="main">
         {booksErr && <div className="mg-note bad" style={{ marginBottom: 14 }}>{booksErr}</div>}
         {stale && cur !== 'settings' && (

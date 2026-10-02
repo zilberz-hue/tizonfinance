@@ -27,3 +27,13 @@
   [headers.values]
     X-Frame-Options = "DENY"
     Referrer-Policy = "same-origin"
+
+# The page itself is always checked for a newer version; the assets have hashed names and are cached as usual.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache"
