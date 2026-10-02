@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.43.0';
+const VERSION = '1.44.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -764,6 +764,15 @@ input:focus,select:focus{border-color:var(--gold)}
 .more-docs-pop{position:absolute;z-index:40;top:calc(100% + 6px);inset-inline-start:0;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 32px rgba(60,40,10,.16);padding:8px;min-width:230px;display:grid;gap:2px}
 .more-docs-pop button{background:none;border:0;text-align:right;padding:9px 12px;border-radius:9px;font:inherit;font-size:15px;cursor:pointer;color:#2c2821}.more-docs-pop button:hover{background:var(--soft)}
 .mdp-h{font-size:12px;font-weight:800;color:var(--muted);padding:8px 12px 2px}.mdp-note{font-size:12px;color:var(--muted);padding:8px 12px 4px;line-height:1.5;max-width:260px}
+.mg-hint{font-size:13px;color:var(--muted);line-height:1.55;margin:6px 0}
+.search-v{display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}.search-v > *{min-width:0}.search-v .mg-h{margin-bottom:0}
+.sr-in{flex:1;min-width:0;font-size:17px;padding:12px 14px;border-radius:12px}.sr-sugg{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.sr-h{font-weight:800;color:#3b4f6b;margin-bottom:6px;font-size:16px}.sr-term p{margin:0 0 8px;line-height:1.65;font-size:15px}
+.sr-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}.sr-foot small{color:var(--muted)}.sr-go{display:flex;flex-wrap:wrap;gap:6px}
+.sr-row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid #eef1f4}.sr-row:first-of-type{border-top:0}
+.sr-row > div{display:flex;flex-direction:column;min-width:0;flex:1}.sr-row small{color:var(--muted);font-size:12.5px}.sr-row b{font-size:15px}
+.sr-ans{border-color:#c9d6e8;background:#f7faff}.sr-askmore{text-align:center;font-size:14px}.sr-hist{padding:6px 0;border-top:1px solid #eef1f4}.sr-hist summary{cursor:pointer}
+.sr-hl{outline:3px solid #e0b65a;outline-offset:4px;border-radius:14px;transition:outline-color .4s}
 .launch{display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}.launch > *{min-width:0}.launch .mg-h{margin-bottom:0}
 .ln-prog{display:flex;flex-direction:column;gap:6px}.ln-bar{height:12px;border-radius:99px;background:#e6edf5;overflow:hidden}.ln-bar i{display:block;height:100%;background:linear-gradient(90deg,#1f4e79,#5b8fc7);border-radius:99px;transition:width .3s}
 .ln-pn{font-size:14px;color:#445}.ln-pn b{font-size:18px;color:#1f4e79}
@@ -1305,6 +1314,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.44.0', date: '02.10.26', items: ['🔎 חיפוש ושאלות (בתפריט הצד, או Ctrl+K מכל מקום): מחפשים מסמך, לקוח, סכום, הוצאה, ספק או פריט בכל העסקים; מונחים (נקודות זיכוי, מקדמות, ניכוי במקור…) עם הסבר וקישור למקום במערכת; ואיפה נמצא כל דבר.', 'כל שאלה אחרת נשלחת למאמן (🤖 שאל, או במיקרופון), והוא עונה לפי המספרים וההגדרות שלך ומפנה למסך המתאים.'] },
   { v: '1.43.0', date: '02.10.26', items: ['לשונית חדשה 📬 גבייה: דוח גיול חובות (מי חייב, כמה ומאיזה זמן: עד 30, 31–60, 61–90, מעל 90 יום), עם הדפסה וייצוא.', 'תזכורות אוטומטיות: כל יום א׳–ה׳ בשעה שבוחרים השרת שולח ללקוחות החייבים תזכורת במייל, עם קישור לתשלום בכרטיס. תשלום בקישור מפיק קבלה על החשבוניות. ללקוח בלי מייל ההודעה מוכנה לשליחה בוואטסאפ בלחיצה. מספר תזכורות, מרווח, סכום מינימלי, ו"בלי תזכורות" ללקוח מסוים.', 'הוראות קבע: חיוב חודשי קבוע. ביום שנקבע השרת יוצר קישור לתשלום ושולח ללקוח; כשמשלם, הקבלה מופקת לבד. רואים מי שילם החודש.', 'התאמת סליקת אשראי (בלשונית בנק): מעלים דוח עסקאות או זיכויים מחברת האשראי, והמערכת מראה מה שולם ואין עליו קבלה, איזו קבלה לא הופיעה בדוח, ועמלות.'] },
   { v: '1.42.3', date: '02.10.26', items: ['תוכנית שהגיעה כקוד (בגלל מירכאות כמו מע"מ, או תשובה שנקטעה) מוצגת עכשיו כצ׳קליסט רגיל, גם תוכנית שכבר שמורה. המאמן גם מתבקש לכתוב מע״מ עם ״.'] },
   { v: '1.42.2', date: '02.10.26', items: ['המאמן: כשהמודל מחזיר תשובה ריקה, השרת מבקש שוב עם יותר מקום, ולא שומר תוכנית ריקה. תוכנית שנשמרה ריקה מסומנת, עם "↻ בנה מחדש".'] },
@@ -1869,7 +1879,7 @@ function App() {
     try {
       const b = sortBooks(await withTimeout(listBooks(user.email)));
       setBooks(b); setBooksErr('');
-      if (!['all', 'settings', 'users', 'coach', 'launch'].includes(cur) && !b.some(x => x.id === cur)) setCur('all');
+      if (!['all', 'settings', 'users', 'coach', 'launch', 'search'].includes(cur) && !b.some(x => x.id === cur)) setCur('all');
     } catch (e) {
       setBooks([]);
       setBooksErr(String(e?.code || e?.message || '').includes('permission')
@@ -1959,7 +1969,7 @@ function App() {
   };
   useEffect(() => {
     if (!books) return;
-    if (cur === 'all' || cur === 'coach') books.forEach(b => ensure(b));
+    if (cur === 'all' || cur === 'coach' || cur === 'search') books.forEach(b => ensure(b));
     else { const b = books.find(x => x.id === cur); if (b) ensure(b); }
   }, [cur, books]);
 
@@ -2026,6 +2036,17 @@ function App() {
     }, want ? 500 : 900);
     return () => clearTimeout(t);
   }, [tourCtx, tourBusy, tourWant, tourRole]);
+  /* From the search screen: a screen, a business's tab, and the spot on it. */
+  const goTo = (g) => {
+    if (g.global) setCur(g.global);
+    else { const b = (books || []).find(x => x.id === g.book) || tourBook || (books || [])[0]; if (!b) return; setCur(b.id); setTabReq({ book: b.id, k: g.tab }); }
+    if (g.anchor) setTimeout(() => { const el = document.querySelector(`[data-tour="${g.anchor}"]`); if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('sr-hl'); setTimeout(() => el.classList.remove('sr-hl'), 2600); }, 900);
+  };
+  useEffect(() => {
+    const k = (e) => { if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'ל')) { e.preventDefault(); setCur('search'); } };
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
+  }, []);
   const startTour = (ctx) => {
     if (!BOOK_CTX.includes(ctx)) { setCur(ctx === 'welcome' && books?.length ? 'all' : ctx); setTourWant(ctx === 'welcome' && books?.length ? 'all' : ctx); return; }
     const pick = [tourBook, ...(books || [])].find(b => b && (roleOf(b, user.email) !== 'clerk' || ['docs', 'customers', 'items'].includes(ctx))
@@ -2058,6 +2079,8 @@ function App() {
           <span className="brand-t"><b>Tizon Finance</b><small>הנהלת חשבונות וליווי פיננסי</small></span>
           <button className="side-fold" onClick={toggleMini} title={mini ? 'הרחב את התפריט' : 'כווץ את התפריט'} aria-label={mini ? 'הרחב את התפריט' : 'כווץ את התפריט'}>{mini ? '«' : '»'}</button>
         </div>
+        <button className={'bk' + (cur === 'search' ? ' on' : '')} onClick={() => setCur('search')} title="חיפוש ושאלות (Ctrl+K)">
+          <span className="ic">🔎</span><span className="lbl">חיפוש ושאלות</span></button>
         <button className={'bk' + (cur === 'all' ? ' on' : '')} onClick={() => setCur('all')} title="כל העסקים">
           <span className="ic">▦</span><span className="lbl">כל העסקים</span></button>
         {(books || []).some(b => roleOf(b, user.email) === 'owner') && <button data-tour="side-coach" className={'bk' + (cur === 'coach' ? ' on' : '')} onClick={() => setCur('coach')} title="המאמן הפיננסי">
@@ -2108,9 +2131,10 @@ function App() {
 
         {cur === 'help' && <HelpView role={tourRole} clerkOnly={tourRole === 'clerk'} onStart={startTour} flash={flash} />}
         {cur === 'users' && books && <UsersView books={books} user={user} flash={flash} onSave={saveBook} />}
-        {cur !== 'settings' && cur !== 'users' && cur !== 'help' && cur !== 'coach' && cur !== 'launch' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
+        {cur !== 'settings' && cur !== 'users' && cur !== 'help' && cur !== 'coach' && cur !== 'launch' && cur !== 'search' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
 
         {cur === 'launch' && <LaunchView flash={flash} />}
+        {cur === 'search' && books && <SearchView books={books} datas={datas} user={user} flash={flash} onGo={goTo} />}
         {cur === 'coach' && books && books.length > 0 && <CoachView books={books} datas={datas} loading={loading} user={user} flash={flash} />}
         {cur === 'all' && books && books.length > 0 && (() => {
           /* The financial overview is for owners and viewers; someone who only
@@ -3019,6 +3043,169 @@ function SmartCoach({ summary, flash, partial }) {
     </>}
   </div>);
 }
+
+/* ------------------------------------------------------------ search
+   One box for everything: where something is in the app, what a term means,
+   and the business's own records (customers, documents, expenses,
+   suppliers, items). Anything else goes to the coach as a question. */
+const GLOSSARY = [
+  { k: 'נקודות זיכוי', w: 'נקודת זיכוי זיכוי ממס', get text() { return `כל נקודת זיכוי מורידה מהמס השנתי סכום קבוע (ב-${TAX.year}: ${fmt(TAX.point)} לשנה לנקודה). לתושב ישראל יש לפחות 2.25 נקודות; נקודות נוספות לפי מצב משפחתי, ילדים, תואר אקדמי, שחרור משירות ועוד. את המספר שלך קובעים בצפי המס, והוא משנה את ההפרשה החודשית.`; }, go: { tab: 'pnl', anchor: 'tax-forecast' } },
+  { k: 'מקדמות מס הכנסה', w: 'מקדמה מקדמות אחוז מקדמות', text: 'תשלום חודשי או דו-חודשי על חשבון המס השנתי, כאחוז מהמחזור, לפי מה שקבע פקיד השומה. בסוף השנה מתחשבנים מול הדוח השנתי.', go: { tab: 'pay' } },
+  { k: 'מע״מ', w: 'מעמ מס ערך מוסף עסקאות תשומות דיווח', text: 'עוסק מורשה גובה מע״מ על המכירות (עסקאות) ומקזז את המע״מ ששילם על הוצאות (תשומות). ההפרש משולם לרשות, חודשי או דו-חודשי.', go: { tab: 'vat' } },
+  { k: 'עוסק פטור', w: 'פטור תקרת מחזור', text: 'עוסק שהמחזור השנתי שלו מתחת לתקרה שנקבעה בחוק. לא גובה מע״מ ולא מקזז, ומוציא קבלות בלבד.', go: { tab: 'dash' } },
+  { k: 'עוסק מורשה', w: 'מורשה', text: 'עוסק שגובה מע״מ ומדווח עליו. מוציא חשבוניות מס, חשבוניות מס קבלה וקבלות.', go: { tab: 'vat' } },
+  { k: 'ביטוח לאומי ומס בריאות', w: 'ביטוח לאומי בל מס בריאות דמי ביטוח', text: 'עצמאי משלם דמי ביטוח לאומי ומס בריאות לפי ההכנסה, בשיעור מופחת עד סכום מסוים ובשיעור מלא מעליו. חלק מהתשלום מוכר כהוצאה. הצפי מופיע בצפי המס.', go: { tab: 'pnl', anchor: 'tax-forecast' } },
+  { k: 'ניכוי במקור', w: 'ניכוי מס במקור אישור ניכוי', text: 'סכום שלקוח עסקי מנכה מהתשלום ומעביר ישר לרשות המסים. רושמים אותו בקבלה, והוא נחשב תשלום על חשבון המס שלך.', go: { tab: 'docs' } },
+  { k: 'חשבונית מס', w: 'חשבונית 305', text: 'מסמך שמחייב את הלקוח ומדווח על עסקה למע״מ. כשהלקוח משלם, מוציאים עליה קבלה.', go: { tab: 'docs' } },
+  { k: 'חשבונית מס קבלה', w: '320 חשבונית קבלה', text: 'חשבונית וקבלה במסמך אחד, כשהתשלום מתקבל מיד. הנפוצה ביותר בקליניקה.', go: { tab: 'docs' } },
+  { k: 'קבלה', w: '400 קבלה על תשלום', text: 'אישור שהתקבל תשלום. אצל עוסק מורשה היא סוגרת חשבונית מס; אצל עוסק פטור היא המסמך היחיד.', go: { tab: 'docs' } },
+  { k: 'חשבונית זיכוי', w: 'זיכוי 330 ביטול חשבונית', text: 'מבטלת חשבונית (כולה או חלק). חשבונית שהופקה לא נמחקת: מזכים אותה.', go: { tab: 'docs' } },
+  { k: 'מספר הקצאה', w: 'הקצאה חשבוניות ישראל שעמ', text: 'מספר שרשות המסים נותנת לחשבונית מס ללקוח עסקי מעל סכום מסוים, כדי שהלקוח יוכל לקזז את המע״מ. נדרש רק אחרי שהתוכנה רשומה.', go: { tab: 'tax' } },
+  { k: 'מבנה אחיד', w: 'קובץ מבנה אחיד 1.31 BKMVDATA INI', text: 'קובץ בפורמט קבוע של רשות המסים עם כל התנועות והמסמכים. מבקר מס מבקש אותו, ורואה החשבון יכול לקלוט אותו.', go: { tab: 'tax', anchor: 'tax-export' } },
+  { k: 'רישום תוכנה', w: 'רישום התוכנה רשות המסים תוכנה רשומה', text: 'תוכנה שמפיקה מסמכי מס צריכה מספר רישום מרשות המסים. השלבים במסלול ההשקה ובלשונית רשות המסים.', go: { global: 'launch' } },
+  { k: 'הוצאה מוכרת', w: 'הוצאות מוכרות מוכר', text: 'הוצאה שנועדה לייצר הכנסה, ולכן מורידה את הרווח החייב במס. חלק מההוצאות מוכרות רק בחלקן (רכב, טלפון, בית). כדאי לבדוק מול רואה החשבון.', go: { tab: 'expenses' } },
+  { k: 'רווח והפסד', w: 'רווח הפסד דוח רוו״ה', text: 'הכנסות פחות הוצאות בתקופה. ממנו נגזר המס.', go: { tab: 'pnl' } },
+  { k: 'מאזן בוחן', w: 'מאזן בוחן חשבונות', text: 'רשימת כל החשבונות עם החובה והזכות שלהם. הסכומים חייבים להתאזן.', go: { tab: 'ledger' } },
+  { k: 'כרטסת', w: 'כרטסת לקוח ספק', text: 'כל התנועות של לקוח או ספק לפי תאריך, עם יתרה מצטברת.', go: { tab: 'ledger' } },
+  { k: 'גיול חובות', w: 'חובות חייבים גיול גבייה', text: 'מי חייב, כמה ומאיזה זמן. משם שולחים תזכורות.', go: { tab: 'collect', anchor: 'aging' } },
+  { k: 'הוראת קבע', w: 'הוראות קבע חיוב חודשי', text: 'חיוב חודשי קבוע ללקוח: נוצר קישור לתשלום בכל חודש, והקבלה מופקת לבד.', go: { tab: 'collect', anchor: 'standing' } },
+  { k: 'הפרשה למס', w: 'להפריש הפרשה חיסכון למס', text: 'כמה לשים בצד כל חודש למס הכנסה, ביטוח לאומי ומע״מ, כדי שלא יפתיע בסוף השנה.', go: { global: 'coach' } },
+  { k: 'פנסיה וקרן השתלמות', w: 'פנסיה קרן השתלמות הפקדה ניכוי', text: 'הפקדה לפנסיה ולקרן השתלמות לעצמאים מקטינה את המס (חלקה כניכוי וחלקה כזיכוי). את ההפקדות מזינים בצפי המס.', go: { tab: 'pnl', anchor: 'tax-forecast' } },
+];
+/* Where things are, beyond the guided tours. */
+const PLACES = [
+  { k: 'מסלול השקה', w: 'השקה רישום מעבר צ׳קליסט', text: 'הצעדים עד שהקליניקה עובדת על Tizon Finance.', go: { global: 'launch' } },
+  { k: 'המאמן הפיננסי', w: 'מאמן יעד אוברדרפט תוכנית', text: 'יעדים, תזרים, אוברדרפט, הפרשות ותוכניות עם צ׳קליסט.', go: { global: 'coach' } },
+  { k: 'גיבוי וענן', w: 'גיבוי ענן חתימה דיגיטלית תעודה', text: 'גיבויים, חיבור לענן, חתימה דיגיטלית.', go: { global: 'settings' } },
+  { k: 'משתמשים והרשאות', w: 'משתמשים הרשאות פקיד', text: 'מי רואה ומי מפיק בכל עסק.', go: { global: 'users' } },
+  { k: 'דוחות יומי, שבועי וחודשי', w: 'דוח יומי שבועי חודשי מייל', text: 'הדוחות בחלון ובמייל, וההגדרות שלהם.', go: { tab: 'bset' } },
+  { k: 'דפי סליקה', w: 'סליקה קישור תשלום זד קרדיט יופיי', text: 'קישור לתשלום בכרטיס; התשלום מפיק מסמך לבד.', go: { tab: 'paypages' } },
+  { k: 'התאמת סליקת אשראי', w: 'אשראי עמלות זיכויים חברת אשראי', text: 'דוח מחברת האשראי מול הקבלות.', go: { tab: 'bank', anchor: 'cc-recon' } },
+  { k: 'תזכורות לתשלום', w: 'תזכורת נודניק חוב', text: 'תזכורות אוטומטיות לחייבים, עם קישור לתשלום.', go: { tab: 'collect', anchor: 'remind-set' } },
+];
+const STOP = new Set('איפה מה איך כמה למה מתי האם מי יש לי את של על עם זה זו אני אפשר נמצא נמצאת מגדירים להגדיר מגדיר עושים לעשות רואים לראות צריך צריכה רוצה הוא היא או גם כל עוד אצלי שלי'.split(' '));
+const normQ = (s) => String(s || '').toLowerCase().replace(/[״"׳'.,!?־\-()]/g, ' ').replace(/\s+/g, ' ').trim();
+/* Hebrew prefixes (ה, ו, ב, ל, מ, ש, כ) and plural endings do not stop a match. */
+const stem = (w) => { const x = w.replace(/^(ו|ה|ב|ל|מ|ש|כ){1,2}(?=.{3,})/, ''), y = x.replace(/(ים|ות|ה)$/, ''); return y.length >= 3 ? y : x.length >= 3 ? x : w; };
+const scoreText = (q, ...fields) => {
+  const all = normQ(q).split(' ').filter(t => t.length > 1), core = all.filter(t => !STOP.has(t));
+  const toks = (core.length ? core : all).map(stem); if (!toks.length) return 0;
+  let s = 0;
+  fields.forEach((f, i) => { const t = normQ(f), words = t.split(' ').map(stem); toks.forEach(k => { if (words.some(w => w === k)) s += i === 0 ? 6 : 2; else if (words.some(w => w.startsWith(k))) s += i === 0 ? 3 : 1; }); });
+  /* Every word asked for must be there (as a word or the start of one), or it is not a match. */
+  const hit = toks.filter(k => fields.some(f => normQ(f).split(' ').some(w => stem(w).startsWith(k) || w.startsWith(k)))).length;
+  return hit === toks.length ? s + 4 : hit / toks.length >= 0.6 && toks.length >= 3 ? s : 0;
+};
+const tourIndex = () => Object.entries(TOURS).flatMap(([ctx, steps]) => steps.filter(st => st.title && ctx !== 'welcome').map(st => ({
+  k: st.title, w: '', text: st.text, go: BOOK_CTX.includes(ctx) ? { tab: ctx, anchor: st.t } : { global: ctx === 'all' ? 'all' : ctx, anchor: st.t }, ctx })));
+const CTX_NAME = { dash: 'סקירה', docs: 'מסמכים', collect: 'גבייה', customers: 'לקוחות', items: 'פריטים', ledger: 'כרטסת', income: 'הכנסות', expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק',
+  vat: 'מע״מ', paypages: 'סליקה', bset: 'הגדרות העסק', pay: 'לתשלום', pnl: 'רווח והפסד', tax: 'רשות המסים', export: 'ייצוא', import: 'ייבוא',
+  settings: 'גיבוי וענן', users: 'משתמשים', coach: 'המאמן', help: 'מדריך', all: 'כל העסקים', launch: 'מסלול השקה' };
+const whereOf = (go) => go.global ? CTX_NAME[go.global] || '' : 'בעסק ← ' + (CTX_NAME[go.tab] || go.tab);
+const ASK_KEY = 'tzbooks_asks';
+
+function SearchView({ books, datas, user, flash, onGo }) {
+  const [q, setQ] = useState('');
+  const [ans, setAns] = useState(null);
+  const [wait, setWait] = useState(false);
+  const [hist, setHist] = useState(() => lsGet(ASK_KEY, []) || []);
+  const inRef = useRef(null);
+  useEffect(() => { inRef.current?.focus(); }, []);
+  const ready = books.filter(b => datas[b.id]);
+  const idx = useMemo(() => [...GLOSSARY.map(x => ({ ...x, kind: 'term' })), ...PLACES.map(x => ({ ...x, kind: 'place' })), ...tourIndex().map(x => ({ ...x, kind: 'place' }))], []);
+  const query = q.trim();
+  const found = useMemo(() => {
+    if (normQ(query).length < 2) return null;
+    const terms = idx.map(x => ({ ...x, s: scoreText(query, x.k + ' ' + x.w, x.text) })).filter(x => x.s >= 4).sort((a, b) => b.s - a.s);
+    const seen = new Set(), places = [];
+    terms.forEach(x => { const key = x.k + (x.go.tab || x.go.global); if (!seen.has(key)) { seen.add(key); places.push(x); } });
+    const n = num(query), isNum = !isNaN(n) && /^[\d.,₪\s-]+$/.test(query);
+    const data = [];
+    ready.forEach(b => {
+      const d = datas[b.id] || {};
+      const hit = (fields) => isNum ? fields.some(f => String(f ?? '').replace(/\D/g, '').includes(query.replace(/\D/g, ''))) : scoreText(query, ...fields) >= 4;
+      (d.customers || []).forEach(c => { if (hit([c.name, c.phone, c.email, c.taxId])) data.push({ kind: 'לקוח', b, label: c.name, sub: [c.phone, c.email].filter(Boolean).join(' · '), go: { tab: 'customers' } }); });
+      (d.documents || []).forEach(x => { if (x.series === 'test' && !query.includes('ניסיון')) return;
+        if (isNum ? (Math.abs((Number(x.total) || 0) - n) < 1 || String(x.number) === query.trim()) : hit([docTitle(x), x.customer?.name, (x.lines || []).map(l => l.desc).join(' ')]))
+          data.push({ kind: 'מסמך', b, label: `${docTitle(x)} · ${x.customer?.name || ''}`, sub: `${heDate(x.date)} · ${fmt(x.total)}`, go: { tab: 'docs' }, date: x.date }); });
+      (d.expenses || []).forEach(e => { if (isNum ? Math.abs((Number(e.gross) || 0) - n) < 1 : hit([e.desc, e.supplierName, e.cat, e.docNo]))
+        data.push({ kind: 'הוצאה', b, label: e.desc || e.cat || 'הוצאה', sub: `${heDate(e.date)} · ${fmt(e.gross)}${e.cat ? ' · ' + e.cat : ''}`, go: { tab: 'expenses' }, date: e.date }); });
+      (d.suppliers || []).forEach(s => { if (hit([s.name, s.taxId, s.email])) data.push({ kind: 'ספק', b, label: s.name, sub: s.taxId || '', go: { tab: 'suppliers' } }); });
+      (d.items || []).forEach(it => { if (hit([it.name, it.sku])) data.push({ kind: 'פריט', b, label: it.name, sub: it.price ? fmt(it.price) : '', go: { tab: 'items' } }); });
+    });
+    data.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    return { terms: places.filter(x => x.kind === 'term').slice(0, 3), places: places.filter(x => x.kind === 'place').slice(0, 6), data: data.slice(0, 30), more: Math.max(0, data.length - 30) };
+  }, [query, idx, ready.length, datas]);
+
+  /* The question to the coach: what this screen found, the tax settings, and this year's totals, as context. */
+  const ask = async (text) => {
+    const t = String(text ?? q).trim(); if (!t || wait) return;
+    if (!cloud) { flash('השאלות למאמן דורשות חיבור לענן'); return; }
+    setWait(true); setAns(null);
+    const prof = lsGet(TAX_PROFILE_KEY, {}) || {}, y = thisMonth().slice(0, 4);
+    const nums = ready.filter(b => roleOf(b, user.email) !== 'clerk').map(b => { const L = buildLedger(b, datas[b.id]), s = totals(L, y + '-01', thisMonth());
+      return `${b.name} (${DEALERS[b.dealerType] || ''}): מתחילת ${y} הכנסות ${Math.round(s.incGross)}, הוצאות ${Math.round(s.expGross)}, רווח ${Math.round(s.profit)}`; });
+    const ctx = [`היום ${heDate(todayIso())}.`, nums.join('. '), `הגדרות מס: נקודות זיכוי ${prof.points ?? 2.25}${prof.deduct ? `, ניכויים (פנסיה וכד׳) ${prof.deduct}` : ''}${prof.advRate ? `, אחוז מקדמות ${prof.advRate}` : ''}.`,
+      found?.terms?.length ? 'מונחים מהמערכת: ' + found.terms.map(x => `${x.k}: ${x.text}`).join(' | ') : '',
+      'מסכים במערכת (איפה מה נמצא): ' + [...PLACES, ...GLOSSARY].map(x => `${x.k} → ${whereOf(x.go)}`).join('; ')].filter(Boolean).join('\n');
+    const id = uid('job');
+    try {
+      await coachCall({ id, kind: 'ask', text: t, summary: ctx }, true);
+      let j = null; const until = Date.now() + 3 * 60e3;
+      while (Date.now() < until) { await new Promise(r => setTimeout(r, 2000)); j = await coachCall({ action: 'job', id }).catch(() => null); if (j?.state === 'done' || j?.state === 'error') break; }
+      if (j?.state === 'done') { setAns({ q: t, text: j.text }); const h = [{ q: t, a: j.text, at: new Date().toISOString() }, ...hist.filter(x => x.q !== t)].slice(0, 20); setHist(h); lsSet(ASK_KEY, h); }
+      else setAns({ q: t, err: coachErr(j?.error || 'timeout', j?.detail) });
+    } catch (e) { setAns({ q: t, err: coachErr(e.message) }); }
+    setWait(false);
+  };
+  const go = (target, b) => onGo({ ...target, book: b?.id });
+  const GoBtns = ({ x }) => x.go.global ? <button className="mg-btn ghost sm" onClick={() => go(x.go)}>פתח ←</button>
+    : <span className="sr-go">{books.filter(b => roleOf(b, user.email) !== 'clerk' || ['docs', 'customers', 'items'].includes(x.go.tab)).slice(0, 4).map(b =>
+      <button key={b.id} className="mg-btn ghost sm" onClick={() => go(x.go, b)}>{books.length > 1 ? b.name : 'פתח'} ←</button>)}</span>;
+  const nothing = found && !found.terms.length && !found.places.length && !found.data.length;
+  return (<div className="search-v">
+    <div className="mg-h" style={{ '--h1': '#3b4f6b', '--h2': '#7b93b3' }}><div><h2>🔎 חיפוש ושאלות</h2>
+      <div className="sub">מסמך, לקוח, סכום, מונח או כל שאלה. Ctrl+K פותח מכל מקום.</div></div></div>
+    <div className="mg-card sr-box">
+      <div className="coach-in">
+        <input ref={inRef} className="sr-in" value={q} onChange={e => { setQ(e.target.value); setAns(null); }} placeholder="למשל: נקודות זיכוי · דנה כהן · 350 · איפה מגדירים תזכורות · כמה מס אשלם השנה?"
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (nothing || /\?$|^(מה|איך|כמה|למה|מתי|האם|איפה|מי)\s/.test(q.trim())) ask(); } }} />
+        <MicButton value={q} onChange={(v) => { setQ(v); setAns(null); }} flash={flash} />
+        <button className="mg-btn" disabled={!q.trim() || wait} onClick={() => ask()}>{wait ? 'חושב…' : '🤖 שאל'}</button>
+      </div>
+      {!query && <div className="sr-sugg">{['נקודות זיכוי', 'מקדמות', 'גיול חובות', 'כמה מע״מ אשלם החודש?', 'איך מוציאים חשבונית זיכוי?', 'מה מוכר כהוצאה בקליניקה?'].map(s =>
+        <button key={s} className="mg-chipbtn" onClick={() => { setQ(s); if (s.endsWith('?')) ask(s); }}>{s}</button>)}</div>}
+    </div>
+
+    {(wait || ans) && <div className="mg-card sr-ans">
+      <div className="sr-h">🤖 תשובה{ans?.q ? `: ${ans.q}` : ''}</div>
+      {wait && <div className="cm assistant thinking" style={{ maxWidth: '100%' }}>חושב<span className="dots">…</span></div>}
+      {ans?.err && <div className="mg-note bad">{ans.err}</div>}
+      {ans?.text && <CoachText text={ans.text} />}
+      {ans?.text && <div className="mg-hint" style={{ marginTop: 6 }}>תשובה כללית מהמאמן. בשאלות מס חשובות, כדאי לאשר מול רואה החשבון.</div>}
+    </div>}
+
+    {found && <>
+      {found.terms.map(x => <div key={x.k} className="mg-card sr-term">
+        <div className="sr-h">📘 {x.k}</div><p>{x.text}</p>
+        <div className="sr-foot"><small>{whereOf(x.go)}</small><GoBtns x={x} /></div></div>)}
+      {found.places.length > 0 && <div className="mg-card"><div className="sr-h">🧭 במערכת</div>
+        {found.places.map(x => <div key={x.k + (x.go.tab || x.go.global)} className="sr-row"><div><b>{x.k}</b><small>{whereOf(x.go)} · {x.text}</small></div><GoBtns x={x} /></div>)}</div>}
+      {found.data.length > 0 && <div className="mg-card"><div className="sr-h">🗂 ברשומות שלך ({found.data.length + found.more})</div>
+        {found.data.map((x, i) => <div key={i} className="sr-row"><div><span className="mg-chip">{x.kind}</span> <b>{x.label}</b><small>{x.sub}{books.length > 1 ? ` · ${x.b.name}` : ''}</small></div>
+          <button className="mg-btn ghost sm" onClick={() => go(x.go, x.b)}>פתח ←</button></div>)}
+        {found.more > 0 && <div className="mg-hint">ועוד {found.more}. כדאי לחדד את החיפוש.</div>}</div>}
+      {nothing && !ans && !wait && <div className="mg-card"><p className="coach-p" style={{ margin: 0 }}>לא נמצא במערכת. <button className="mg-linkish" onClick={() => ask()}>לשאול את המאמן: "{query}"</button></p></div>}
+      {!nothing && !ans && !wait && <div className="sr-askmore"><button className="mg-linkish" onClick={() => ask()}>🤖 לשאול את המאמן על "{query}"</button></div>}
+    </>}
+    {pendingLoad(books, datas) > 0 && <div className="mg-hint">⏳ חלק מהעסקים עוד נטענים; התוצאות יתעדכנו.</div>}
+
+    {!query && hist.length > 0 && <div className="mg-card"><div className="sr-h">🕘 שאלות אחרונות</div>
+      {hist.map((h, i) => <details key={i} className="sr-hist"><summary>{h.q} <small>· {new Date(h.at).toLocaleDateString('he-IL')}</small></summary><CoachText text={h.a} /></details>)}
+      <button className="mg-linkish" style={{ marginTop: 8 }} onClick={() => { setHist([]); lsSet(ASK_KEY, []); }}>נקה היסטוריה</button></div>}
+  </div>);
+}
+const pendingLoad = (books, datas) => books.filter(b => !datas[b.id]).length;
 
 /* ------------------------------------------------------------- launch plan
    The way from "a pilot" to "the clinic runs on Tizon Finance": a checklist

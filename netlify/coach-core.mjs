@@ -22,6 +22,14 @@ export const SYSTEM = `אתה המאמן הפיננסי של בעל עסק קט�
 - אתה מאמן לניהול העסק. אתה לא יועץ השקעות מורשה ולא רואה חשבון: בשאלות על השקעות, הלוואות או דיווח למס, תן כיוון כללי והפנה לבנק או לרואה החשבון.
 - תשובות בשיחה: קצרות (עד כ-200 מילים) אלא אם התבקשה תוכנית. תוכניות: כותרות קצרות ורשימות, עם יעד, פעולות לפי שבועות, תקציב אם רלוונטי, ואיך מודדים.`;
 
+export const ASK_SYSTEM = `אתה העוזר שבתוך Tizon Finance, מערכת הנהלת חשבונות וחשבוניות לעסק קטן בישראל (מטפלים, קליניקה, חנות).
+עונים על כל שאלה: מונחים של מס והנהלת חשבונות בישראל, איך עושים משהו במערכת ואיפה הוא נמצא, ושאלות על המספרים של העסק.
+כללים:
+- עברית, קצר וברור: 2 עד 6 משפטים או רשימה קצרה. בלי הקדמות.
+- אם יש במערכת מסך שקשור לשאלה, סיים בשורה "איפה במערכת: …" לפי רשימת המסכים שקיבלת. אל תמציא מסכים.
+- סכומים, מדרגות ותקרות של מס משתנים כל שנה: אם אתה לא בטוח בערך העדכני, אמור זאת והפנה לבדיקה מול רואה החשבון או אתר רשות המסים.
+- אתה לא רואה חשבון ולא יועץ מס מורשה; בהחלטות משמעותיות המלץ לאשר מול רואה החשבון.`;
+
 export const PLAN_AREAS = {
   clinic: 'הקליניקה (טיפולים)', store: 'החנות (מוצרים)', courses: 'קורסים והדרכות', tizon: 'Tizon Health (הפלטפורמה)',
   marketing: 'שיווק כללי לכל העסקים', debt: 'יציאה מהאוברדרפט ותזרים', costs: 'קיצוץ הוצאות',
@@ -152,6 +160,14 @@ export async function coachRun(body, email, deps) {
       plans[area || label] = { label: data?.title || label, text: data ? planAsText(data) : raw, data: data || undefined, at: new Date().toISOString() };
       await st.setJSON(planKey(email), plans);
       await st.setJSON(jobKey(id), { state: 'done', kind: 'plan', area: area || label, plan: plans[area || label] });
+      return;
+    }
+    if (body.kind === 'ask') {
+      /* A one-off question from the search screen: answered, not kept in the conversation. */
+      const q1 = String(body.text || '').trim().slice(0, 1500);
+      if (!q1) throw Object.assign(new Error('empty'), { code: 'empty' });
+      const text = await deps.ask({ key, system: ASK_SYSTEM + '\n\nמה המערכת יודעת עכשיו:\n' + String(body.summary || '').slice(0, 9000), messages: [{ role: 'user', content: q1 }], maxTokens: 1200 });
+      await st.setJSON(jobKey(id), { state: 'done', kind: 'ask', text });
       return;
     }
     const q = String(body.text || '').trim().slice(0, 2000);
