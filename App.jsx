@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.44.0';
+const VERSION = '1.44.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1314,6 +1314,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.44.1', date: '02.10.26', items: ['נקודות זיכוי: אפשר להקליד מספר עם נקודה עשרונית (2.75) או פסיק (2,5), ולמחוק ולהקליד מחדש. שדה ריק כבר לא מאפס את הזיכוי בחישוב, אלא נחשב 2.25.'] },
   { v: '1.44.0', date: '02.10.26', items: ['🔎 חיפוש ושאלות (בתפריט הצד, או Ctrl+K מכל מקום): מחפשים מסמך, לקוח, סכום, הוצאה, ספק או פריט בכל העסקים; מונחים (נקודות זיכוי, מקדמות, ניכוי במקור…) עם הסבר וקישור למקום במערכת; ואיפה נמצא כל דבר.', 'כל שאלה אחרת נשלחת למאמן (🤖 שאל, או במיקרופון), והוא עונה לפי המספרים וההגדרות שלך ומפנה למסך המתאים.'] },
   { v: '1.43.0', date: '02.10.26', items: ['לשונית חדשה 📬 גבייה: דוח גיול חובות (מי חייב, כמה ומאיזה זמן: עד 30, 31–60, 61–90, מעל 90 יום), עם הדפסה וייצוא.', 'תזכורות אוטומטיות: כל יום א׳–ה׳ בשעה שבוחרים השרת שולח ללקוחות החייבים תזכורת במייל, עם קישור לתשלום בכרטיס. תשלום בקישור מפיק קבלה על החשבוניות. ללקוח בלי מייל ההודעה מוכנה לשליחה בוואטסאפ בלחיצה. מספר תזכורות, מרווח, סכום מינימלי, ו"בלי תזכורות" ללקוח מסוים.', 'הוראות קבע: חיוב חודשי קבוע. ביום שנקבע השרת יוצר קישור לתשלום ושולח ללקוח; כשמשלם, הקבלה מופקת לבד. רואים מי שילם החודש.', 'התאמת סליקת אשראי (בלשונית בנק): מעלים דוח עסקאות או זיכויים מחברת האשראי, והמערכת מראה מה שולם ואין עליו קבלה, איזו קבלה לא הופיעה בדוח, ועמלות.'] },
   { v: '1.42.3', date: '02.10.26', items: ['תוכנית שהגיעה כקוד (בגלל מירכאות כמו מע"מ, או תשובה שנקטעה) מוצגת עכשיו כצ׳קליסט רגיל, גם תוכנית שכבר שמורה. המאמן גם מתבקש לכתוב מע״מ עם ״.'] },
@@ -3145,7 +3146,7 @@ function SearchView({ books, datas, user, flash, onGo }) {
     const prof = lsGet(TAX_PROFILE_KEY, {}) || {}, y = thisMonth().slice(0, 4);
     const nums = ready.filter(b => roleOf(b, user.email) !== 'clerk').map(b => { const L = buildLedger(b, datas[b.id]), s = totals(L, y + '-01', thisMonth());
       return `${b.name} (${DEALERS[b.dealerType] || ''}): מתחילת ${y} הכנסות ${Math.round(s.incGross)}, הוצאות ${Math.round(s.expGross)}, רווח ${Math.round(s.profit)}`; });
-    const ctx = [`היום ${heDate(todayIso())}.`, nums.join('. '), `הגדרות מס: נקודות זיכוי ${prof.points ?? 2.25}${prof.deduct ? `, ניכויים (פנסיה וכד׳) ${prof.deduct}` : ''}${prof.advRate ? `, אחוז מקדמות ${prof.advRate}` : ''}.`,
+    const ctx = [`היום ${heDate(todayIso())}.`, nums.join('. '), `הגדרות מס: נקודות זיכוי ${pointsOf(prof)}${prof.deduct ? `, ניכויים (פנסיה וכד׳) ${prof.deduct}` : ''}${prof.advRate ? `, אחוז מקדמות ${prof.advRate}` : ''}.`,
       found?.terms?.length ? 'מונחים מהמערכת: ' + found.terms.map(x => `${x.k}: ${x.text}`).join(' | ') : '',
       'מסכים במערכת (איפה מה נמצא): ' + [...PLACES, ...GLOSSARY].map(x => `${x.k} → ${whereOf(x.go)}`).join('; ')].filter(Boolean).join('\n');
     const id = uid('job');
@@ -3369,7 +3370,7 @@ function CoachView({ books, datas, loading, user, flash }) {
   const prof = lsGet(TAX_PROFILE_KEY, {}) || {};
   const ytd = L.reduce((a, x) => a + totals(x.L, ym.slice(0, 4) + '-01', ym).profit, 0);
   const share = Math.max(0.08, yearShare());
-  const tf = taxForecast(ytd / share, { points: Number(prof.points) || 2.25 });
+  const tf = taxForecast(ytd / share, { points: pointsOf(prof) });
   const taxMonthly = r2(tf.total / 12), vatMonth = r2(Math.max(0, cur.vatDue));
   const reserveNeed = r2(taxMonthly + vatMonth), reserved = Number(c.reserved?.[ym]) || 0;
 
@@ -5627,6 +5628,8 @@ function niOf(annual) {
   const ni = 12 * (low * n.niLow + high * n.niHigh), health = 12 * (low * n.hLow + high * n.hHigh);
   return { ni, health, total: ni + health, deduct: ni * n.deductible };
 }
+/* Credit points as the user typed them ("2.75", "2,5", or empty while typing): a number, 2.25 when empty or not a number. */
+const pointsOf = (prof) => { const v = parseFloat(String(prof?.points ?? '').replace(',', '.')); return isNaN(v) ? 2.25 : Math.min(30, Math.max(0, v)); };
 function taxForecast(profit, { points = 2.25, other = 0, company = false } = {}) {
   const p = Math.max(0, profit);
   if (company) { const tax = p * TAX.company; return { company: true, profit: p, tax, ni: 0, health: 0, total: tax, rate: p ? tax / p : 0 }; }
@@ -5662,7 +5665,7 @@ function TaxForecast({ book, rows, onLoad, compact }) {
   const tid = digitsOf(book.taxId) || book.id, advKey = `${tid}:${y}`;
   /* Two payees, two sets of advances: the Tax Authority, and Bituach Leumi. */
   const blKey = `${advKey}:bl`;
-  const points = prof.points ?? 2.25, adv = Number(prof.adv?.[advKey]) || 0, advBl = Number(prof.adv?.[blKey]) || 0, other = Number(prof.deduct) || 0;
+  const points = pointsOf(prof), adv = Number(prof.adv?.[advKey]) || 0, advBl = Number(prof.adv?.[blKey]) || 0, other = Number(prof.deduct) || 0;
   const f = taxForecast(base, { points, other, company });
   const dueNow = mode === 'year' ? f.total : f.total;
   const bl = company ? 0 : f.ni + f.health;
@@ -5714,7 +5717,9 @@ function TaxForecast({ book, rows, onLoad, compact }) {
         <L l="סה״כ" v={f.total} b c="var(--green)" />
       </div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(170px,100%),1fr))', gap: 10, marginTop: 12 }}>
-        {!company && <Field label="נקודות זיכוי"><input inputMode="decimal" value={prof.points ?? 2.25} onChange={e => save({ points: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>}
+        {!company && <Field label="נקודות זיכוי"><input inputMode="decimal" value={prof.points ?? 2.25} placeholder="2.25"
+          onChange={e => { const v = e.target.value.replace(/[^\d.,]/g, ''); save({ points: v }); }}
+          onBlur={e => { const v = e.target.value.trim(); save({ points: v === '' ? 2.25 : pointsOf({ points: v }) }); }} /></Field>}
         <Field label={`מקדמות ${company ? 'מס' : 'מס הכנסה'} ששולמו ב-${y}`}><input inputMode="decimal" value={prof.adv?.[advKey] ?? ''} placeholder="0" onChange={e => save({ adv: { ...(prof.adv || {}), [advKey]: e.target.value } })} /></Field>
         {!company && <Field label={`מקדמות ביטוח לאומי ששולמו ב-${y}`}><input inputMode="decimal" value={prof.adv?.[`${advKey}:bl`] ?? ''} placeholder="0" onChange={e => save({ adv: { ...(prof.adv || {}), [`${advKey}:bl`]: e.target.value } })} /></Field>}
         {!company && <Field label="ניכויים בשנה (פנסיה, השתלמות)"><input inputMode="decimal" value={prof.deduct ?? ''} placeholder="0" onChange={e => save({ deduct: e.target.value })} /></Field>}
@@ -5750,7 +5755,7 @@ function authReport(rows, period, prof, tid) {
   const company = isCompanyId(tid);
   /* The year so far, carried to a full year, for estimates. */
   const share = Math.max(0.08, Math.min(1, ytdTo === thisMonth() ? yearShare() : nMonths(`${y}-01`, ytdTo) / 12));
-  const f = taxForecast(sum.ytdProfit / share, { points: prof.points ?? 2.25, other: Number(prof.deduct) || 0, company });
+  const f = taxForecast(sum.ytdProfit / share, { points: pointsOf(prof), other: Number(prof.deduct) || 0, company });
   const rateIn = Number(prof.advRate?.[tid]);
   const estRate = sum.ytdTurn > 0 ? f.tax / (sum.ytdTurn / share) : 0;
   const advRate = rateIn > 0 ? rateIn / 100 : estRate;
