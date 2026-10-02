@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.45.0';
+const VERSION = '1.45.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -691,6 +691,27 @@ function SegSettings({ book, flash, data, siblings = [], onMerge }) {
   </div>);
 }
 
+/* Undoing a merge: what was copied from the merged business is removed from
+   the business it went into (each copy carries mergedFrom), the store link and
+   lines go back to how they were, and the merged business shows again. */
+async function unmergeBook(sib, target, onStep) {
+  const tid = target.id;
+  for (const k of ['suppliers', 'items', 'incomes', 'expenses', 'banktx', 'recurring', 'retainers', 'standing', 'customers']) {
+    onStep?.(k);
+    const list = await withTimeout(bookCol(tid, k).list(), 30000);
+    for (const r of list.filter(r => r.mergedFrom === sib.id)) await withTimeout(bookCol(tid, k).del(r.id), 15000);
+  }
+  onStep?.('היסטוריית מסמכים');
+  const arch = await withTimeout(bookCol(tid, 'archive').list(), 30000);
+  const have = archiveDocs(arch), keep = have.filter(d => d.mergedFrom !== sib.id);
+  if (keep.length !== have.length) await archiveWrite(tid, keep, arch);
+  const prev = sib.mergePrev;
+  const patch = prev ? { tenant: prev.tenant, storeSeg: prev.storeSeg, segs: prev.segs, segDefault: prev.segDefault }
+    : (sib.tenant && target.tenant === sib.tenant ? { tenant: '' } : {});
+  if (Object.keys(patch).length) { await DB.patch('books', tid, patch); Object.assign(target, patch); }
+  await DB.patch('books', sib.id, { mergedInto: '', mergedAt: '', unmergedAt: new Date().toISOString() }); sib.mergedInto = '';
+}
+
 /* Merging a business with the same tax id into this one: its records are
    copied here with its line of activity, the store link moves here, and the
    old business is kept (hidden) as it was. Nothing is deleted. A business
@@ -710,7 +731,7 @@ async function mergeLineInto({ main, mainData, sib, sibData, seg, cols, onStep }
   }
   onStep?.('לקוחות…');
   const cp = planCustomers(mainData.customers || [], sibData.customers || [], 'merge');
-  if (cp.add.length + cp.upd.length) await saveCustomers(cols.customers, [...cp.add, ...cp.upd]);
+  if (cp.add.length + cp.upd.length) await saveCustomers(cols.customers, [...cp.add.map(c => ({ ...c, mergedFrom: sib.id })), ...cp.upd]);
   out.customers = cp.add.length;
   /* Imported history (from iCount): into this business's pack, without what it already has. */
   onStep?.('היסטוריית מסמכים…');
@@ -719,12 +740,13 @@ async function mergeLineInto({ main, mainData, sib, sibData, seg, cols, onStep }
   const docs = (sibData.documents || []).filter(d => d.series === 'import' && !mine.has(key(d))).map(({ _arch, ...d }) => ({ ...d, seg: d.seg || seg, mergedFrom: sib.id }));
   out.documents = docs.length ? await archiveAdd(main.id, {}, docs) : 0;
   onStep?.('חיבור לחנות…');
+  const prev = { tenant: main.tenant || '', storeSeg: main.storeSeg || '', segs: segsOf(main), segDefault: main.segDefault || '' };
   const patchMain = { segs: [...new Set([...(segsOf(main).length ? segsOf(main) : SEG_DEF), seg])] };
   if (!segsOf(main).includes(main.segDefault)) patchMain.segDefault = patchMain.segs[0];
   if (sib.tenant && !main.tenant) { patchMain.tenant = sib.tenant; patchMain.storeSeg = seg; }
   else if (sib.tenant) patchMain.storeSeg = seg;
   await DB.patch('books', main.id, clean(patchMain)); Object.assign(main, patchMain);
-  await DB.patch('books', sib.id, { mergedInto: main.id, mergedAt: new Date().toISOString(), mergedSeg: seg }); sib.mergedInto = main.id;
+  await DB.patch('books', sib.id, { mergedInto: main.id, mergedAt: new Date().toISOString(), mergedSeg: seg, mergePrev: prev }); sib.mergedInto = main.id;
   return out;
 }
 function MergeBox({ main, mainData, sib, sibData, cols, flash, onClose, onDone }) {
@@ -741,6 +763,8 @@ function MergeBox({ main, mainData, sib, sibData, cols, flash, onClose, onDone }
     <div className="mg-mod-b">
       {!sibData && <div className="mg-empty">טוען את "{sib.name}"…</div>}
       {sibData && !done && <>
+        <div className="mg-note warn" style={{ marginBottom: 10 }}>⚠ <b>"{main.name}" נשאר העסק הראשי.</b> "{sib.name}" יוסתר מהתפריט (כל הנתונים שלו נשמרים, ואפשר לבטל את האיחוד).
+          {(sibData.documents || []).length > (mainData.documents || []).length && <> שים לב: ב"{sib.name}" יש יותר מסמכים מאשר כאן. אם הוא העסק המרכזי, בטל, פתח את "{sib.name}" ואחד משם.</>}</div>
         <p className="coach-p" style={{ marginTop: 0 }}>הרשומות של "{sib.name}" יועתקו לכאן ויסומנו בתחום שתבחר. {sib.tenant ? 'החיבור לחנות יעבור לכאן, וההזמנות מהאתר ייכנסו לתחום הזה. ' : ''}"{sib.name}" עצמו לא נמחק: הוא נשאר כמו שהוא, מוסתר מהתפריט.</p>
         <ul className="merge-list">
           <li>הכנסות ידניות: {count('incomes')} · הוצאות: {count('expenses')} · ספקים: {count('suppliers')} · פריטים: {count('items')}</li>
@@ -1034,6 +1058,7 @@ li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
 .sg-col small{font-size:11px;color:var(--muted)}.seg-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:13px}.seg-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-inline-end:4px}
 .seg-edit{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.seg-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:99px;background:#fff;padding:2px 4px 2px 10px}
 .seg-pill input{border:0;background:transparent;width:110px;padding:4px 2px;font:inherit;min-width:0}.seg-pill button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:14px}.seg-pill.add{border-style:dashed}
+.side button.bk.merged{opacity:.6}.side button.bk.merged .lbl::after{content:' · אוחד';font-size:.8em;color:var(--muted)}
 .merge-list{margin:6px 0 12px;padding-inline-start:18px;font-size:14px;line-height:1.8}
 .collect{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.collect > *{min-width:0}
 .col-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}.col-acts{display:flex;gap:6px}
@@ -1553,6 +1578,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.45.1', date: '02.10.26', items: ['עסק שאוחד לא נעלם מהתפריט: הוא מסומן "אוחד", הנתונים שלו שמורים, ובפתיחתו יש כפתור "↩ בטל את האיחוד" שמסיר את העותקים מהעסק השני ומחזיר הכל כמו שהיה.', 'בחלון האיחוד כתוב במפורש איזה עסק נשאר ואיזה מוסתר, ואזהרה כשבעסק שמוסתר יש יותר מסמכים.'] },
   { v: '1.45.0', date: '02.10.26', items: ['🧩 תחומי פעילות: עסק אחד (מספור אחד, מע״מ אחד, קובץ מבנה אחיד אחד) עם תחומים: קליניקה, צמחים, חנות מקוונת, קורסים. לכל תחום הכנסות, הוצאות ורווח, וגרף של 12 חודשים (לשונית תחומים).', 'שיוך אוטומטי: הזמנות מהאתר לחנות המקוונת; מסמך לפי הפריטים או מילים בשורות (למשל צמח, פורמולה, תמצית לצמחים), גם במסמכים מ-iCount; הוצאה לפי הספק, או למשותף. אפשר לבחור תחום בכל מסמך, הוצאה, הכנסה, פריט וספק.', '"נמכר בקליניקה לפי פריט": מה יצא מהמלאי בלי לעבור באתר, לעדכון ידני של המלאי בחנות.', 'איחוד עסקים עם אותו מספר עוסק (הגדרות העסק ← תחומי פעילות): הרשומות מועתקות עם התחום שלהן, החיבור לחנות עובר, והעסק הישן נשאר מוסתר כמו שהיה. נחסם אם בעסק השני יש מסמכים אמיתיים במספור משלו.'] },
   { v: '1.44.1', date: '02.10.26', items: ['נקודות זיכוי: אפשר להקליד מספר עם נקודה עשרונית (2.75) או פסיק (2,5), ולמחוק ולהקליד מחדש. שדה ריק כבר לא מאפס את הזיכוי בחישוב, אלא נחשב 2.25.'] },
   { v: '1.44.0', date: '02.10.26', items: ['🔎 חיפוש ושאלות (בתפריט הצד, או Ctrl+K מכל מקום): מחפשים מסמך, לקוח, סכום, הוצאה, ספק או פריט בכל העסקים; מונחים (נקודות זיכוי, מקדמות, ניכוי במקור…) עם הסבר וקישור למקום במערכת; ואיפה נמצא כל דבר.', 'כל שאלה אחרת נשלחת למאמן (🤖 שאל, או במיקרופון), והוא עונה לפי המספרים וההגדרות שלך ומפנה למסך המתאים.'] },
@@ -2332,8 +2358,8 @@ function App() {
         {(books || []).some(b => roleOf(b, user.email) === 'owner') && <button className={'bk' + (cur === 'launch' ? ' on' : '')} onClick={() => setCur('launch')} title="מסלול השקה">
           <span className="ic">🚀</span><span className="lbl">מסלול השקה</span></button>}
         <div data-tour="side-books" className="sec">העסקים</div>
-        {(books || []).filter(b => !b.mergedInto || cur === b.id).map(b => (
-          <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '')} onClick={() => setCur(b.id)} title={b.name}>
+        {(books || []).map(b => (
+          <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '') + (b.mergedInto ? ' merged' : '')} onClick={() => setCur(b.id)} title={b.mergedInto ? `${b.name} (אוחד)` : b.name}>
             <span className="ic bk-ini" style={{ background: b.color || '#2f7d5b' }}>{ini(b.name)}</span><span className="lbl">{b.name}</span>
           </button>
         ))}
@@ -2401,7 +2427,9 @@ function App() {
                       siblings={(books || []).filter(b => b.id !== book.id && !b.mergedInto && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId) && roleOf(b, user.email) === 'owner').map(b => ({ book: b, data: datas[b.id] }))}
                       onLoadSiblings={() => (books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId)).forEach(b => ensure(b))}
                       user={user} onGlobal={(v) => setCur(v)} onServer={() => serverStatus(true).then(setServer)}
-                      onOpenBook={(id) => setCur(id)} /></SegCtx.Provider>
+                      onOpenBook={(id) => setCur(id)} mergedName={(books || []).find(x => x.id === book.mergedInto)?.name || ''}
+                      onUnmerge={async (sib, step) => { const target = (books || []).find(x => x.id === sib.mergedInto); if (!target) throw new Error('העסק המאוחד לא נמצא');
+                        await unmergeBook(sib, target, step); setDatas({}); refreshBooks(); }} /></SegCtx.Provider>
           : <div className="mg-empty">טוען את {book.name}…</div>)}
       </main>
 
@@ -4270,8 +4298,9 @@ function PayPagesTab({ book, data, payOk, server, role, ro, flash, onCreated, on
   );
 }
 
-function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings, user, onGlobal, onServer, onOpenBook }) {
+function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings, user, onGlobal, onServer, onOpenBook, onUnmerge, mergedName }) {
   const [merge, setMerge] = useState(null);
+  const [unBusy, setUnBusy] = useState('');
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
@@ -4491,8 +4520,12 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
 
   return (
     <div className={ro ? 'ro' : ''}>
-      {book.mergedInto && <div className="mg-note warn" style={{ marginBottom: 12 }}>העסק הזה אוחד לתוך עסק אחר ומוצג כאן כמו שהיה, לעיון.{' '}
-        {onOpenBook && <button className="mg-btn sm" onClick={() => onOpenBook(book.mergedInto)}>לעסק המאוחד</button>}</div>}
+      {book.mergedInto && <div className="mg-note warn" style={{ marginBottom: 12 }}><b>העסק הזה אוחד לתוך "{mergedName || 'עסק אחר'}".</b> כל הנתונים שלו שמורים כאן כמו שהיו; עותק שלהם הועבר לשם.{' '}
+        {onOpenBook && <button className="mg-btn sm" onClick={() => onOpenBook(book.mergedInto)}>לעסק המאוחד</button>}{' '}
+        {role === 'owner' && onUnmerge && <button className="mg-btn sm" style={{ background: '#b3412f' }} disabled={!!unBusy} onClick={async () => {
+          if (!window.confirm(`לבטל את האיחוד? העותקים שהועברו ל"${mergedName || 'העסק השני'}" יוסרו משם, והעסק הזה יחזור לתפריט כמו שהיה.`)) return;
+          setUnBusy('…'); try { await onUnmerge(book, setUnBusy); flash('האיחוד בוטל'); } catch (e) { flash('הביטול נכשל · ' + (e?.message || e)); } setUnBusy(''); }}>
+          {unBusy ? `מבטל… ${unBusy}` : '↩ בטל את האיחוד'}</button>}</div>}
       {ro && <div className="mg-note" style={{ marginBottom: 12 }}><b>צפייה בלבד.</b> אפשר לראות, להדפיס ולייצא. הפקה ושינויים שמורים לבעלי העסק.</div>}
       <div data-tour="book-head" className="mg-h" style={{ '--h1': book.color || '#8a6331', '--h2': '#c4a36e' }}>
         <div><h2>{book.name}</h2>
