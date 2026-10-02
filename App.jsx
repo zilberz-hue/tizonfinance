@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.39.1';
+const VERSION = '1.39.2';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1247,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.39.2', date: '02.10.26', items: ['מסמך שנחתם דיגיטלית נושא חותמת נראית: "🔏 חתום דיגיטלית" עם שם בעל התעודה, במקום שורת החתימה. החתימה עצמה בתוך הקובץ, ורואים אותה ב-Adobe Reader.'] },
   { v: '1.39.1', date: '02.10.26', items: ['PDF של מסמך: עמוד אחד כשהמסמך נכנס בעמוד (בלי עמוד שני ריק).'] },
   { v: '1.39.0', date: '02.10.26', items: ['שם חדש: Tizon Finance · הנהלת חשבונות, חשבוניות וליווי פיננסי למטפלים. השם מופיע במסך, במסמכים, במיילים, בדוחות ובקובצי המבנה האחיד. הנתונים, הכתובת והגיבויים לא השתנו.'] },
   { v: '1.38.1', date: '02.10.26', items: ['חתימה דיגיטלית: כפתור "✨ צור תעודה עצמית" יוצר תעודה בשרת (המפתח לא יוצא ממנו), וכל PDF נחתם מיד. מסומנת כתעודה עצמית עד שמעלים תעודה מגורם מאשר.'] },
@@ -5146,7 +5147,7 @@ function openOf(inv, docs) {
 }
 
 /* ------------------------------------------------------------------ print */
-function docHTML(book, d, copy) {
+function docHTML(book, d, copy, signer) {
   const T = DOC_TYPES[d.type] || {};
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const m = (n) => '₪' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -5168,6 +5169,7 @@ table{width:100%;border-collapse:collapse;margin:10px 0}th{background:#f1e8d6;te
 .ref,.notes{margin:10px 0;padding:8px 12px;background:#faf6ee;border-radius:6px}
 .foot{margin-top:28px;border-top:1px solid #ddd;padding-top:8px;color:#888;font-size:11px;display:flex;justify-content:space-between}
 .sign{margin-top:36px;width:220px;border-top:1px solid #444;padding-top:4px;text-align:center;color:#555}
+.dsig{display:inline-flex;align-items:center;gap:8px;margin-top:22px;border:2px solid #2f5d46;color:#2f5d46;border-radius:10px;padding:7px 12px;font-size:12px;line-height:1.5}.dsig b{font-size:13px}
 .wm{position:fixed;top:40%;left:0;right:0;text-align:center;transform:rotate(-24deg);font-size:54px;font-weight:800;color:rgba(200,40,40,.13);pointer-events:none}
 </style></head><body>
 ${d.series === 'test' ? '<div class="wm">מסמך ניסיון · לא לצורכי מס</div>' : ''}
@@ -5186,7 +5188,7 @@ ${T.pay && pays ? `<h3 style="margin:18px 0 0;font-size:15px">פרטי התשל�
 ${d.withholding ? `<div class="tot"><div><span>ניכוי במקור</span><span>${m(d.withholding)}</span></div></div>` : ''}
 ${!T.lines ? `<div class="tot"><div class="g"><span>סה״כ התקבל</span><span>${m(d.total)}</span></div></div>` : ''}` : ''}
 ${d.notes ? `<div class="notes">${esc(d.notes)}</div>` : ''}
-<div class="sign">חתימה</div>
+${signer ? `<div class="dsig"><span style="font-size:20px">🔏</span><span><b>חתום דיגיטלית</b><br>${esc(signer.name || '')}${signer.self ? ' · תעודה עצמית' : ''} · ${esc(new Date().toLocaleDateString('he-IL'))}</span></div>` : '<div class="sign">חתימה</div>'}
 <div class="foot">${isImported(d) ? `<span>העתק של מסמך שהופק במקור ב-iCount · הודפס מ-Tizon Finance ${VERSION} · ${esc(new Date().toLocaleString('he-IL'))}</span><span></span>`
   : `<span>הופק ב-Tizon Finance ${VERSION} · ${esc(new Date(d.createdAt).toLocaleString('he-IL'))}</span><span>קוד אימות ${esc(d.stamp || '')}</span>`}</div>
 </body></html>`;
@@ -5266,7 +5268,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
   /* A PDF: signed when the certificate is set up, plain otherwise. */
   /* The document as a PDF: signed when the certificate is set up. */
   const makePdf = async (d) => {
-    const raw = await docPDF(book, d, isCopy(d));
+    const raw = await docPDF(book, d, isCopy(d), canSign ? (server.cert || { name: book.legalName || book.name }) : null);
     let bytes = new Uint8Array(raw);
     if (canSign) {
       const r = await fnCall({ action: 'doc', pdf: b64(raw), title: docTitle(d), business: book.legalName || book.name, businessEmail: book.email || '' });
@@ -5308,7 +5310,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim())) { flash('כתובת האימייל לא תקינה'); return false; }
     setBusyId(d.id);
     try {
-      const raw = await docPDF(book, d, (d.printCount || 0) > 0);
+      const raw = await docPDF(book, d, (d.printCount || 0) > 0, server?.cert || { name: book.legalName || book.name });
       await fnCall({ action: 'doc', pdf: b64(raw), to, replyTo: book.email || '', filename: pdfName(d),
         title: docTitle(d), business: book.legalName || book.name, businessEmail: book.email || '',
         subject: `${docTitle(d)} · ${book.legalName || book.name}`,
@@ -5755,12 +5757,12 @@ const unb64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
 /* A real PDF of a document, drawn from the same page that is printed. The
    libraries load only when a PDF is asked for. */
-async function docPDF(book, d, copy) {
+async function docPDF(book, d, copy, signer) {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')]);
   const f = document.createElement('iframe');
   f.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;background:#fff';
   document.body.appendChild(f);
-  f.contentDocument.open(); f.contentDocument.write(docHTML(book, d, copy)); f.contentDocument.close();
+  f.contentDocument.open(); f.contentDocument.write(docHTML(book, d, copy, signer)); f.contentDocument.close();
   await new Promise(r => setTimeout(r, 500));
   const body = f.contentDocument.body;
   body.style.cssText += ';padding:44px;width:794px;background:#fff';
