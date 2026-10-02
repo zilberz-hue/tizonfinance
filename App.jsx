@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.35.2';
+const VERSION = '1.35.3';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -167,6 +167,7 @@ const remote = {
   },
 };
 const DB = cloud ? remote : local;
+const quotaMsg = 'המכסה היומית של מסד הנתונים (Firebase) נגמרה. היא מתחדשת כל יום ב-10:00 בבוקר. כדי שזה לא יקרה: Firebase ← תוכנית Blaze.';
 /* Firestore's errors, in words. resource-exhausted is the free plan's daily quota. */
 const dbErr = (e) => { const c = e?.code || '';
   if (/resource-exhausted/.test(c) || /quota/i.test(e?.message || '')) return 'המכסה היומית של מסד הנתונים (Firebase) נגמרה. היא מתחדשת כל יום ב-10:00 בבוקר; עד אז אי אפשר לשמור. כדי שזה לא יקרה: Firebase ← תוכנית Blaze (תשלום לפי שימוש, בפועל אגורות).';
@@ -1201,6 +1202,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.35.3', date: '02.10.26', items: ['iCount: כשהמכסה היומית של Firebase נגמרת, ההודעה אומרת את זה במקום "עומס ב-Google".'] },
   { v: '1.35.2', date: '02.10.26', items: ['המאמן החכם: הודעת שגיאה ברורה כשאין יתרה בחשבון Anthropic, כשהשרתים עמוסים או כששם המודל לא מוכר, עם ההודעה המקורית מ-Anthropic.'] },
   { v: '1.35.1', date: '02.10.26', items: ['המאמן החכם: שדה מפתח ה-API מופיע תמיד, גם לפני שכל הנתונים נטענו ואם השרת לא ענה; כפתור 🤖 בראש מסך המאמן קופץ אליו.'] },
   { v: '1.35.0', date: '01.10.26', items: ['🤖 המאמן החכם (במסך המאמן): שיחה עם Claude על המספרים שלך, ושאלות מוכנות בלחיצה.', 'תוכניות 90 יום לפי תחום: הקליניקה, החנות, קורסים, Tizon Health, שיווק, אוברדרפט ותזרים, וקיצוץ הוצאות. נשמרות, מתעדכנות ומודפסות.', 'עובד עם מפתח API של Anthropic שנשמר רק בשרת.'] },
@@ -3499,7 +3501,8 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
     } catch (e) {
       const m = String(e?.message || e);
       const err = m === 'icount-not-linked' ? 'iCount לא מחובר לעסק הזה (⚙ הגדרות ← iCount)'
-        : m === 'owners only' || m === 'not allowed' ? 'השרת לא זיהה אותך כבעל העסק (ייתכן עומס זמני ב-Google). נסה שוב בעוד כמה דקות.'
+        : (m === 'owners only' || m === 'not allowed') && /429|RESOURCE_EXHAUSTED|[Qq]uota/.test(JSON.stringify(e?.body?.detail || '')) ? quotaMsg
+        : m === 'owners only' || m === 'not allowed' ? 'השרת לא הצליח לבדוק שאתה בעל העסק. אם גם שמירה במערכת נכשלת, המכסה היומית של Firebase נגמרה (מתחדשת ב-10:00). אחרת נסה שוב בעוד כמה דקות.'
         : /auth|token|401|unauthori|invalid_(api|key|user)/i.test(m) ? 'iCount דחה את המפתח. צריך מפתח API חדש (⚙ הגדרות ← iCount).'
         : 'המשיכה מ-iCount נכשלה · ' + m;
       await DB.patch('books', book.id, { icountErr: err, icountErrAt: new Date().toISOString() }).catch(() => {});
