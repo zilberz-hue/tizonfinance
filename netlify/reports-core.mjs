@@ -3,8 +3,8 @@
    Three reports, each a picture of where the business stands:
      daily    every evening (20:00 Israel time by default): today's income and
               expenses, and the month so far
-     weekly   Friday morning: the last seven days (Friday to Thursday), against
-              the week before, and the month so far
+     weekly   Sunday morning: last week, Sunday to Saturday, against the week
+              before, and the month so far
      monthly  the 1st of the month: last month, against the month before, and
               the year so far
    One email per person, with every business they get reports for. Nothing
@@ -38,9 +38,9 @@ export function periodsFor(kind, today) {
   if (kind === 'daily') return { kind, key: 'd:' + today, from: today, to: today, title: `דוח יומי · ${heDate(today)}`,
     ctx: [{ label: `${monthName(ym)} עד היום`, from: ym + '-01', to: today }] };
   if (kind === 'weekly') {
-    /* The seven days that end on the Thursday before (or on) today. */
-    const back = (new Date(today + 'T12:00:00Z').getUTCDay() + 7 - 4) % 7;
-    const to = addDays(today, back === 0 ? -7 : -back), from = addDays(to, -6);
+    /* The last full week, Sunday to Saturday, before today. */
+    const dow = new Date(today + 'T12:00:00Z').getUTCDay();
+    const to = addDays(today, -(dow + 1)), from = addDays(to, -6);
     return { kind, key: 'w:' + to, from, to, title: `דוח שבועי · ${heDate(from)} – ${heDate(to)}`,
       cmp: { label: 'שבוע קודם', from: addDays(from, -7), to: addDays(to, -7) },
       ctx: [{ label: `${monthName(to.slice(0, 7))} עד ${heDate(to)}`, from: to.slice(0, 7) + '-01', to }] };
@@ -52,12 +52,12 @@ export function periodsFor(kind, today) {
 }
 
 /* Which reports are due at this hour. A missed hour is caught up later the
-   same day (daily) or the next day (weekly on Saturday, monthly on the 2nd). */
+   same day (daily) or the next day (weekly on Monday, monthly on the 2nd). */
 export function dueKinds(now, cfg) {
   const { date, hour, dow } = ilNow(now);
   const out = [];
   if (cfg.daily && hour >= (Number(cfg.hour) || 20)) out.push(periodsFor('daily', date));
-  if (cfg.weekly && ((dow === 5 && hour >= 8) || dow === 6)) out.push(periodsFor('weekly', date));
+  if (cfg.weekly && ((dow === 0 && hour >= 8) || dow === 1)) out.push(periodsFor('weekly', date));
   const day = Number(date.slice(8, 10));
   if (cfg.monthly && ((day === 1 && hour >= 8) || day === 2)) out.push(periodsFor('monthly', date));
   return out;

@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.46.0';
+const VERSION = '1.46.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1586,6 +1586,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.46.1', date: '02.10.26', items: ['דוח שבועי: שבוע מלא מראשון עד שבת (במקום שישי עד חמישי). במייל ובחלון הוא מגיע ביום ראשון בבוקר על השבוע שעבר; בלשונית "השבוע" רואים את השבוע הנוכחי מראשון.'] },
   { v: '1.46.0', date: '02.10.26', items: ['📎 צירוף קבצים למאמן: תמונה, צילום מסך (אפשר להדביק עם Ctrl+V), PDF, אקסל או טקסט. תמונה מכווצת כבר במכשיר (למשל מ-3 MB לכ-300 KB) לפני השליחה, ורואים כמה.', 'המאמן מנתח את הקובץ: למשל צילום של רישום שגוי, והוא אומר מה לא תקין, למה, ואיך מתקנים (איזה מסך, איזה שדה, מה הערך הנכון).'] },
   { v: '1.45.3', date: '02.10.26', items: [
     'רווח שלילי (הפסד) מוצג בשורה אחת עם סימן המינוס. בכרטיס צר המינוס ירד לשורה נפרדת ונראה כמו סכום חיובי.',
@@ -1791,7 +1792,7 @@ const TOURS = {
     { t: 'coach-checkin', title: 'פגישת החודש', text: 'כמה שורות בתחילת כל חודש: מה עבד, מה לא, ומה עושים עכשיו.', since: '1.34.0' },
   ],
   dash: [
-    { t: 'hdr-reports', title: 'דוחות', text: 'הכנסות והוצאות של היום, השבוע או החודש, מול התקופה הקודמת. הדוח נפתח גם לבד בערב, ביום שישי וב-1 לחודש, ונשלח במייל.', since: '1.33.0' },
+    { t: 'hdr-reports', title: 'דוחות', text: 'הכנסות והוצאות של היום, השבוע או החודש, מול התקופה הקודמת. הדוח נפתח גם לבד בערב, ביום ראשון (השבוע שעבר, ראשון עד שבת) וב-1 לחודש, ונשלח במייל.', since: '1.33.0' },
     { t: 'book-head', title: 'הספר של העסק', text: 'סוג העוסק, מספר העוסק ושיעור המע״מ. מכאן גם עורכים את פרטי העסק.', since: '1.0.0' },
     { t: 'book-tabs', title: 'הלשוניות', text: 'כל עבודת העסק כאן: מסמכים, לקוחות, פריטים, הכנסות, הוצאות, בנק, מע״מ, רווח והפסד ורשות המסים.', since: '1.0.0' },
     { t: 'dash-month', title: 'חודש', text: 'בוחרים חודש והמספרים מתעדכנים.', since: '1.0.0' },
@@ -4072,7 +4073,7 @@ function SetRow({ icon, title, ok, status, children, onOpen, open }) {
   );
 }
 /* ------------------------------------------------------- business reports
-   The day, the week (Friday to Thursday) and the month at a glance: what came
+   The day, the week (Sunday to Saturday) and the month at a glance: what came
    in, what went out, where from and on what, against the period before and
    with the month or year so far. Shown here as a pop-up when one is due, and
    sent by email from the server (netlify/reports-core.mjs, the same rules). */
@@ -4094,7 +4095,7 @@ function repPeriod(kind, n) {
              ctx: { label: `${monthLabel(d.slice(0, 7))} עד ${heDate(d)}`, from: d.slice(0, 7) + '-01', to: d } };
   }
   if (kind === 'weekly') {
-    const end0 = addDaysIso(today, (4 - dowOf(today) + 7) % 7);          // the Thursday that closes this week
+    const end0 = addDaysIso(today, 6 - dowOf(today));                  // the Saturday that closes this week (Sunday to Saturday)
     const to = addDaysIso(end0, -7 * n), from = addDaysIso(to, -6);
     return { kind, key: 'w:' + to, from, to, title: `${n === 0 ? 'השבוע · ' : ''}${heDate(from)} – ${heDate(to)}`,
              cmp: { label: 'שבוע קודם', from: addDaysIso(from, -7), to: addDaysIso(to, -7) },
@@ -4117,7 +4118,7 @@ function repSummary(ledger, from, to) {
            profit: r2((ig - iv) - (eg - ev)), vatDue: r2(iv - ev), topCust: top(inc, who, 6), byCat: top(exp, e => e.cat || 'אחר', 6) };
 }
 /* Which report to show by itself now, if any: the month in its first week,
-   the week on Friday and Saturday, the day in the evening (or yesterday's,
+   the week on Sunday and Monday, the day in the evening (or yesterday's,
    the next morning). Each once. */
 function repDue(book, ledger) {
   const cfg = { hour: 20, ...(book.reports || {}) };
@@ -4127,7 +4128,7 @@ function repDue(book, ledger) {
   const busy = (p) => { const r = repSummary(ledger, p.from, p.to); return r.inc.count + r.exp.count > 0; };
   const cands = [];
   if (cfg.monthly !== false && day <= 7) cands.push(['monthly', 1]);
-  if (cfg.weekly !== false && (dow === 5 || dow === 6)) cands.push(['weekly', 1]);
+  if (cfg.weekly !== false && (dow === 0 || dow === 1)) cands.push(['weekly', 1]);
   if (cfg.daily !== false && h >= (Number(cfg.hour) || 20)) cands.push(['daily', 0]);
   if (cfg.daily !== false && h < 12) cands.push(['daily', 1]);
   /* One pop-up at a time: the biggest report due opens, and the others due with
@@ -4211,7 +4212,7 @@ function ReportSettings({ book, owner, flash, server }) {
   return (<div style={{ display: 'grid', gap: 10 }}>
     <div style={{ display: 'grid', gap: 6 }}>
       {ck('daily', 'דוח יומי בערב: הכנסות והוצאות של היום, והחודש עד היום')}
-      {ck('weekly', 'דוח שבועי ביום שישי בבוקר: שישי עד חמישי, מול השבוע הקודם')}
+      {ck('weekly', 'דוח שבועי ביום ראשון בבוקר: השבוע שעבר, ראשון עד שבת, מול השבוע שלפניו')}
       {ck('monthly', 'דוח חודשי ב-1 לחודש: החודש שעבר, מול החודש שלפניו והשנה עד עכשיו')}
       {ck('popup', 'להציג את הדוח גם כחלון קופץ כשנכנסים למערכת')}
     </div>
@@ -4292,7 +4293,7 @@ function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEd
       </SetRow>
 
       <SetRow icon="📊" title="דוחות יומי, שבועי וחודשי" ok={book.reports ? (book.reports.daily !== false || book.reports.weekly !== false || book.reports.monthly !== false) : true} open={open === 'reports'} onOpen={() => tog('reports')}
-              status={(() => { const r = { daily: true, weekly: true, monthly: true, hour: 20, ...(book.reports || {}) }; const on = [r.daily && `יומי ב-${r.hour}:00`, r.weekly && 'שבועי בשישי', r.monthly && 'חודשי ב-1'].filter(Boolean);
+              status={(() => { const r = { daily: true, weekly: true, monthly: true, hour: 20, ...(book.reports || {}) }; const on = [r.daily && `יומי ב-${r.hour}:00`, r.weekly && 'שבועי בראשון', r.monthly && 'חודשי ב-1'].filter(Boolean);
                 return on.length ? `${on.join(' · ')} · במייל${server?.mail ? '' : ' (כשיוגדר מייל)'}${r.popup === false ? '' : ' ובחלון קופץ'}` : 'כבוי'; })()}>
         <ReportSettings book={book} owner={owner} flash={flash} server={server} />
       </SetRow>
