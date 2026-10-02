@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.45.2';
+const VERSION = '1.45.3';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -422,7 +422,10 @@ const BOOK_COLORS = ['#8a6331', '#3f7a2a', '#2b4bb8', '#8a2450', '#35318a', '#1f
 /* ------------------------------------------------------------------ helpers */
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 /* The minus sign stays in front of the shekel sign inside Hebrew text. */
-const fmt = (n) => (r2(n) < 0 ? '\u200E-' : '') + '₪' + Math.abs(r2(n)).toLocaleString('en-US', { maximumFractionDigits: 2 });
+/* The minus is tied to the sum (a word joiner after it): in a narrow card the
+   browser broke the line after "-", and a loss read as "-" on one line and a
+   positive sum on the next. */
+const fmt = (n) => (r2(n) < 0 ? '\u200E-\u2060' : '') + '₪' + Math.abs(r2(n)).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const pad = (n) => String(n).padStart(2, '0');
 /* Dates as the business sees them: Israel time, not UTC (at 01:30 on the 1st
    UTC is still in the previous month, and so would the VAT period be). */
@@ -931,7 +934,7 @@ const CSS = `
 :root{--bg:#f7f3ea;--card:#fff;--ink:#2b2a26;--muted:#6b6557;--line:#e8dfcc;--green:#2f5d27;--green2:#4f8f35;
   --gold:#a8783f;--bronze1:#8a6331;--bronze2:#c4a36e;--warn:#a2680f;--bad:#b3261e;--soft:#f1ece2}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:'Assistant','Segoe UI',system-ui,sans-serif;font-size:15px}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Assistant','Segoe UI',system-ui,sans-serif,'Noto Color Emoji';font-size:15px}
 button,input,select,textarea{font-family:inherit;font-size:14px}
 input,select,textarea{border:1.5px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff;color:var(--ink);width:100%;outline:none}
 input:focus,select:focus{border-color:var(--gold)}
@@ -965,7 +968,7 @@ input:focus,select:focus{border-color:var(--gold)}
 .mg-stat{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--gold);border-radius:16px;padding:16px 18px}
 .mg-stat:nth-child(4n+2){border-top-color:#2b4bb8}.mg-stat:nth-child(4n+3){border-top-color:#d9822b}.mg-stat:nth-child(4n+4){border-top-color:var(--green2)}
 .mg-stat .lb{font-size:13px;font-weight:700;color:var(--muted)}
-.mg-stat .vl{font-size:26px;font-weight:800;margin:6px 0 2px}
+.mg-stat .vl{font-size:26px;font-weight:800;margin:6px 0 2px;unicode-bidi:plaintext}
 .mg-stat .dl{font-size:12px;color:var(--muted)}
 .mg-card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px 20px}
 .mg-card h3{font-size:16px}
@@ -1579,6 +1582,9 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.45.3', date: '02.10.26', items: [
+    'רווח שלילי (הפסד) מוצג בשורה אחת עם סימן המינוס. בכרטיס צר המינוס ירד לשורה נפרדת ונראה כמו סכום חיובי.',
+    'האייקונים בתפריטים ובכפתורים (🧾, 👥 ועוד) מוצגים גם ב-Windows 7, ולא כריבועים ריקים.'] },
   { v: '1.45.2', date: '02.10.26', items: ['כשעולה גרסה חדשה מופיעה הודעה "יש גרסה חדשה" עם כפתור עדכון, בלי לחפש איך לרענן.'] },
   { v: '1.45.1', date: '02.10.26', items: ['עסק שאוחד לא נעלם מהתפריט: הוא מסומן "אוחד", הנתונים שלו שמורים, ובפתיחתו יש כפתור "↩ בטל את האיחוד" שמסיר את העותקים מהעסק השני ומחזיר הכל כמו שהיה.', 'בחלון האיחוד כתוב במפורש איזה עסק נשאר ואיזה מוסתר, ואזהרה כשבעסק שמוסתר יש יותר מסמכים.'] },
   { v: '1.45.0', date: '02.10.26', items: ['🧩 תחומי פעילות: עסק אחד (מספור אחד, מע״מ אחד, קובץ מבנה אחיד אחד) עם תחומים: קליניקה, צמחים, חנות מקוונת, קורסים. לכל תחום הכנסות, הוצאות ורווח, וגרף של 12 חודשים (לשונית תחומים).', 'שיוך אוטומטי: הזמנות מהאתר לחנות המקוונת; מסמך לפי הפריטים או מילים בשורות (למשל צמח, פורמולה, תמצית לצמחים), גם במסמכים מ-iCount; הוצאה לפי הספק, או למשותף. אפשר לבחור תחום בכל מסמך, הוצאה, הכנסה, פריט וספק.', '"נמכר בקליניקה לפי פריט": מה יצא מהמלאי בלי לעבור באתר, לעדכון ידני של המלאי בחנות.', 'איחוד עסקים עם אותו מספר עוסק (הגדרות העסק ← תחומי פעילות): הרשומות מועתקות עם התחום שלהן, החיבור לחנות עובר, והעסק הישן נשאר מוסתר כמו שהיה. נחסם אם בעסק השני יש מסמכים אמיתיים במספור משלו.'] },
@@ -9760,6 +9766,9 @@ style.textContent = CSS;
 document.head.appendChild(style);
 const fonts = document.createElement('link');
 fonts.rel = 'stylesheet';
-fonts.href = 'https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700;800&family=Frank+Ruhl+Libre:wght@500;700&display=swap';
+/* Noto Color Emoji too: Windows 7 has no colour emoji font, and the icons in
+   the menus and buttons (🧾, 👥, 💳…) were empty boxes there. Google serves
+   only the glyphs a page uses. */
+fonts.href = 'https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700;800&family=Frank+Ruhl+Libre:wght@500;700&family=Noto+Color+Emoji&display=swap';
 document.head.appendChild(fonts);
 createRoot(document.getElementById('root')).render(<App />);
