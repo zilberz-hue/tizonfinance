@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.40.0';
+const VERSION = '1.41.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -49,7 +49,7 @@ const lsSet = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED
    send them twice). They are also kept in this browser, so everything keeps
    working offline. The device lock (PIN) follows too, so every device asks
    for the same code. The store is linked for every device on the server. */
-const SYNCED = ['tzbooks_coach', 'tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin', 'tzbooks_taxprofile'];
+const SYNCED = ['tzbooks_coach', 'tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin', 'tzbooks_taxprofile', 'tzbooks_launch'];
 /* Removed on one device, removed on all: kept in the cloud as false. */
 const lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } if (SYNCED.includes(k)) prefPush(k, false); };
 let prefUid = null, prefQueue = {}, prefTimer = null, prefErr = '';
@@ -763,6 +763,29 @@ input:focus,select:focus{border-color:var(--gold)}
 .more-docs-pop{position:absolute;z-index:40;top:calc(100% + 6px);inset-inline-start:0;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 32px rgba(60,40,10,.16);padding:8px;min-width:230px;display:grid;gap:2px}
 .more-docs-pop button{background:none;border:0;text-align:right;padding:9px 12px;border-radius:9px;font:inherit;font-size:15px;cursor:pointer;color:#2c2821}.more-docs-pop button:hover{background:var(--soft)}
 .mdp-h{font-size:12px;font-weight:800;color:var(--muted);padding:8px 12px 2px}.mdp-note{font-size:12px;color:var(--muted);padding:8px 12px 4px;line-height:1.5;max-width:260px}
+.launch{display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}.launch > *{min-width:0}.launch .mg-h{margin-bottom:0}
+.ln-prog{display:flex;flex-direction:column;gap:6px}.ln-bar{height:12px;border-radius:99px;background:#e6edf5;overflow:hidden}.ln-bar i{display:block;height:100%;background:linear-gradient(90deg,#1f4e79,#5b8fc7);border-radius:99px;transition:width .3s}
+.ln-pn{font-size:14px;color:#445}.ln-pn b{font-size:18px;color:#1f4e79}
+.ln-next{margin-top:14px;display:flex;flex-direction:column;gap:6px}.ln-next .lb{font-size:12.5px;color:#667;font-weight:700}
+.launch input[type=checkbox]{width:18px;height:18px;min-width:18px;flex:0 0 18px;margin:0;padding:0}.launch input[type=date]{width:auto}.ln-sh .mg-chip,.ln-due{white-space:nowrap;flex:0 0 auto}
+.ln-nx{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f3f7fb;border-radius:10px;cursor:pointer}.ln-nx span:nth-child(2){flex:1;min-width:0}
+.ln-set{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:14px;font-size:13.5px}.ln-set label{display:flex;align-items:center;gap:6px}
+.ln-week{background:#fbf8ef;border-color:#eadfb8;font-size:14px;line-height:1.6}
+.ln-sh{display:flex;align-items:center;justify-content:space-between;gap:8px}.ln-sh h3{margin:0;font-size:17px;color:#1f4e79}
+.ln-sub{font-size:13px;color:#667;margin:4px 0 10px}
+.ln-list{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column}
+.ln-list li{padding:10px 2px;border-top:1px solid #eef1f4}.ln-list li:first-child{border-top:0}
+.ln-row{display:flex;align-items:flex-start;gap:10px;cursor:pointer}.ln-row input{margin-top:3px;width:18px;height:18px;flex:0 0 auto}
+.ln-t{flex:1;min-width:0;font-weight:600;line-height:1.45}.ln-due{flex:0 0 auto;white-space:nowrap}
+li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
+.ln-w{font-size:13px;color:#5a6470;margin:4px 28px 0 0;line-height:1.5}
+.ln-note{font-size:13px;background:#f3f7fb;border-radius:8px;padding:6px 10px;margin:6px 28px 0 0;white-space:pre-wrap}
+.ln-act{display:flex;gap:6px;margin:6px 28px 0 0}
+.ln-edit{display:flex;flex-direction:column;gap:6px;margin:6px 28px 0 0}.ln-edit textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid #d5dbe2;border-radius:8px}
+.ln-edit label{display:flex;align-items:center;gap:6px;font-size:13px}
+.ln-add{display:flex;flex-wrap:wrap;gap:6px}.ln-add input:first-child{flex:1 1 200px;min-width:0;padding:7px 9px;border:1px solid #d5dbe2;border-radius:8px;font:inherit}
+@media (max-width:640px){.ln-row{flex-wrap:wrap}.ln-t{flex:1 1 calc(100% - 40px)}.ln-due{margin-inline-start:28px}.ln-nx{flex-wrap:wrap}.ln-nx span:nth-child(2){flex:1 1 calc(100% - 40px)}.ln-nx .mg-chip{margin-inline-start:26px}.ln-w,.ln-note,.ln-act,.ln-edit{margin-inline-start:0}}
+@media print{.no-print,.side,.ln-act{display:none!important}.launch .mg-card{break-inside:avoid;box-shadow:none}}
 .coach{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.coach > *,.coach-grid > *{min-width:0}.coach .mg-h{margin-bottom:0}
 .coach-goal .cg-top{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:space-between}
 .coach-goal .lb{font-size:13.5px;color:var(--muted)}.cg-big{font-size:40px;font-weight:900;color:#2f5d46;direction:ltr;unicode-bidi:isolate;line-height:1.15}
@@ -1251,6 +1274,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.41.0', date: '02.10.26', items: ['מסלול השקה (בתפריט הצד, 🚀): צ׳קליסט עם תאריכים מהפיילוט ועד שהקליניקה עובדת על Tizon Finance — הכנה, תיק הרישום ברשות המסים, עבודה במקביל ל-iCount, והמעבר. הערות, שינוי תאריכים ומשימות משלך, מסונכרן לכל המכשירים, ואפשר להדפיס.'] },
   { v: '1.40.0', date: '02.10.26', items: ['מסמכים חדשים ("＋ מסמכים נוספים" בלשונית מסמכים): הצעת מחיר, הזמנה, תעודת משלוח והזמנת רכש. לא מסמכי מס ולא הכנסה; מהם מפיקים חשבונית בלחיצה "→ חשבונית".', 'קבלה על פיקדון (לא נספרת כהכנסה), הפקדת בנק של מזומן וצ׳קים שעוד לא הופקדו, החזרת שיק (פותחת שוב את החוב) וביטול יתרה, מהשורה של המסמך.', 'ריטיינרים: חיוב חודשי קבוע ללקוח. כל חודש הם ממתינים להפקה, ולחיצה אחת מפיקה את כולם.', 'במבנה האחיד נכנסים הזמנה (100), תעודת משלוח (200), הזמנת רכש (500) והפקדת בנק (420) לפי הקודים הרשמיים.'] },
   { v: '1.39.2', date: '02.10.26', items: ['מסמך שנחתם דיגיטלית נושא חותמת נראית: "🔏 חתום דיגיטלית" עם שם בעל התעודה, במקום שורת החתימה. החתימה עצמה בתוך הקובץ, ורואים אותה ב-Adobe Reader.'] },
   { v: '1.39.1', date: '02.10.26', items: ['PDF של מסמך: עמוד אחד כשהמסמך נכנס בעמוד (בלי עמוד שני ריק).'] },
@@ -1803,7 +1827,7 @@ function App() {
     try {
       const b = sortBooks(await withTimeout(listBooks(user.email)));
       setBooks(b); setBooksErr('');
-      if (!['all', 'settings', 'users', 'coach'].includes(cur) && !b.some(x => x.id === cur)) setCur('all');
+      if (!['all', 'settings', 'users', 'coach', 'launch'].includes(cur) && !b.some(x => x.id === cur)) setCur('all');
     } catch (e) {
       setBooks([]);
       setBooksErr(String(e?.code || e?.message || '').includes('permission')
@@ -1996,6 +2020,8 @@ function App() {
           <span className="ic">▦</span><span className="lbl">כל העסקים</span></button>
         {(books || []).some(b => roleOf(b, user.email) === 'owner') && <button data-tour="side-coach" className={'bk' + (cur === 'coach' ? ' on' : '')} onClick={() => setCur('coach')} title="המאמן הפיננסי">
           <span className="ic">🎯</span><span className="lbl">המאמן הפיננסי</span></button>}
+        {(books || []).some(b => roleOf(b, user.email) === 'owner') && <button className={'bk' + (cur === 'launch' ? ' on' : '')} onClick={() => setCur('launch')} title="מסלול השקה">
+          <span className="ic">🚀</span><span className="lbl">מסלול השקה</span></button>}
         <div data-tour="side-books" className="sec">העסקים</div>
         {(books || []).map(b => (
           <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '')} onClick={() => setCur(b.id)} title={b.name}>
@@ -2040,8 +2066,9 @@ function App() {
 
         {cur === 'help' && <HelpView role={tourRole} clerkOnly={tourRole === 'clerk'} onStart={startTour} flash={flash} />}
         {cur === 'users' && books && <UsersView books={books} user={user} flash={flash} onSave={saveBook} />}
-        {cur !== 'settings' && cur !== 'users' && cur !== 'help' && cur !== 'coach' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
+        {cur !== 'settings' && cur !== 'users' && cur !== 'help' && cur !== 'coach' && cur !== 'launch' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
 
+        {cur === 'launch' && <LaunchView flash={flash} />}
         {cur === 'coach' && books && books.length > 0 && <CoachView books={books} datas={datas} loading={loading} user={user} flash={flash} />}
         {cur === 'all' && books && books.length > 0 && (() => {
           /* The financial overview is for owners and viewers; someone who only
@@ -2752,6 +2779,133 @@ function SmartCoach({ summary, flash, partial }) {
         <button className="mg-linkish" onClick={() => { if (window.confirm('להסיר את מפתח ה-API מהשרת?')) saveKey(true); }}>הסר מפתח API</button>
         <span style={{ color: 'var(--muted)' }}>· מודל {st.model}</span></div>
     </>}
+  </div>);
+}
+
+/* ------------------------------------------------------------- launch plan
+   The way from "a pilot" to "the clinic runs on Tizon Finance": a checklist
+   by stages, each step with a target date counted from the day the plan
+   starts. Moving the start date moves every date that was not set by hand.
+   What is done, notes and own steps follow the owner to every device. */
+const LAUNCH_KEY = 'tzbooks_launch';
+const LAUNCH_PLAN = [
+  { id: 's1', title: 'שבוע 1 · מכינים את הקרקע', sub: 'iCount ממשיך להוציא את החשבוניות האמיתיות; ב-Tizon עובדים במקביל ובמצב ניסיון.', steps: [
+    { id: 'l_sim', d: 0, t: 'להריץ שוב את הסימולטור של רשות המסים על קובץ דוגמה חדש', w: 'עסק ← רשות המסים ← "🧪 הפק קובץ דוגמה לרישום", ולהעלות לסימולטור. כולל עכשיו גם הזמנה, תעודת משלוח, הזמנת רכש והפקדה.' },
+    { id: 'l_mode', d: 0, t: 'כלל עבודה: חשבונית או קבלה אמיתית למטופל יוצאות רק מ-iCount', w: 'ב-Tizon מסמכי מס רק במצב ניסיון. הצעות מחיר, הזמנות, ריטיינרים ומעקב תשלומים מותר כבר עכשיו.' },
+    { id: 'l_icount', d: 1, t: 'לוודא שהמסמכים של הקליניקה מ-iCount נמשכים ל-Tizon', w: 'עסק ← הכנסות: כל חשבוניות החודש מופיעות, והסכומים זהים ל-iCount.' },
+    { id: 'l_sasson', d: 1, t: 'לקבוע פגישה עם ששון דהרי', w: 'להראות לו את התוכנה ואת דוח הסימולטור, ולבקש שילווה את הרישום ואת המעבר.' },
+    { id: 'l_open', d: 2, t: 'להזין יתרות פתיחה', w: 'יתרת הבנק והאוברדרפט (המאמן ← חשבונות וחובות), וחובות פתוחים של מטופלים.' },
+    { id: 'l_fixed', d: 3, t: 'להגדיר הוצאות קבועות וקטגוריות', w: 'שכירות, טלפון, תוכנות, ביטוחים. כך המאמן והתזרים רואים את כל החודש.' },
+    { id: 'l_ret', d: 3, t: 'להגדיר ריטיינרים למטופלים בליווי חודשי', w: 'מסמכים ← "＋ מסמכים נוספים" ← ריטיינרים. עד המעבר מפיקים מהם רק מסמכי ניסיון.' },
+    { id: 'l_rep', d: 4, t: 'להפעיל דוחות במייל: יומי, שבועי וחודשי', w: 'הגדרות ← דוחות. לבדוק שהמייל הראשון הגיע.' },
+    { id: 'l_bk', d: 4, t: 'לוודא שהגיבוי השבועי פעיל, ולהוריד גיבוי ידני אחד', w: 'הגדרות ← גיבוי וענן.' },
+  ] },
+  { id: 's2', title: 'שבועות 2–3 · תיק הרישום ברשות המסים', sub: 'מגישים בקשה לרישום התוכנה. מרגע ההגשה הבדיקה יכולה להימשך עד כ-90 יום.', steps: [
+    { id: 'p_req', d: 7, t: 'לבדוק באתר רשות המסים את רשימת המסמכים העדכנית לבקשת רישום תוכנה', w: 'gov.il, "רישום תוכנה לניהול ספרים". לעבוד לפי הרשימה שמופיעה שם, לא לפי זיכרון.' },
+    { id: 'p_ok', d: 8, t: 'אישור מששון לסוגי המסמכים ולתהליך', w: 'אילו מסמכים הקליניקה צריכה, ואם יש לו הערות לפני ההגשה.' },
+    { id: 'p_file', d: 9, t: 'קובץ דוגמה סופי ודוח הסימולטור', w: 'להפיק את הקובץ, להריץ בסימולטור ולשמור את הדוח כ-PDF.' },
+    { id: 'p_print', d: 9, t: 'להדפיס את פלט הסיכום ואת מאזן הבוחן מהקובץ', w: 'אחרי ההפקה, בלשונית רשות המסים.' },
+    { id: 'p_doc', d: 11, t: 'תיאור קצר של התוכנה ומדריך משתמש', w: 'אפשר לבקש ממני לכתוב אותם לפי מה שהרשות מבקשת.' },
+    { id: 'p_send', d: 14, t: 'להגיש את הבקשה', w: 'דרך gov.il, עם כל המסמכים.' },
+    { id: 'p_ref', d: 14, t: 'לרשום כאן את מספר הפנייה', w: 'בהערות של השלב הזה (✎).' },
+  ] },
+  { id: 's3', title: 'חודשים 1–3 · עבודה במקביל עד האישור', sub: 'iCount מפיק, Tizon עוקב. בסוף כל חודש משווים ביניהם.', steps: [
+    { id: 'r_m1', d: 28, t: 'סגירת החודש הראשון: להשוות הכנסות והוצאות בין Tizon ל-iCount', w: 'הפרש? לרשום בהערות ולתקן לפני החודש הבא.' },
+    { id: 'r_s1', d: 30, t: 'לשלוח לששון את הדוח החודשי מתוך Tizon', w: 'ולשאול אם חסר לו משהו בדוח.' },
+    { id: 'r_vat', d: 45, t: 'בדיווח המע״מ הבא: לחשב מתוך Tizon ולבדוק מול ששון', w: 'אם המספרים זהים, זה סימן טוב לקראת המעבר.' },
+    { id: 'r_cert', d: 45, t: 'להזמין תעודה דיגיטלית מגורם מאשר (לא חובה, מומלץ)', w: 'במקום התעודה העצמית. מעלים אותה בהגדרות ← גיבוי וענן ← חתימה דיגיטלית.' },
+    { id: 'r_m2', d: 58, t: 'סגירת החודש השני: השוואה ל-iCount ודוח לששון', w: '' },
+    { id: 'r_chk', d: 60, t: 'לבדוק את מצב הבקשה ברשות המסים', w: 'אם עוד לא חזרה תשובה.' },
+    { id: 'r_m3', d: 88, t: 'סגירת החודש השלישי: השוואה ל-iCount ודוח לששון', w: '' },
+  ] },
+  { id: 's4', title: 'אחרי אישור הרישום · עוברים', sub: 'התאריכים כאן משוערים: הם תלויים במועד שהרשות מאשרת. המעבר עצמו בתחילת חודש.', steps: [
+    { id: 'g_num', d: 104, t: 'להזין את מספר הרישום בהגדרות התוכנה', w: 'הגדרות ← רישום התוכנה.' },
+    { id: 'g_alloc', d: 110, t: 'להסדיר מספרי הקצאה לחשבוניות לעסקים מעל הסף', w: 'למטופלים פרטיים לא נדרש. לברר מול ששון את הסף העדכני.' },
+    { id: 'g_ok', d: 110, t: 'אישור סופי מששון למעבר', w: '' },
+    { id: 'g_go', d: 'som', t: 'יום המעבר: הקליניקה מוציאה חשבוניות וקבלות אמיתיות מ-Tizon', w: 'להעביר את הקליניקה ממצב ניסיון לפעיל. המספור מתחיל מהמספר הבא אחרי האחרון ב-iCount, אם ששון מבקש.' },
+    { id: 'g_m1', d: 'som+30', t: 'החודש האמיתי הראשון: לבדוק כל מסמך ואת המספור, ולשלוח לששון', w: '' },
+    { id: 'g_arch', d: 'som+50', t: 'לייצא מ-iCount את כל הארכיון ולשמור אותו', w: 'חובת שמירה של מסמכים: לבדוק עם ששון כמה שנים, ולשמור לפני שמבטלים.' },
+    { id: 'g_stop', d: 'som+60', t: 'לבטל את המנוי ל-iCount', w: 'רק אחרי שהארכיון שמור והחודש הראשון עבר בלי תקלות.' },
+    { id: 'g_store', d: 'som+90', t: 'השלב הבא: החנות', w: 'אותו תהליך, אחרי שהקליניקה יציבה.' },
+  ] },
+];
+const launchGet = () => ({ start: '2026-10-04', done: {}, notes: {}, due: {}, extra: [], ...(lsGet(LAUNCH_KEY, {}) || {}) });
+/* The switch day: the first of the month after approval (+110 days). */
+const launchSom = (start) => { const x = addDaysIso(start, 110); return addMonths(x.slice(0, 7), 1) + '-01'; };
+const launchDue = (start, d) => {
+  if (typeof d === 'number') return addDaysIso(start, d);
+  const [, k] = String(d).split('+'); return addDaysIso(launchSom(start), Number(k) || 0);
+};
+
+function LaunchView({ flash }) {
+  const [s, setS] = useState(launchGet);
+  const [edit, setEdit] = useState(null), [adding, setAdding] = useState(null), [nt, setNt] = useState({ t: '', due: '' });
+  const [hideDone, setHideDone] = useState(false);
+  const save = (fn) => setS(x => { const n = fn(x); try { lsSet(LAUNCH_KEY, n); } catch { /* ignore */ } return n; });
+  const today = todayIso(), week = addDaysIso(today, 7);
+  const stages = LAUNCH_PLAN.map(st => ({ ...st, steps: [
+    ...st.steps.map(x => ({ ...x, due: s.due[x.id] || launchDue(s.start, x.d) })),
+    ...(s.extra || []).filter(x => x.stage === st.id).map(x => ({ ...x, own: true, due: s.due[x.id] || x.due || today })),
+  ].sort((a, b) => a.due.localeCompare(b.due)) }));
+  const all = stages.flatMap(x => x.steps), doneN = all.filter(x => s.done[x.id]).length;
+  const pct = all.length ? Math.round(doneN / all.length * 100) : 0;
+  const next = all.filter(x => !s.done[x.id]).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 3);
+  const late = all.filter(x => !s.done[x.id] && x.due < today).length;
+  const golive = launchSom(s.start);
+  const when = (x) => s.done[x.id] ? { c: 'ok', l: '✓ ' + heDate(s.done[x.id]) } : x.due < today ? { c: 'bad', l: 'באיחור · ' + heDate(x.due) }
+    : x.due === today ? { c: 'warn', l: 'היום' } : x.due <= week ? { c: 'warn', l: heDate(x.due) } : { c: '', l: heDate(x.due) };
+  const toggle = (id) => save(x => { const done = { ...x.done }; if (done[id]) delete done[id]; else done[id] = todayIso(); return { ...x, done }; });
+  const addOwn = (stage) => { if (!nt.t.trim()) return; const id = 'own_' + Date.now().toString(36);
+    save(x => ({ ...x, extra: [...(x.extra || []), { id, stage, t: nt.t.trim(), due: nt.due || today, w: '' }] })); setNt({ t: '', due: '' }); setAdding(null); };
+  const delOwn = (id) => save(x => ({ ...x, extra: (x.extra || []).filter(e => e.id !== id) }));
+  return (<div className="launch">
+    <div className="mg-h" style={{ '--h1': '#1f4e79', '--h2': '#5b8fc7' }}><div><h2>🚀 מסלול השקה</h2>
+      <div className="sub">מפיילוט לקליניקה שעובדת על Tizon Finance · מעבר משוער {heDate(golive)}</div></div>
+      <button className="mg-btn hdr-act no-print" style={{ background: '#fff', color: '#1f4e79', fontWeight: 800 }} onClick={() => window.print()}>🖨 <span>הדפס</span></button></div>
+
+    <div className="mg-card ln-top">
+      <div className="ln-prog"><div className="ln-bar"><i style={{ width: pct + '%' }} /></div>
+        <div className="ln-pn"><b>{pct}%</b> · {doneN} מתוך {all.length} משימות{late > 0 && <span className="mg-chip bad" style={{ marginInlineStart: 8 }}>{late} באיחור</span>}</div></div>
+      {next.length > 0 && <div className="ln-next"><div className="lb">הבא בתור</div>
+        {next.map(x => <label key={x.id} className="ln-nx"><input type="checkbox" checked={false} onChange={() => toggle(x.id)} /><span>{x.t}</span><span className={'mg-chip ' + when(x).c}>{when(x).l}</span></label>)}</div>}
+      {!next.length && <div className="mg-note">🎉 כל המשימות הושלמו. הקליניקה עובדת על Tizon Finance.</div>}
+      <div className="ln-set no-print">
+        <label>תאריך התחלה <input type="date" value={s.start} onChange={e => e.target.value && save(x => ({ ...x, start: e.target.value }))} /></label>
+        <label className="ln-hd"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> הסתר משימות שהושלמו</label>
+      </div>
+    </div>
+
+    <div className="mg-card ln-week"><b>🗓 קבוע, כל יום ראשון (10 דקות):</b> לקרוא את הדוח השבועי במייל · לוודא שכל חשבוניות השבוע מ-iCount הגיעו · לסמן כאן מה הושלם.</div>
+
+    {stages.map(st => { const dn = st.steps.filter(x => s.done[x.id]).length; return (
+      <div key={st.id} className="mg-card ln-stage">
+        <div className="ln-sh"><h3>{st.title}</h3><span className={'mg-chip ' + (dn === st.steps.length ? 'ok' : '')}>{dn}/{st.steps.length}</span></div>
+        <div className="ln-sub">{st.sub}</div>
+        <ul className="ln-list">
+          {st.steps.filter(x => !hideDone || !s.done[x.id]).map(x => { const w = when(x); return (
+            <li key={x.id} className={s.done[x.id] ? 'done' : ''}>
+              <label className="ln-row"><input type="checkbox" checked={!!s.done[x.id]} onChange={() => toggle(x.id)} />
+                <span className="ln-t">{x.t}{x.own && <span className="mg-chip" style={{ marginInlineStart: 6 }}>שלי</span>}</span>
+                <span className={'mg-chip ln-due ' + w.c}>{w.l}</span></label>
+              {x.w && <div className="ln-w">{x.w}</div>}
+              {s.notes[x.id] && edit !== x.id && <div className="ln-note">📝 {s.notes[x.id]}</div>}
+              <div className="ln-act no-print">
+                <button className="mg-btn ghost sm" onClick={() => setEdit(edit === x.id ? null : x.id)}>✎ הערה ותאריך</button>
+                {x.own && <button className="mg-btn ghost sm" onClick={() => delOwn(x.id)}>מחק</button>}
+              </div>
+              {edit === x.id && <div className="ln-edit no-print">
+                <textarea rows={2} placeholder="הערה, מספר פנייה, מה סוכם…" value={s.notes[x.id] || ''} onChange={e => { const v = e.target.value; save(o => ({ ...o, notes: { ...o.notes, [x.id]: v } })); }} />
+                <label>תאריך יעד <input type="date" value={x.due} onChange={e => { const v = e.target.value; save(o => ({ ...o, due: { ...o.due, [x.id]: v } })); }} /></label>
+                {s.due[x.id] && <button className="mg-btn ghost sm" onClick={() => save(o => { const due = { ...o.due }; delete due[x.id]; return { ...o, due }; })}>חזור לתאריך המחושב</button>}
+              </div>}
+            </li>); })}
+        </ul>
+        {adding === st.id
+          ? <div className="ln-add no-print"><input placeholder="משימה חדשה…" value={nt.t} onChange={e => setNt({ ...nt, t: e.target.value })} onKeyDown={e => e.key === 'Enter' && addOwn(st.id)} autoFocus />
+              <input type="date" value={nt.due} onChange={e => setNt({ ...nt, due: e.target.value })} />
+              <button className="mg-btn sm" onClick={() => addOwn(st.id)}>הוסף</button><button className="mg-btn ghost sm" onClick={() => setAdding(null)}>ביטול</button></div>
+          : <button className="mg-btn ghost sm no-print" onClick={() => { setAdding(st.id); setNt({ t: '', due: '' }); }}>＋ משימה משלי</button>}
+      </div>); })}
   </div>);
 }
 
