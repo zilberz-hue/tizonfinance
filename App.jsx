@@ -1,5 +1,5 @@
 /* ============================================================================
-   Tizon Books · הנהלת חשבונות לכל העסקים
+   Tizon Finance · הנהלת חשבונות לכל העסקים
    A standalone app. It touches nothing of the store: not its code, not its
    Firebase, not its rules.
 
@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.38.1';
+const VERSION = '1.39.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -224,7 +224,7 @@ async function storeAddCustomer(tenant, c) {
   const rec = clean({
     name: c.name, email: c.email || '', phone: c.phone || '',
     address: [c.address, c.city].filter(Boolean).join(', '),
-    notes: 'נוסף מ-Tizon Books', createdAt: todayIso(), source: 'tizon-books',
+    notes: 'נוסף מ-Tizon Finance', createdAt: todayIso(), source: 'tizon-books',
   });
   await setDoc(doc(store().db, 'tenants', tenant, 'customers', id), rec);
   return id;
@@ -1247,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.39.0', date: '02.10.26', items: ['שם חדש: Tizon Finance · הנהלת חשבונות, חשבוניות וליווי פיננסי למטפלים. השם מופיע במסך, במסמכים, במיילים, בדוחות ובקובצי המבנה האחיד. הנתונים, הכתובת והגיבויים לא השתנו.'] },
   { v: '1.38.1', date: '02.10.26', items: ['חתימה דיגיטלית: כפתור "✨ צור תעודה עצמית" יוצר תעודה בשרת (המפתח לא יוצא ממנו), וכל PDF נחתם מיד. מסומנת כתעודה עצמית עד שמעלים תעודה מגורם מאשר.'] },
   { v: '1.38.0', date: '02.10.26', items: ['חתימה דיגיטלית: מעלים את קובץ התעודה (‎.pfx/.p12) ומקלידים את הסיסמה שלה ישירות באפליקציה (גיבוי וענן ← חתימה דיגיטלית). שניהם נשמרים רק בשרת. בלי הגדרות ב-Netlify.', 'הסבר מאיפה מזמינים תעודה, והודעה ברורה כשהסיסמה שגויה.'] },
   { v: '1.37.0', date: '02.10.26', items: ['רישום התוכנה ברשות המסים: כפתור "🧪 הפק קובץ דוגמה לרישום" בלשונית רשות המסים. כל סוגי הרשומות, 10 מסמכים מכל סוג, מלקוחות לדוגמה, בלי לגעת בספרים.', 'רשומות M100 (פריטים) לפי המפרט, אפשרות לכלול אותן בייצוא.', 'פלט הסיכום כולל הודעת סיום ומאזן בוחן תנועות, כנדרש בסעיפים 2.6 ו-5.4.'] },
@@ -1401,7 +1402,7 @@ const WRITERS = ['owner', 'clerk'];
 
 const TOURS = {
   welcome: [
-    { title: 'ברוך הבא ל-Tizon Books', text: 'סיור של דקה. מעבירים שלבים עם "הבא" או עם החצים במקלדת, ויוצאים בכל רגע עם Esc.', since: '1.0.0' },
+    { title: 'ברוך הבא ל-Tizon Finance', text: 'סיור של דקה. מעבירים שלבים עם "הבא" או עם החצים במקלדת, ויוצאים בכל רגע עם Esc.', since: '1.0.0' },
     { t: 'welcome-card', title: 'מתחילים מעסק', text: 'כל עסק הוא ספר נפרד, עם סוג עוסק ומע״מ משלו. אפשר להתחיל מהחנות, מהקליניקה או מכל עסק אחר.', since: '1.0.0' },
     { t: 'side-new', title: 'עוד עסק', text: 'מכאן מוסיפים עסקים בכל רגע.', since: '1.0.0' },
     { t: 'side-settings', title: 'גיבוי וענן', text: 'בלי ענן הנתונים נשמרים בדפדפן הזה בלבד. כדאי לחבר ענן או לגבות לעיתים קרובות.', since: '1.0.0' },
@@ -1447,7 +1448,7 @@ const TOURS = {
     { t: 'book-tabs', title: 'העסקים שלך', text: 'יש לך הרשאה להפיק מסמכים ולנהל לקוחות. שתי הלשוניות כאן.', since: '1.7.0', roles: ['clerk'] },
     { t: 'docs-mode', title: 'ניסיון או אמיתי', text: 'במצב ניסיון המסמכים מסומנים T- ולא נספרים. במצב אמיתי הם מסמכי מס: מספור רציף, בלי מחיקה ובלי עריכה.', since: '1.2.0' },
     { t: 'docs-new', title: 'הפקת מסמך', text: 'בוחרים סוג: חשבונית מס, קבלה, חשבונית מס קבלה, זיכוי ועוד. הסוגים מותאמים לסוג העוסק.', since: '1.2.0', roles: WRITERS },
-    { t: 'docs-filters', title: 'סינון', text: 'לפי חודש, סוג ומקור (Tizon Books או iCount). כאן רואים גם כמה חשבוניות עוד פתוחות.', since: '1.2.0' },
+    { t: 'docs-filters', title: 'סינון', text: 'לפי חודש, סוג ומקור (Tizon Finance או iCount). כאן רואים גם כמה חשבוניות עוד פתוחות.', since: '1.2.0' },
     { t: 'docs-table', title: 'המסמכים', text: 'מכל מסמך אפשר להפיק PDF חתום, להדפיס ולשלוח במייל או בוואטסאפ. הדפסה חוזרת מסומנת "העתק".', since: '1.2.0' },
     { t: 'docs-paynew', title: 'דף סליקה', text: 'קישור לתשלום בכרטיס (זד קרדיט) ששולחים ללקוח בוואטסאפ או במייל. כשהוא משלם, החשבונית מופקת ונשלחת אליו לבד.', since: '1.9.0', roles: WRITERS },
     { t: 'docs-pay', title: 'מעקב אחרי תשלומים', text: 'כל הקישורים ששלחת: מה ממתין, מה שולם ואיזה מסמך הופק. הרשימה מתעדכנת לבד.', since: '1.9.0' },
@@ -1834,7 +1835,7 @@ function App() {
     (async () => {
       try {
         const { zip, lines } = await makeArchive(mine, prev, user.email);
-        await fnCall({ action: 'archive', subject: `Tizon Books · ארכיון ${prev}`, text: `ארכיון חודשי ל-${prev}:\n${lines.join('\n')}`,
+        await fnCall({ action: 'archive', subject: `Tizon Finance · ארכיון ${prev}`, text: `ארכיון חודשי ל-${prev}:\n${lines.join('\n')}`,
                        files: [{ name: `tizon-books-archive-${prev}.zip`, b64: b64(zip), type: 'application/zip' }] });
         lsSet(ARCH_KEY, prev);
         for (const b of mine) await logAct(b.id, { action: 'archive', title: `${prev} נשלח ל-${user.email}`, series: 'live' });
@@ -1973,14 +1974,14 @@ function App() {
       {/* Phones and small tablets: a top bar, and the menu as a drawer. */}
       <header className="topbar">
         <button className="tb-menu" aria-label="תפריט" onClick={() => setNavOpen(true)}><span /><span /><span /></button>
-        <b className="tb-title">{book ? book.name : ({ all: 'כל העסקים', coach: 'המאמן הפיננסי', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך' })[cur] || 'Tizon Books'}</b>
+        <b className="tb-title">{book ? book.name : ({ all: 'כל העסקים', coach: 'המאמן הפיננסי', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך' })[cur] || 'Tizon Finance'}</b>
         <img className="tb-mark" src={MARK} alt="Tizon" />
       </header>
       {navOpen && <div className="side-dim" onClick={() => setNavOpen(false)} />}
       <aside className={'side' + (navOpen ? ' open' : '') + (mini ? ' mini' : '')} onClickCapture={e => { if (e.target.closest('button.bk')) setTimeout(() => setNavOpen(false), 0); }}>
         <div className="brand">
           <img className="mark" src={MARK} alt="Tizon" />
-          <span className="brand-t"><b>Tizon Books</b><small>הנהלת חשבונות</small></span>
+          <span className="brand-t"><b>Tizon Finance</b><small>הנהלת חשבונות וליווי פיננסי</small></span>
           <button className="side-fold" onClick={toggleMini} title={mini ? 'הרחב את התפריט' : 'כווץ את התפריט'} aria-label={mini ? 'הרחב את התפריט' : 'כווץ את התפריט'}>{mini ? '«' : '»'}</button>
         </div>
         <button className={'bk' + (cur === 'all' ? ' on' : '')} onClick={() => setCur('all')} title="כל העסקים">
@@ -2107,8 +2108,8 @@ function UsersView({ books, user, flash, onSave }) {
     setEmail(''); flash(`${e} נוסף`);
     /* The system sends no email of its own: an invitation ready to send. */
     const link = window.location.origin;
-    window.location.href = `mailto:${e}?subject=${encodeURIComponent('הזמנה ל-Tizon Books')}&body=${encodeURIComponent(
-      `שלום,\n\nהוספתי אותך כ${ROLES[role]} ב-Tizon Books.\nנכנסים כאן: ${link}\nבוחרים "משתמש חדש", נרשמים עם האימייל הזה (${e}) ובוחרים סיסמה.\n\n${user.email}`)}`;
+    window.location.href = `mailto:${e}?subject=${encodeURIComponent('הזמנה ל-Tizon Finance')}&body=${encodeURIComponent(
+      `שלום,\n\nהוספתי אותך כ${ROLES[role]} ב-Tizon Finance.\nנכנסים כאן: ${link}\nבוחרים "משתמש חדש", נרשמים עם האימייל הזה (${e}) ובוחרים סיסמה.\n\n${user.email}`)}`;
   };
   return (
     <>
@@ -2553,7 +2554,7 @@ function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreCha
           {!cloud ? (
             <>
               {BUILT_IN_CLOUD && <div className="mg-note warn" style={{ marginBottom: 12 }}>
-                המכשיר הזה נותק מהענן של Tizon Books.{' '}
+                המכשיר הזה נותק מהענן של Tizon Finance.{' '}
                 <button className="mg-btn sm" onClick={() => { localStorage.removeItem(LOCAL_ONLY_KEY); location.reload(); }}>חזרה לענן</button></div>}
               <p style={{ marginTop: 0 }}>
                 כרגע הכול נשמר בדפדפן הזה בלבד. כדי לעבוד מכל מכשיר, מחברים פרויקט Firebase <b>נפרד</b>, לא הפרויקט של החנות:
@@ -4038,8 +4039,8 @@ function matchSupplier(suppliers, g) {
 /* The script for the owner's Gmail: every hour, new mail with an invoice file
    is sent to this business's inbox and labelled, so nothing is sent twice. */
 function gmailScript(endpoint, bookId, key, bookName) {
-  return `/* Tizon Books · איסוף חשבוניות מ-Gmail עבור "${bookName}"
-   רץ בחשבון Google שלך בלבד. שולח ל-Tizon Books קבצי PDF ותמונות
+  return `/* Tizon Finance · איסוף חשבוניות מ-Gmail עבור "${bookName}"
+   רץ בחשבון Google שלך בלבד. שולח ל-Tizon Finance קבצי PDF ותמונות
    ממיילים שנראים כמו חשבונית או קבלה, ומסמן אותם בתווית tizon-books.
    הפעלה: בחר את הפונקציה setup למעלה ולחץ "הרצה" (Run), ואשר את ההרשאות. */
 const ENDPOINT = '${endpoint}?action=inbox-push&b=${bookId}&k=${key}';
@@ -4846,7 +4847,7 @@ function AuthPayTab({ book, rows, onLoad, flash }) {
     <table><tr><th>תשלום</th><th>לפי המערכת</th><th>לפי רו״ח</th><th>הפרש</th><th>פירוט</th></tr>
     ${rep.lines.map(l => `<tr><td>${l.label}${l.est ? ' (הערכה)' : ''}</td><td class="n">${fmt(l.amount)}</td><td class="n">${acct[l.k] ? fmt(acct[l.k]) : ''}</td><td class="n">${diffOf(l) === null ? '' : fmt(diffOf(l))}</td><td>${l.detail}</td></tr>`).join('')}
     <tr><th>סה״כ</th><th class="n">${fmt(rep.total)}</th><th></th><th></th><th></th></tr></table>
-    <p style="font-size:12px;color:#666">הופק ב-Tizon Books ${VERSION}. הערכה לבקרה פנימית בלבד; הסכומים לתשלום הם אלה שבהודעות הרשויות ומרואה החשבון.</p></body></html>`);
+    <p style="font-size:12px;color:#666">הופק ב-Tizon Finance ${VERSION}. הערכה לבקרה פנימית בלבד; הסכומים לתשלום הם אלה שבהודעות הרשויות ומרואה החשבון.</p></body></html>`);
   return (
     <div data-tour="pay-auth">
       <div style={{ ...row, marginBottom: 12 }}>
@@ -5061,7 +5062,7 @@ function ImportTab({ book, data, cols, flash, onDone, onDeleteBook, onLog, serve
 }
 
 /* ================================================================ documents */
-/* Phase 1 of issuing documents from Tizon Books itself.
+/* Phase 1 of issuing documents from Tizon Finance itself.
 
    The rules it keeps, because a tax document is not an ordinary record:
      · every type has its own running number, with no gaps and no repeats —
@@ -5185,8 +5186,8 @@ ${d.withholding ? `<div class="tot"><div><span>ניכוי במקור</span><span
 ${!T.lines ? `<div class="tot"><div class="g"><span>סה״כ התקבל</span><span>${m(d.total)}</span></div></div>` : ''}` : ''}
 ${d.notes ? `<div class="notes">${esc(d.notes)}</div>` : ''}
 <div class="sign">חתימה</div>
-<div class="foot">${isImported(d) ? `<span>העתק של מסמך שהופק במקור ב-iCount · הודפס מ-Tizon Books ${VERSION} · ${esc(new Date().toLocaleString('he-IL'))}</span><span></span>`
-  : `<span>הופק ב-Tizon Books ${VERSION} · ${esc(new Date(d.createdAt).toLocaleString('he-IL'))}</span><span>קוד אימות ${esc(d.stamp || '')}</span>`}</div>
+<div class="foot">${isImported(d) ? `<span>העתק של מסמך שהופק במקור ב-iCount · הודפס מ-Tizon Finance ${VERSION} · ${esc(new Date().toLocaleString('he-IL'))}</span><span></span>`
+  : `<span>הופק ב-Tizon Finance ${VERSION} · ${esc(new Date(d.createdAt).toLocaleString('he-IL'))}</span><span>קוד אימות ${esc(d.stamp || '')}</span>`}</div>
 </body></html>`;
 }
 /* Printed from a hidden frame — no pop-up to be blocked. "Save as PDF" is
@@ -5419,7 +5420,7 @@ function DocsTab({ quick = null, book, docs, customers = [], items = [], onIssue
         <Field label="קיבוץ"><select value={groupBy} onChange={e => setGroup(e.target.value)}>
           <option value="">ללא</option><option value="month">📁 לפי חודש</option><option value="cust">📁 לפי לקוח</option><option value="type">📁 לפי סוג</option></select></Field>
         {hasImp && <Field label="מקור"><select value={src} onChange={e => setSrc(e.target.value)}>
-          <option value="">הכול</option><option value="own">Tizon Books</option><option value="import">iCount</option></select></Field>}
+          <option value="">הכול</option><option value="own">Tizon Finance</option><option value="import">iCount</option></select></Field>}
         {openInv.length > 0 && <div className="mg-note" style={{ alignSelf: 'center' }}>
           {openInv.length} חשבוניות פתוחות בסך {fmt(openInv.reduce((a, d) => a + openOf(d, docs), 0))}</div>}
       </div>
@@ -5773,7 +5774,7 @@ async function docPDF(book, d, copy) {
     if (page) pdf.addPage();
     pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, W, c.height * W / c.width);
   }
-  pdf.setProperties({ title: docTitle(d), creator: 'Tizon Books ' + VERSION, author: book.legalName || book.name });
+  pdf.setProperties({ title: docTitle(d), creator: 'Tizon Finance ' + VERSION, author: book.legalName || book.name });
   return pdf.output('arraybuffer');
 }
 const PDF_SLUG = { 320: 'tax-invoice-receipt', 305: 'tax-invoice', 400: 'receipt', 330: 'credit-note', 300: 'deal-invoice' };
@@ -5947,7 +5948,7 @@ function buildUnified(book, docs, soft, from, to, opts = {}) {
   const dir = `OPENFRMT/${osek.slice(0, 8)}.${yy}/${stamp}`;
   const addr = String(book.address || '');
   const street = addr.split(',')[0] || '', city = addr.split(',').slice(1).join(',').trim();
-  const ini = ['A000' + fX('', 5) + fN(total, 15) + osek + mainId + OF_CONST + fN(soft.regNo, 8) + fX('Tizon Books', 20) + fX(VERSION, 20)
+  const ini = ['A000' + fX('', 5) + fN(total, 15) + osek + mainId + OF_CONST + fN(soft.regNo, 8) + fX('Tizon Finance', 20) + fX(VERSION, 20)
     + fN(digitsOf(soft.makerId) || digitsOf(book.taxId), 9) + fX(soft.makerName || 'Tizon Health', 20) + '2' + fX(dir.replace(/\//g, '\\'), 50) + (journal ? '2' : '0') + (journal ? '1' : '0')
     + fN(0, 9) + fN(0, 9) + fX('', 10) + fX(book.legalName || book.name, 50) + fX(street, 50) + fX('', 10) + fX(city, 30) + fX('', 8)
     + fN(0, 4) + fN(ymd(from), 8) + fN(ymd(to), 8) + fN(ymd(now.toISOString()), 8) + stamp.slice(4) + '0' + '1' + fX('fflate ZIP', 20)
@@ -5995,7 +5996,7 @@ async function makeArchive(books, month, email) {
   const backup = await exportAll(email);
   backup.books = backup.books.filter(x => books.some(b => b.id === x.id));
   files['backup.json'] = strToU8(JSON.stringify(backup));
-  files['README.txt'] = strToU8(`Tizon Books ${VERSION} · ארכיון ${month}\r\n\r\n${lines.join('\r\n')}\r\n`);
+  files['README.txt'] = strToU8(`Tizon Finance ${VERSION} · ארכיון ${month}\r\n\r\n${lines.join('\r\n')}\r\n`);
   return { zip: zipSync(files), lines };
 }
 
@@ -6068,7 +6069,7 @@ function exportSheets(book, data, ledger, from, to, withTest) {
     ['הכנסות לפני מע״מ', r2(t.incNet)], ['מע״מ עסקאות', r2(t.incVat)], ['הוצאות לפני מע״מ', r2(t.expNet)], ['מע״מ תשומות', r2(t.expVat)],
     ['מע״מ לתשלום', r2(t.vatDue)], ['רווח', r2(t.profit)], ['', ''],
     ['מסמכים', docs.length], ['הכנסות', inc.length], ['הוצאות', out.length], ['פקודות יומן', j.tx.length ? j.tx[j.tx.length - 1].n : 0],
-    ['', ''], ['Tizon Books ' + VERSION, '']] };
+    ['', ''], ['Tizon Finance ' + VERSION, '']] };
   return S;
 }
 const SHEET_ORDER = ['summary', 'docs', 'lines', 'pays', 'income', 'expenses', 'vat', 'journal', 'tb', 'customers', 'suppliers', 'items', 'bank'];
@@ -6277,7 +6278,7 @@ function TaxTab({ book, docs, log, ro, onLog, flash, ledger, items = [] }) {
 <div style="border:2px solid #2f7d5b;color:#2f7d5b;padding:8px 12px;display:inline-block;margin:6px 0 10px;font-weight:bold">✓ הפקת הקבצים במבנה אחיד הסתיימה בהצלחה${last.sample ? ' (קובץ דוגמה לבקשת רישום התוכנה)' : ''}</div>
 <div>מספר עוסק: <b>${esc(book.taxId)}</b> · שם העסק: <b>${esc(book.legalName || book.name)}</b></div>
 <div>טווח: ${heDate(lf)} עד ${heDate(lt)} · תאריך ושעת הפקה: ${new Date().toLocaleString('he-IL')}</div>
-<div>נתיב: ${esc(last.dir.replace(/\//g, '\\'))} · תוכנה: Tizon Books ${VERSION} · מספר רישום: ${esc(soft.regNo || 'טרם נרשמה')}</div>
+<div>נתיב: ${esc(last.dir.replace(/\//g, '\\'))} · תוכנה: Tizon Finance ${VERSION} · מספר רישום: ${esc(soft.regNo || 'טרם נרשמה')}</div>
 <h3>סיכום רשומות בקובץ BKMVDATA</h3><table><tr><th>סוג רשומה</th><th>כמות</th></tr>${recRows}<tr><td><b>סה״כ</b></td><td><b>${last.counts.total}</b></td></tr></table>
 <h3>סיכום מסמכים לפי סוג</h3><table><tr><th>קוד</th><th>סוג מסמך</th><th>כמות</th><th>סה״כ (ש״ח)</th></tr>${rows}</table>
 ${last.journal ? (() => { const acc = [...last.journal.accounts].filter(a => a.dr || a.cr).sort((a, b) => String(a.key).localeCompare(String(b.key)));
@@ -6564,7 +6565,7 @@ function ICountImport({ book, data, cols, flash, onDone, onLog }) {
         <div className="mg-note" style={{ marginBottom: 10 }}>
           ייכנסו <b>{plan.fresh.length}</b> מסמכים ו-<b>{plan.freshBuys.length}</b> הוצאות חדשים
           {plan.sales.length - plan.fresh.length > 0 && ` · ${plan.sales.length - plan.fresh.length} כבר קיימים ולא ייובאו שוב`}.
-          המסמכים נשמרים כהיסטוריה לקריאה בלבד, עם המספרים של iCount, ונספרים בהכנסות ובמע״מ. הם לא משפיעים על המספור של Tizon Books.
+          המסמכים נשמרים כהיסטוריה לקריאה בלבד, עם המספרים של iCount, ונספרים בהכנסות ובמע״מ. הם לא משפיעים על המספור של Tizon Finance.
           {data.orders?.length > 0 && ' הזמנות מהחנות שהחשבונית שלהן הופקה ב-iCount ייספרו פעם אחת בלבד.'}
         </div>
         <button className="mg-btn" disabled={busy || !(plan.fresh.length + plan.freshBuys.length)} onClick={run}>
@@ -7103,7 +7104,7 @@ function CustomersTab({ book, data, cols, patch, flash, ro, role = 'owner', onRe
                                                onGo={syncStore} onCancel={() => setReview(false)} />}</>
               : <>כל {storeCust.rows.length} לקוחות החנות כבר ברשימה.</>}
           {!ro && toStore.length > 0 && <div style={{ marginTop: 6 }}>
-            ב-Tizon Books יש <b>{toStore.length}</b> לקוחות שלא קיימים בחנות.{' '}
+            ב-Tizon Finance יש <b>{toStore.length}</b> לקוחות שלא קיימים בחנות.{' '}
             <button className="mg-btn ghost sm" onClick={() => setPush(Object.fromEntries(toStore.map(c => [c.id, false])))}>שלח לחנות…</button></div>}
         </div>
       )}
@@ -7226,7 +7227,7 @@ function PushToStore({ book, customers, picked, setPicked, flash, onDone, onClos
       <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 12, fontSize: 14 }}>
         <input type="checkbox" style={{ width: 'auto', marginTop: 3 }} checked={ok} onChange={e => setOk(e.target.checked)} />
         <span>הלקוחות שסימנתי הסכימו לקבל ממני דיוור.</span></label>
-      <div className="mg-note" style={{ marginTop: 10 }}>נוצרים בחנות רק לקוחות חדשים. לקוח שכבר קיים שם לא משתנה. בחנות הם מסומנים "נוסף מ-Tizon Books".</div>
+      <div className="mg-note" style={{ marginTop: 10 }}>נוצרים בחנות רק לקוחות חדשים. לקוח שכבר קיים שם לא משתנה. בחנות הם מסומנים "נוסף מ-Tizon Finance".</div>
     </Box>
   );
 }
@@ -7520,7 +7521,7 @@ tfoot td{font-weight:800;background:#faf6ee}.top{display:flex;justify-content:sp
 <table><thead><tr>${head.map(h => `<th${h.n ? ' class="n"' : ''}>${esc(h.t)}</th>`).join('')}</tr></thead>
 <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td${head[i].n ? ' class="n"' : ''}>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
 ${foot ? `<tfoot><tr>${foot.map((c, i) => `<td${head[i].n ? ' class="n"' : ''}>${esc(c)}</td>`).join('')}</tr></tfoot>` : ''}</table>
-<div class="s" style="margin-top:14px">הופק ב-Tizon Books ${VERSION}</div></body></html>`;
+<div class="s" style="margin-top:14px">הופק ב-Tizon Finance ${VERSION}</div></body></html>`;
 }
 
 function LedgerTab({ book, data, ledger, pick }) {

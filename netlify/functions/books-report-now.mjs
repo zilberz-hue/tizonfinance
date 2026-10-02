@@ -1,4 +1,4 @@
-/* Tizon Books · one report now, to the person asking (from the settings:
+/* Tizon Finance · one report now, to the person asking (from the settings:
    "send me one now"). Only for someone logged in, about their own books. */
 import { runReports } from '../reports-core.mjs';
 import { realDeps } from '../reports-deps.mjs';

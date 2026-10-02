@@ -1,4 +1,4 @@
-# Tizon Books · Netlify
+# Tizon Finance · Netlify
 [build]
   command = "npm run build"
   publish = "dist"

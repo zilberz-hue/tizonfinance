@@ -1,4 +1,4 @@
-/* Tizon Books · the reports, on a schedule. Runs every hour; each run sends
+/* Tizon Finance · the reports, on a schedule. Runs every hour; each run sends
    what is due and was not sent yet (see netlify/reports-core.mjs). */
 import { runReports } from '../reports-core.mjs';
 import { realDeps } from '../reports-deps.mjs';

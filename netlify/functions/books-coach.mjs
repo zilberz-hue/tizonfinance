@@ -1,4 +1,4 @@
-/* Tizon Books · the smart coach: status, the key, the answer to a job. */
+/* Tizon Finance · the smart coach: status, the key, the answer to a job. */
 import { coachAction } from '../coach-core.mjs';
 import { ownerOf, realCoachDeps, json } from '../coach-deps.mjs';
 

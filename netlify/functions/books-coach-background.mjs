@@ -1,4 +1,4 @@
-/* Tizon Books · the smart coach, thinking: runs in the background (up to 15
+/* Tizon Finance · the smart coach, thinking: runs in the background (up to 15
    minutes), so a long plan never times out. The page polls books-coach for
    the job's answer. */
 import { coachRun } from '../coach-core.mjs';

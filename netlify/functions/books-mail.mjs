@@ -1,4 +1,4 @@
-/* Tizon Books 1.19.0 · server function, in one file. Built from
+/* Tizon Finance 1.19.0 · server function, in one file. Built from
    netlify/functions/books-mail.mjs and netlify/lib/*.mjs. */
 // netlify/functions/books-mail.mjs
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -315,7 +315,7 @@ async function handleCallback({ bookId, payId, secret, body }, deps) {
     await deps.db.update(payPath, { status: pay.status === "open" ? "mismatch" : pay.status, mismatch: { at: now.toISOString(), paid: cb.total, reference: cb.reference } });
     await deps.mail?.({
       to: pay.createdBy,
-      subject: `Tizon Books \xB7 \u05EA\u05E9\u05DC\u05D5\u05DD \u05D1\u05E1\u05DB\u05D5\u05DD \u05E9\u05D5\u05E0\u05D4 (${money(cb.total)})`,
+      subject: `Tizon Finance \xB7 \u05EA\u05E9\u05DC\u05D5\u05DD \u05D1\u05E1\u05DB\u05D5\u05DD \u05E9\u05D5\u05E0\u05D4 (${money(cb.total)})`,
       text: `\u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4 \u05E9\u05DC ${pay.customer?.name || ""} \u05E2\u05DC ${money(pay.total)} \u05E9\u05D5\u05DC\u05DD \u05D1\u05E1\u05DB\u05D5\u05DD ${money(cb.total)} (\u05D0\u05E1\u05DE\u05DB\u05EA\u05D0 ${cb.reference}).
 \u05DC\u05D0 \u05D4\u05D5\u05E4\u05E7 \u05DE\u05E1\u05DE\u05DA. \u05DB\u05D3\u05D0\u05D9 \u05DC\u05D1\u05D3\u05D5\u05E7 \u05D1\u05DE\u05DE\u05E9\u05E7 \u05E9\u05DC \u05D6\u05D3 \u05E7\u05E8\u05D3\u05D9\u05D8.`
     }).catch(() => {
@@ -328,7 +328,7 @@ async function handleCallback({ bookId, payId, secret, body }, deps) {
       await deps.db.update(payPath, { extraPayments: [...pay.extraPayments || [], { at: now.toISOString(), reference: cb.reference, total: cb.total, last4: cb.last4 }] });
       await deps.mail?.({
         to: pay.createdBy,
-        subject: "Tizon Books \xB7 \u05EA\u05E9\u05DC\u05D5\u05DD \u05DB\u05E4\u05D5\u05DC \u05D1\u05D3\u05E3 \u05E1\u05DC\u05D9\u05E7\u05D4",
+        subject: "Tizon Finance \xB7 \u05EA\u05E9\u05DC\u05D5\u05DD \u05DB\u05E4\u05D5\u05DC \u05D1\u05D3\u05E3 \u05E1\u05DC\u05D9\u05E7\u05D4",
         text: `\u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4 \u05E9\u05DC ${pay.customer?.name || ""} \u05E9\u05D5\u05DC\u05DD \u05E4\u05E2\u05DD \u05E0\u05D5\u05E1\u05E4\u05EA (\u05D0\u05E1\u05DE\u05DB\u05EA\u05D0 ${cb.reference}). \u05D4\u05DE\u05E1\u05DE\u05DA \u05D4\u05D5\u05E4\u05E7 \u05E4\u05E2\u05DD \u05D0\u05D7\u05EA. \u05DB\u05D3\u05D0\u05D9 \u05DC\u05D6\u05DB\u05D5\u05EA \u05D0\u05EA \u05D4\u05D7\u05D9\u05D5\u05D1 \u05D4\u05E0\u05D5\u05E1\u05E3 \u05D1\u05D6\u05D3 \u05E7\u05E8\u05D3\u05D9\u05D8.`
       }).catch(() => {
       });
@@ -404,7 +404,7 @@ ${book.legalName || book.name}`,
   if (deps.mail && pay.createdBy && pay.createdBy.includes("@")) {
     await deps.mail({
       to: pay.createdBy,
-      subject: `Tizon Books \xB7 \u05D4\u05EA\u05E7\u05D1\u05DC \u05EA\u05E9\u05DC\u05D5\u05DD ${money(doc.total)} \u05DE${doc.customer.name}`,
+      subject: `Tizon Finance \xB7 \u05D4\u05EA\u05E7\u05D1\u05DC \u05EA\u05E9\u05DC\u05D5\u05DD ${money(doc.total)} \u05DE${doc.customer.name}`,
       text: `${book.name}: ${doc.customer.name} \u05E9\u05D9\u05DC\u05DD ${money(doc.total)} \u05D1\u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4 (${heDate(doc.date)}).
 \u05D4\u05D5\u05E4\u05E7\u05D4 ${title}${sent ? ` \u05D5\u05E0\u05E9\u05DC\u05D7\u05D4 \u05DC-${sent}` : ". \u05D4\u05D9\u05D0 \u05DC\u05D0 \u05E0\u05E9\u05DC\u05D7\u05D4 \u05DC\u05DC\u05E7\u05D5\u05D7: " + (doc.customer.email ? "\u05D0\u05D9\u05DF \u05EA\u05E2\u05D5\u05D3\u05EA \u05D7\u05EA\u05D9\u05DE\u05D4 \u05D0\u05D5 \u05DE\u05D9\u05D9\u05DC \u05D1\u05E9\u05E8\u05EA" : "\u05D0\u05D9\u05DF \u05DC\u05D5 \u05D0\u05D9\u05DE\u05D9\u05D9\u05DC")}.`
     }).catch(() => {
@@ -600,7 +600,7 @@ async function docPdf(book, d, opts = {}) {
   };
   const footer = () => {
     page.drawLine({ start: { x: L, y: 62 }, end: { x: R, y: 62 }, thickness: 0.5, color: rgb(0.85, 0.85, 0.85) });
-    text(`\u05D4\u05D5\u05E4\u05E7 \u05D1-Tizon Books${opts.version ? " " + opts.version : ""} \xB7 ${new Date(d.createdAt || Date.now()).toLocaleString("en-GB", { timeZone: "Asia/Jerusalem" }).replace(",", "")}`, R, 48, { size: 8, color: gray });
+    text(`\u05D4\u05D5\u05E4\u05E7 \u05D1-Tizon Finance${opts.version ? " " + opts.version : ""} \xB7 ${new Date(d.createdAt || Date.now()).toLocaleString("en-GB", { timeZone: "Asia/Jerusalem" }).replace(",", "")}`, R, 48, { size: 8, color: gray });
     text(`\u05E7\u05D5\u05D3 \u05D0\u05D9\u05DE\u05D5\u05EA ${d.stamp || ""}`, L, 48, { size: 8, color: gray, align: "left" });
     text("\u05DE\u05E1\u05DE\u05DA \u05DE\u05DE\u05D5\u05D7\u05E9\u05D1, \u05D7\u05EA\u05D5\u05DD \u05D1\u05D7\u05EA\u05D9\u05DE\u05D4 \u05D0\u05DC\u05E7\u05D8\u05E8\u05D5\u05E0\u05D9\u05EA \u05DE\u05D0\u05D5\u05D1\u05D8\u05D7\u05EA", W / 2, 34, { size: 8, color: gray, align: "center" });
   };
@@ -716,7 +716,7 @@ async function docPdf(book, d, opts = {}) {
   }
   footer();
   pdf.setTitle(`${label} ${num2}`);
-  pdf.setCreator("Tizon Books" + (opts.version ? " " + opts.version : ""));
+  pdf.setCreator("Tizon Finance" + (opts.version ? " " + opts.version : ""));
   pdf.setAuthor(bizName);
   return Buffer.from(await pdf.save({ useObjectStreams: false }));
 }
@@ -913,7 +913,7 @@ async function storeCreateCustomer(idToken, tenant, c, fetchImpl = fetch) {
     email: String(c.email || "").slice(0, 120),
     phone: String(c.phone || "").slice(0, 30),
     address: [c.address, c.city].filter(Boolean).join(", ").slice(0, 200),
-    notes: "\u05E0\u05D5\u05E1\u05E3 \u05DE-Tizon Books",
+    notes: "\u05E0\u05D5\u05E1\u05E3 \u05DE-Tizon Finance",
     createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
     source: "tizon-books"
   }).filter(([, v]) => v !== ""));
@@ -1383,9 +1383,9 @@ var books_mail_default = async (req) => {
           });
           await (mailOverride || mailReady() ? sendMail : null)?.({
             to: pay.createdBy,
-            subject: `Tizon Books \xB7 \u05D9\u05D5\u05E4\u05D9\u05D9 \u05D3\u05D9\u05D5\u05D5\u05D7 \u05E2\u05DC \u05EA\u05E9\u05DC\u05D5\u05DD \xB7 ${pay.customer?.name || ""}`,
+            subject: `Tizon Finance \xB7 \u05D9\u05D5\u05E4\u05D9\u05D9 \u05D3\u05D9\u05D5\u05D5\u05D7 \u05E2\u05DC \u05EA\u05E9\u05DC\u05D5\u05DD \xB7 ${pay.customer?.name || ""}`,
             text: `\u05D9\u05D5\u05E4\u05D9\u05D9 \u05D3\u05D9\u05D5\u05D5\u05D7 \u05E2\u05DC \u05EA\u05E9\u05DC\u05D5\u05DD \u05D1\u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4 \u05E9\u05DC ${pay.customer?.name || ""} (${money(pay.total)}, \u05E2\u05E1\u05E7\u05D4 ${trx}).
-\u05DC\u05D1\u05D3\u05D5\u05E7 \u05D1\u05DE\u05DE\u05E9\u05E7 \u05E9\u05DC \u05D9\u05D5\u05E4\u05D9\u05D9, \u05D5\u05D0\u05D6 \u05D1-Tizon Books \u05DC\u05DC\u05D7\u05D5\u05E5 "\u05D0\u05D9\u05E9\u05D5\u05E8 \u05D5\u05D4\u05E4\u05E7\u05EA \u05D7\u05E9\u05D1\u05D5\u05E0\u05D9\u05EA" \u05DC\u05D9\u05D3 \u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4.`
+\u05DC\u05D1\u05D3\u05D5\u05E7 \u05D1\u05DE\u05DE\u05E9\u05E7 \u05E9\u05DC \u05D9\u05D5\u05E4\u05D9\u05D9, \u05D5\u05D0\u05D6 \u05D1-Tizon Finance \u05DC\u05DC\u05D7\u05D5\u05E5 "\u05D0\u05D9\u05E9\u05D5\u05E8 \u05D5\u05D4\u05E4\u05E7\u05EA \u05D7\u05E9\u05D1\u05D5\u05E0\u05D9\u05EA" \u05DC\u05D9\u05D3 \u05D3\u05E3 \u05D4\u05E1\u05DC\u05D9\u05E7\u05D4.`
           }).catch(() => {
           });
         }
@@ -1768,7 +1768,7 @@ var books_mail_default = async (req) => {
       await mailer().sendMail({
         from: env("MAIL_FROM") || env("SMTP_USER"),
         to: email,
-        subject: String(body.subject || "Tizon Books \xB7 \u05D0\u05E8\u05DB\u05D9\u05D5\u05DF \u05D7\u05D5\u05D3\u05E9\u05D9"),
+        subject: String(body.subject || "Tizon Finance \xB7 \u05D0\u05E8\u05DB\u05D9\u05D5\u05DF \u05D7\u05D5\u05D3\u05E9\u05D9"),
         text: String(body.text || ""),
         attachments: files
       });
@@ -1781,7 +1781,7 @@ var books_mail_default = async (req) => {
       await mailer().sendMail({
         from: env("MAIL_FROM") || env("SMTP_USER"),
         to: email,
-        subject: `Tizon Books \xB7 \u05D2\u05D9\u05D1\u05D5\u05D9 ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`,
+        subject: `Tizon Finance \xB7 \u05D2\u05D9\u05D1\u05D5\u05D9 ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`,
         text: "\u05D2\u05D9\u05D1\u05D5\u05D9 \u05D0\u05D5\u05D8\u05D5\u05DE\u05D8\u05D9 \u05E9\u05DC \u05DB\u05DC \u05D4\u05E2\u05E1\u05E7\u05D9\u05DD. \u05DC\u05E9\u05D7\u05D6\u05D5\u05E8: \u05D2\u05D9\u05D1\u05D5\u05D9 \u05D5\u05E2\u05E0\u05DF \u2190 \u05E9\u05D7\u05D6\u05E8 \u05DE\u05D2\u05D9\u05D1\u05D5\u05D9.",
         attachments: [{ filename: String(body.filename || "tizon-books-backup.json"), content: Buffer.from(data, "utf8"), contentType: "application/json" }]
       });

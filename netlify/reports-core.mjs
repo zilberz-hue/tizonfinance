@@ -1,5 +1,5 @@
 /* ============================================================================
-   Tizon Books · business reports by email
+   Tizon Finance · business reports by email
    Three reports, each a picture of where the business stands:
      daily    every evening (20:00 Israel time by default): today's income and
               expenses, and the month so far
@@ -135,10 +135,10 @@ export function reportEmail(p, sections, appUrl) {
 <body style="margin:0;background:#f4efe6;font-family:Arial,'Segoe UI',sans-serif;color:#2c2821">
 <div style="max-width:640px;margin:0 auto;padding:18px 12px" dir="rtl">
 <div style="background:linear-gradient(135deg,#8a6331,#c4a36e);color:#fff;border-radius:16px;padding:18px 20px">
-<div style="font-size:13px;opacity:.9">Tizon Books</div><div style="font-size:22px;font-weight:800;margin-top:2px">${esc(p.title)}</div></div>
+<div style="font-size:13px;opacity:.9">Tizon Finance</div><div style="font-size:22px;font-weight:800;margin-top:2px">${esc(p.title)}</div></div>
 ${all}
 ${sections.map(s => bookSection(s, p.kind)).join('<hr style="border:0;border-top:1px solid #eadfca;margin:16px 0">')}
-<div style="margin-top:20px;text-align:center"><a href="${esc(appUrl)}" style="display:inline-block;background:#2f5d46;color:#fff;text-decoration:none;padding:11px 22px;border-radius:10px;font-weight:700">פתח את Tizon Books</a></div>
+<div style="margin-top:20px;text-align:center"><a href="${esc(appUrl)}" style="display:inline-block;background:#2f5d46;color:#fff;text-decoration:none;padding:11px 22px;border-radius:10px;font-weight:700">פתח את Tizon Finance</a></div>
 <div style="color:#9a8c75;font-size:12px;margin-top:16px;text-align:center;line-height:1.6">הסכומים כוללים מע״מ, והרווח לפני מע״מ. הוצאות קבועות שעוד לא הגיעה עליהן חשבונית מסומנות "בהערכה".<br>את הדוחות מפעילים ומכבים בהגדרות העסק ← דוחות במייל.</div>
 </div></body></html>`;
   const lead = sections.map(s => `${s.name}: ${money(s.main.inc.gross)} הכנסות`).join(' · ');

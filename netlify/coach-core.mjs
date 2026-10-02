@@ -1,5 +1,5 @@
 /* ============================================================================
-   Tizon Books · the smart coach
+   Tizon Finance · the smart coach
    A conversation with Claude about the person's own numbers, and written
    plans by area (the clinic, the store, courses, marketing, the way out of
    the overdraft). The Anthropic key is kept only here, on the server; the
@@ -13,7 +13,7 @@ const KEY = 'coach-key';                                    // one key for the w
 const chatKey = (e) => 'coach-chat:' + e, planKey = (e) => 'coach-plans:' + e, jobKey = (id) => 'coach-job:' + id;
 const MAX_TURNS = 30;
 
-export const SYSTEM = `אתה המאמן הפיננסי של בעל עסק קטן בישראל, בתוך מערכת הנהלת החשבונות שלו (Tizon Books).
+export const SYSTEM = `אתה המאמן הפיננסי של בעל עסק קטן בישראל, בתוך מערכת הנהלת החשבונות שלו (Tizon Finance).
 אתה מלווה אותו לאורך זמן: יעדים, הכנסות, הוצאות, תזרים, יציאה מאוברדרפט, הפרשות למס, שיווק ותוכניות עבודה לפי תחומים.
 כללים:
 - כתוב בעברית, ישיר וחם, בלי חנופה. אם יעד לא ריאלי בקצב הנוכחי, תגיד את זה עם מספרים, ותציע את הדרך הכי קרובה אליו.
