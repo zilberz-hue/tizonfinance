@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.42.0';
+const VERSION = '1.42.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -820,6 +820,9 @@ li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
 .mic{flex:0 0 auto;min-width:44px;font-size:18px;padding:6px 10px}.mic.rec{background:#b3412f;color:#fff;border-color:#b3412f;animation:micp 1.2s infinite}@keyframes micp{50%{box-shadow:0 0 0 6px rgba(179,65,47,.18)}}
 .cm-plan{display:block;margin-top:8px;font-size:13px}.cp-n{font-size:13px;color:var(--muted);margin-bottom:8px}
 .cp-goals{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:8px 0}.cp-goals div{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px}.cp-goals b{display:block;color:#2f5d46;font-size:12.5px}
+.cp-acts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+.plan-view .mg-mod-in{max-width:920px;height:92vh;max-height:92vh}.pv-frame{flex:1;width:100%;border:0;background:#f7f3ea;min-height:0}
+@media (max-width:640px){.plan-view .mg-mod-in{height:100%;max-height:100%;border-radius:0}.plan-view .mg-mod-f{flex-wrap:wrap}}
 .cp-st{margin-top:10px}.coach-plan .ln-list li{padding:8px 2px}
 .coach-plan{margin-top:10px;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:10px 12px}.coach-plan summary{cursor:pointer}
 .ct{font-size:14.5px;line-height:1.65}.ct-h{font-weight:800;margin:8px 0 2px;color:#2f5d46}.ct-li{padding-inline-start:14px;text-indent:-12px}.ct-gap{height:6px}.coach-tbl td{white-space:nowrap}
@@ -1278,6 +1281,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.42.1', date: '02.10.26', items: ['תוכנית: כפתור "👁 הצג" פותח את התוכנית המעוצבת בתוך האפליקציה, ומשם מורידים או מדפיסים. אחרי הורדה מופיעה הודעה עם שם הקובץ.', 'אוטומטי: כל תוכנית, גם ישנה שנכתבה כטקסט, מקבלת צ׳קליסט עם תאריכים. כשמבקשים בשיחה "תבנה לי תוכנית…" המאמן בונה תוכנית עם צ׳קליסט ופותח אותה.'] },
   { v: '1.42.0', date: '02.10.26', items: ['מיקרופון במאמן החכם (🎤): מדברים בעברית והטקסט נכנס לתיבה. גם בהערה לתוכנית ובנושא תוכנית.', 'תוכניות עם צ׳קליסט: כל תוכנית נבנית בשלבים, עם משימות, תאריך יעד לכל משימה, יעדים ל-30/60/90 יום ומה מודדים. מסמנים מה בוצע (מסונכרן לכל המכשירים) ורואים התקדמות ואיחורים.', 'תוכנית לכל נושא שתכתוב, וכפתור "📋 הפוך לתוכנית עם צ׳קליסט" מתחת לתשובה ארוכה בשיחה.', 'הורדת תוכנית כקובץ HTML מעוצב עם צ׳קליסט שעובד גם מחוץ לאפליקציה, והדפסה.'] },
   { v: '1.41.0', date: '02.10.26', items: ['מסלול השקה (בתפריט הצד, 🚀): צ׳קליסט עם תאריכים מהפיילוט ועד שהקליניקה עובדת על Tizon Finance — הכנה, תיק הרישום ברשות המסים, עבודה במקביל ל-iCount, והמעבר. הערות, שינוי תאריכים ומשימות משלך, מסונכרן לכל המכשירים, ואפשר להדפיס.'] },
   { v: '1.40.0', date: '02.10.26', items: ['מסמכים חדשים ("＋ מסמכים נוספים" בלשונית מסמכים): הצעת מחיר, הזמנה, תעודת משלוח והזמנת רכש. לא מסמכי מס ולא הכנסה; מהם מפיקים חשבונית בלחיצה "→ חשבונית".', 'קבלה על פיקדון (לא נספרת כהכנסה), הפקדת בנק של מזומן וצ׳קים שעוד לא הופקדו, החזרת שיק (פותחת שוב את החוב) וביטול יתרה, מהשורה של המסמך.', 'ריטיינרים: חיוב חודשי קבוע ללקוח. כל חודש הם ממתינים להפקה, ולחיצה אחת מפיקה את כולם.', 'במבנה האחיד נכנסים הזמנה (100), תעודת משלוח (200), הזמנת רכש (500) והפקדת בנק (420) לפי הקודים הרשמיים.'] },
@@ -2722,10 +2726,37 @@ function MicButton({ value, onChange, flash, disabled }) {
    file that keeps its own checklist. */
 const PLAN_DONE_KEY = 'tzbooks_plandone';
 const planId = (area, p) => area + '@' + String(p.at || '').slice(0, 19);
-const planTasks = (p) => (p.data?.stages || []).flatMap((st, i) => st.tasks.map((k, j) => ({ ...k, id: `s${i}t${j}`, due: addDaysIso(String(p.at || todayIso()).slice(0, 10), k.day || 0) })));
+/* A plan written as text (before plans came as data, or when the model did
+   not answer in JSON) still becomes a checklist: headings are stages, list
+   lines are tasks, and each stage gets a date from its name (week 2, month
+   3, 30 days) or from its place. */
+function textToPlan(text) {
+  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const stages = [], summary = []; let cur = null;
+  const dayOf = (title, i) => { const t = String(title);
+    let m = t.match(/שבוע(?:ות)?\s*(\d+)(?:\s*[-–]\s*(\d+))?/); if (m) return Math.min(90, Number(m[2] || m[1]) * 7);
+    m = t.match(/חודש\s*(\d+)/); if (m) return Math.min(90, Number(m[1]) * 30);
+    m = t.match(/(\d+)\s*יום/); if (m) return Math.min(365, Number(m[1]));
+    if (/חודש ראשון/.test(t)) return 30; if (/חודש שני/.test(t)) return 60; if (/חודש שלישי/.test(t)) return 90;
+    return Math.min(90, (i + 1) * 7); };
+  for (const l of lines) {
+    const h = l.match(/^#{1,4}\s+(.*)$/) || l.match(/^\*\*([^*]+)\*\*:?$/) || l.match(/^(\d+\)\s+.*)$/);
+    const b = l.match(/^(?:[-*•]|\d+[.]|\[\s?\])\s+(.*)$/);
+    if (h && !b) { cur = { title: h[1].replace(/\*\*/g, ''), tasks: [] }; stages.push(cur); continue; }
+    if (b) { if (!cur) { cur = { title: 'משימות', tasks: [] }; stages.push(cur); } cur.tasks.push({ t: b[1].replace(/\*\*/g, ''), detail: '', owner: '' }); continue; }
+    if (cur && cur.tasks.length) cur.tasks[cur.tasks.length - 1].detail += (cur.tasks[cur.tasks.length - 1].detail ? ' ' : '') + l.replace(/\*\*/g, '');
+    else if (!cur) summary.push(l.replace(/\*\*/g, ''));
+  }
+  const st = stages.filter(x => x.tasks.length);
+  st.forEach((x, i) => { const d = dayOf(x.title, i); x.tasks.forEach(k => { k.day = d; }); });
+  if (!st.length) return null;
+  return { title: '', summary: summary.join(' ').slice(0, 1500), goals: [], measure: [], budget: '', stages: st, fromText: true };
+}
+const planData = (p) => p.data || textToPlan(p.text);
+const planTasks = (p) => (planData(p)?.stages || []).flatMap((st, i) => st.tasks.map((k, j) => ({ ...k, id: `s${i}t${j}`, due: addDaysIso(String(p.at || todayIso()).slice(0, 10), k.day || 0) })));
 const escH = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function planHTML(area, p, done) {
-  const d = p.data, id = planId(area, p), start = String(p.at || '').slice(0, 10), tasks = planTasks(p);
+  const d = planData(p), id = planId(area, p), start = String(p.at || '').slice(0, 10), tasks = planTasks(p);
   const stages = d.stages.map((st, i) => `<section class="st"><h2>${escH(st.title)}</h2><ul>${st.tasks.map((k, j) => { const t = tasks.find(x => x.id === `s${i}t${j}`);
     return `<li data-id="${t.id}"><label><input type="checkbox"${done[t.id] ? ' checked' : ''}><span class="t">${escH(k.t)}</span><span class="due">${heDate(t.due)}</span></label>${k.detail ? `<div class="dt">${escH(k.detail)}</div>` : ''}</li>`; }).join('')}</ul></section>`).join('');
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escH(p.label)}</title>
@@ -2742,7 +2773,7 @@ li.done .t{text-decoration:line-through;color:#98a098;font-weight:500}li.late .d
 .ms li{padding:6px 0}.foot{margin-top:18px;font-size:12.5px;color:var(--mut);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 button{font:inherit;border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 14px;cursor:pointer}
 @media print{body{background:#fff}.np{display:none}.card,.st{break-inside:avoid}header{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-@media (max-width:560px){label{flex-wrap:wrap}.t{flex:1 1 calc(100% - 30px)}.due{margin-right:29px}.dt{margin-right:0}}</style></head><body><div class="w">
+@media (max-width:560px){label{flex-wrap:wrap}.t{flex:1 1 calc(100% - 44px);min-width:0}.due{margin-right:29px}.dt{margin-right:0}}</style></head><body><div class="w">
 <header><h1>${escH(p.label)}</h1><div class="m">תוכנית 90 יום · נכתבה ${heDate(start)} · Tizon Finance</div><div class="bar"><i id="bar"></i></div><div class="pct" id="pct"></div></header>
 ${d.summary ? `<div class="card sum">${escH(d.summary)}</div>` : ''}
 ${d.goals.length ? `<div class="goals">${d.goals.map(g => `<div><b>${escH(g.when)}</b>${escH(g.goal)}</div>`).join('')}</div>` : ''}
@@ -2762,9 +2793,12 @@ function downloadText(name, text, type) {
   a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-function CoachPlan({ area, p, onDel, onRedo, wait }) {
-  const id = planId(area, p);
+function CoachPlan({ area, p, onDel, onRedo, wait, flash, open }) {
+  const id = planId(area, p), d = planData(p);
   const [all, setAll] = useState(() => lsGet(PLAN_DONE_KEY, {}) || {});
+  const [view, setView] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => { if (open && ref.current) { ref.current.open = true; ref.current.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); } }, [open]);
   const done = all[id] || {};
   const toggle = (k) => setAll(x => { const cur = { ...(x[id] || {}) }; if (cur[k]) delete cur[k]; else cur[k] = todayIso();
     const n = { ...x, [id]: cur }; try { lsSet(PLAN_DONE_KEY, n); } catch { /* ignore */ } return n; });
@@ -2772,33 +2806,43 @@ function CoachPlan({ area, p, onDel, onRedo, wait }) {
   const pct = tasks.length ? Math.round(n / tasks.length * 100) : 0;
   const late = tasks.filter(t => !done[t.id] && t.due < today).length;
   const fname = `Tizon-plan-${area.replace(/[^\w-]/g, '')}-${String(p.at || '').slice(0, 10)}.html`;
-  const html = () => planHTML(area, p, done);
-  return (<details className="coach-plan">
+  const html = () => d ? planHTML(area, p, done) : `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${escH(p.label)}</title><style>body{font-family:Arial;margin:28px;line-height:1.7;font-size:14px;white-space:pre-wrap}</style></head><body><h2>${escH(p.label)}</h2>${escH(p.text)}</body></html>`;
+  const download = () => { downloadText(fname, html(), 'text/html;charset=utf-8'); flash?.('הקובץ ירד: ' + fname + ' · נמצא בתיקיית ההורדות'); };
+  return (<details ref={ref} className="coach-plan">
     <summary><b>{p.label}</b> <small>· {new Date(p.at).toLocaleDateString('he-IL')}</small>
-      {p.data && <span className={'mg-chip ' + (pct === 100 ? 'ok' : late ? 'bad' : '')} style={{ marginInlineStart: 8 }}>{pct}%{late ? ` · ${late} באיחור` : ''}</span>}</summary>
-    {!p.data && <CoachText text={p.text} />}
-    {p.data && <div className="cp">
+      {d && <span className={'mg-chip ' + (pct === 100 ? 'ok' : late ? 'bad' : '')} style={{ marginInlineStart: 8 }}>{pct}%{late ? ` · ${late} באיחור` : ''}</span>}</summary>
+    <div className="cp-acts">
+      <button className="mg-btn sm" onClick={() => setView(true)}>👁 הצג</button>
+      <button className="mg-btn ghost sm" onClick={download}>⬇ קובץ HTML</button>
+      <button className="mg-btn ghost sm" onClick={() => printHTML(html())}>🖨 הדפס</button>
+      {onRedo && <button className="mg-btn ghost sm" disabled={!!wait} onClick={onRedo}>↻ בנה מחדש</button>}
+      <button className="mg-btn ghost sm" onClick={onDel}>מחק</button></div>
+    {!d && <CoachText text={p.text} />}
+    {d && <div className="cp">
       <div className="ln-bar" style={{ margin: '8px 0 4px' }}><i style={{ width: pct + '%', background: 'linear-gradient(90deg,#2f5d46,#7aa37f)' }} /></div>
-      <div className="cp-n">{n} מתוך {tasks.length} משימות</div>
-      {p.data.summary && <p className="coach-p">{p.data.summary}</p>}
-      {p.data.goals.length > 0 && <div className="cp-goals">{p.data.goals.map((g, i) => <div key={i}><b>{g.when}</b>{g.goal}</div>)}</div>}
-      {p.data.stages.map((st, i) => <div key={i} className="cp-st"><div className="ct-h">{st.title}</div>
+      <div className="cp-n">{n} מתוך {tasks.length} משימות{d.fromText && ' · נבנה אוטומטית מהטקסט; "↻ בנה מחדש" ייתן גם יעדים ומדדים'}</div>
+      {d.summary && <p className="coach-p">{d.summary}</p>}
+      {d.goals.length > 0 && <div className="cp-goals">{d.goals.map((g, i) => <div key={i}><b>{g.when}</b>{g.goal}</div>)}</div>}
+      {d.stages.map((st, i) => <div key={i} className="cp-st"><div className="ct-h">{st.title}</div>
         <ul className="ln-list">{st.tasks.map((k, j) => { const t = tasks.find(x => x.id === `s${i}t${j}`), ok = !!done[t.id];
           const c = ok ? 'ok' : t.due < today ? 'bad' : t.due <= addDaysIso(today, 7) ? 'warn' : '';
           return <li key={j} className={ok ? 'done' : ''}><label className="ln-row"><input type="checkbox" checked={ok} onChange={() => toggle(t.id)} />
             <span className="ln-t">{k.t}</span><span className={'mg-chip ln-due ' + c}>{ok ? '✓ ' + heDate(done[t.id]) : heDate(t.due)}</span></label>
             {k.detail && <div className="ln-w">{k.detail}</div>}</li>; })}</ul></div>)}
-      {p.data.measure.length > 0 && <><div className="ct-h">📏 מה מודדים כל שבוע</div>{p.data.measure.map((m, i) => <div key={i} className="ct-li">• {m}</div>)}</>}
-      {p.data.budget && <><div className="ct-h">💰 תקציב</div><div className="ct">{p.data.budget}</div></>}
+      {d.measure.length > 0 && <><div className="ct-h">📏 מה מודדים כל שבוע</div>{d.measure.map((m, i) => <div key={i} className="ct-li">• {m}</div>)}</>}
+      {d.budget && <><div className="ct-h">💰 תקציב</div><div className="ct">{d.budget}</div></>}
     </div>}
-    <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-      {p.data && <button className="mg-btn sm" onClick={() => downloadText(fname, html(), 'text/html;charset=utf-8')}>⬇ קובץ HTML</button>}
-      <button className="mg-btn ghost sm" onClick={() => printHTML(p.data ? html() : `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${escH(p.label)}</title><style>body{font-family:Arial;margin:28px;line-height:1.7;font-size:14px;white-space:pre-wrap}</style></head><body><h2>${escH(p.label)}</h2>${escH(p.text)}</body></html>`)}>🖨 הדפס</button>
-      {onRedo && <button className="mg-btn ghost sm" disabled={!!wait} onClick={onRedo}>↻ בנה מחדש</button>}
-      <button className="mg-btn ghost sm" onClick={onDel}>מחק</button></div>
+    {view && <div className="mg-mod plan-view" onClick={() => setView(false)}>
+      <div className="mg-mod-in" onClick={e => e.stopPropagation()}>
+        <div className="mg-mod-h"><h3>{p.label}</h3><button className="sf-x" aria-label="סגור" onClick={() => setView(false)}>✕</button></div>
+        <iframe title={p.label} srcDoc={html()} className="pv-frame" />
+        <div className="mg-mod-f"><button className="mg-btn" onClick={download}>⬇ הורד את הקובץ</button><button className="mg-btn ghost" onClick={() => printHTML(html())}>🖨 הדפס</button>
+          <button className="mg-btn ghost" onClick={() => setView(false)}>סגור</button></div>
+      </div></div>}
   </details>);
 }
 
+const PLAN_ASK = /(בנה|תבנה|תכין|הכן|צור|תן)\s+(לי\s+)?(תוכנית|תכנית|צ[׳']?קליסט|רשימת משימות)|^(תוכנית|תכנית)\s/;
 function SmartCoach({ summary, flash, partial }) {
   const [st, setSt] = useState(null);
   const [err, setErr] = useState('');
@@ -2822,8 +2866,12 @@ function SmartCoach({ summary, flash, partial }) {
     }
     return { state: 'error', error: 'timeout' };
   };
+  const [justBuilt, setJustBuilt] = useState('');
   const send = async (text) => {
     const t = String(text ?? q).trim(); if (!t || wait) return;
+    /* Asking for a plan builds one, with its checklist, instead of a chat answer. */
+    if (PLAN_ASK.test(t)) { setQ(''); setChat(c => [...c, { role: 'user', text: t, at: new Date().toISOString() }]); const ok = await plan('t_' + Date.now().toString(36), t.slice(0, 90));
+      setChat(c => [...c, { role: 'assistant', text: ok ? '✅ בניתי תוכנית עם צ׳קליסט ותאריכים. היא פתוחה למטה, ב**תוכניות עבודה**. לחיצה על 👁 הצג פותחת אותה כדף מעוצב.' : '❌ לא הצלחתי לבנות את התוכנית. הסיבה כתובה למעלה; נסה שוב.', at: new Date().toISOString() }]); return; }
     setQ(''); setWait('chat'); setErr('');
     const now = new Date().toISOString();
     setChat(c => [...c, { role: 'user', text: t, at: now }]);
@@ -2843,10 +2891,10 @@ function SmartCoach({ summary, flash, partial }) {
     try {
       await coachCall({ id, kind: 'plan', area, label, summary, note: [note, extra].filter(Boolean).join('\n') }, true);
       const j = await poll(id);
-      if (j.state === 'done') { setPlans(p => ({ ...p, [j.area]: j.plan })); setTopic(''); flash('התוכנית מוכנה · עם צ׳קליסט'); }
+      if (j.state === 'done') { setPlans(p => ({ ...p, [j.area]: j.plan })); setTopic(''); setJustBuilt(j.area + j.plan.at); flash('התוכנית מוכנה · עם צ׳קליסט'); setWait(''); return true; }
       else setErr(coachErr(j.error, j.detail));
     } catch (e) { setErr(coachErr(e.message)); }
-    setWait('');
+    setWait(''); return false;
   };
   const saveKey = async (remove) => {
     try { await coachCall({ action: 'set-key', key, remove }); setKey(''); flash(remove ? 'המפתח הוסר' : 'המפתח נשמר בשרת'); load(); }
@@ -2895,7 +2943,7 @@ function SmartCoach({ summary, flash, partial }) {
         <input value={note} onChange={e => setNote(e.target.value)} placeholder="הערה לתוכנית הבאה (לא חובה): למשל 'יש לי 10 שעות פנויות בשבוע'" style={{ flex: 1, minWidth: 0 }} />
         <MicButton value={note} onChange={setNote} flash={flash} disabled={!!wait} /></div>
       {Object.entries(plans).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).map(([a, p]) =>
-        <CoachPlan key={a + p.at} area={a} p={p} wait={wait} onDel={() => { if (window.confirm('למחוק את התוכנית?')) delPlan(a); }}
+        <CoachPlan key={a + p.at} area={a} p={p} wait={wait} flash={flash} open={justBuilt === a + p.at} onDel={() => { if (window.confirm('למחוק את התוכנית?')) delPlan(a); }}
           onRedo={() => plan(a, COACH_AREAS.some(x => x[0] === a) ? undefined : p.label)} />)}
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', fontSize: 13 }}>
         {chat.length > 0 && <button className="mg-linkish" onClick={clear}>מחק את השיחה</button>}
