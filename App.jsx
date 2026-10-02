@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.39.0';
+const VERSION = '1.39.1';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1247,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.39.1', date: '02.10.26', items: ['PDF של מסמך: עמוד אחד כשהמסמך נכנס בעמוד (בלי עמוד שני ריק).'] },
   { v: '1.39.0', date: '02.10.26', items: ['שם חדש: Tizon Finance · הנהלת חשבונות, חשבוניות וליווי פיננסי למטפלים. השם מופיע במסך, במסמכים, במיילים, בדוחות ובקובצי המבנה האחיד. הנתונים, הכתובת והגיבויים לא השתנו.'] },
   { v: '1.38.1', date: '02.10.26', items: ['חתימה דיגיטלית: כפתור "✨ צור תעודה עצמית" יוצר תעודה בשרת (המפתח לא יוצא ממנו), וכל PDF נחתם מיד. מסומנת כתעודה עצמית עד שמעלים תעודה מגורם מאשר.'] },
   { v: '1.38.0', date: '02.10.26', items: ['חתימה דיגיטלית: מעלים את קובץ התעודה (‎.pfx/.p12) ומקלידים את הסיסמה שלה ישירות באפליקציה (גיבוי וענן ← חתימה דיגיטלית). שניהם נשמרים רק בשרת. בלי הגדרות ב-Netlify.', 'הסבר מאיפה מזמינים תעודה, והודעה ברורה כשהסיסמה שגויה.'] },
@@ -5768,8 +5769,16 @@ async function docPDF(book, d, copy) {
   const pdf = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
   const W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight();
   const per = Math.floor(canvas.width * H / W);
-  for (let off = 0, page = 0; off < canvas.height; off += per, page++) {
-    const c = document.createElement('canvas'); c.width = canvas.width; c.height = Math.min(per, canvas.height - off);
+  /* The page ends where the ink ends: blank margin at the bottom never makes a page of its own. */
+  let bottom = canvas.height;
+  try {
+    const g = canvas.getContext('2d'), w = canvas.width;
+    const inked = (y) => { const px = g.getImageData(0, y, w, 1).data; for (let i = 0; i < px.length; i += 16) if (px[i] < 235 || px[i + 1] < 235 || px[i + 2] < 235) return true; return false; };
+    let y = canvas.height - 1; while (y > 0 && !inked(y)) y -= 2;
+    bottom = Math.min(canvas.height, y + 40);
+  } catch { /* unreadable canvas: keep its full height */ }
+  for (let off = 0, page = 0; off < bottom; off += per, page++) {
+    const c = document.createElement('canvas'); c.width = canvas.width; c.height = Math.min(per, bottom - off);
     c.getContext('2d').drawImage(canvas, 0, off, c.width, c.height, 0, 0, c.width, c.height);
     if (page) pdf.addPage();
     pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, W, c.height * W / c.width);
