@@ -26,9 +26,34 @@ export const PLAN_AREAS = {
   clinic: 'הקליניקה (טיפולים)', store: 'החנות (מוצרים)', courses: 'קורסים והדרכות', tizon: 'Tizon Health (הפלטפורמה)',
   marketing: 'שיווק כללי לכל העסקים', debt: 'יציאה מהאוברדרפט ותזרים', costs: 'קיצוץ הוצאות',
 };
-const planPrompt = (area, label) => `בנה תוכנית עבודה ל-90 יום לתחום: ${label}.
-מבנה: 1) איפה אנחנו עומדים (מספרים מהסיכום), 2) יעד ל-30, 60 ו-90 יום, 3) פעולות לפי שבועות לחודש הראשון ואחר כך לפי חודשים, 4) ${area === 'marketing' || area === 'clinic' || area === 'store' || area === 'courses' || area === 'tizon' ? 'ערוצי שיווק, מסרים ומבצע אחד לשבועיים הקרובים' : 'מה מקצצים או דוחים, ובאיזה סדר'}, 5) מה מודדים כל שבוע.
-היה ספציפי לעסק הזה ולמספרים שלו.`;
+const planPrompt = (area, label) => `בנה תוכנית עבודה ל-90 יום לנושא: ${label}.
+היה ספציפי לעסק הזה ולמספרים שלו. ${area === 'marketing' || area === 'clinic' || area === 'store' || area === 'courses' || area === 'tizon' ? 'כלול ערוצי שיווק, מסרים ומבצע אחד לשבועיים הקרובים.' : area === 'debt' || area === 'costs' ? 'כלול מה מקצצים או דוחים, ובאיזה סדר.' : ''}
+החזר JSON בלבד, בלי טקסט לפניו או אחריו ובלי גדרות קוד, במבנה הזה:
+{"title":"כותרת קצרה","summary":"2-3 משפטים: איפה אנחנו עומדים עם מספרים מהסיכום, ומה הרעיון המרכזי",
+ "goals":[{"when":"30 יום","goal":"יעד מדיד"},{"when":"60 יום","goal":"..."},{"when":"90 יום","goal":"..."}],
+ "stages":[{"title":"שבוע 1 · ...","tasks":[{"t":"פעולה קונקרטית אחת","day":2,"detail":"איך בדיוק, כמה זה אמור להביא או לחסוך","owner":"אני"}]}],
+ "measure":["מה מודדים כל שבוע, עם מספר יעד"],
+ "budget":"תקציב אם רלוונטי, או מחרוזת ריקה"}
+כללים: 4 עד 6 שלבים (שבועות 1-4 בנפרד, ואחר כך חודש 2 וחודש 3). 3 עד 6 משימות בכל שלב. "day" הוא מספר הימים מהיום (0 עד 90) שעד אליו המשימה צריכה להיות גמורה. כל משימה היא פעולה אחת שאפשר לסמן כבוצעה.`;
+
+/* The plan as data: the model answers in JSON; anything that does not read
+   as a plan is kept as text, so nothing is lost. */
+export function parsePlan(raw) {
+  const t = String(raw || ''), a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  try {
+    const j = JSON.parse(t.slice(a, b + 1)), str = (x, n = 600) => String(x ?? '').trim().slice(0, n);
+    const stages = (Array.isArray(j.stages) ? j.stages : []).slice(0, 10).map(st => ({ title: str(st.title, 120),
+      tasks: (Array.isArray(st.tasks) ? st.tasks : []).slice(0, 12).map(k => ({ t: str(k.t, 300), detail: str(k.detail), owner: str(k.owner, 40),
+        day: Math.max(0, Math.min(365, Math.round(Number(k.day) || 0))) })).filter(k => k.t) })).filter(st => st.tasks.length);
+    if (!stages.length) return null;
+    return { title: str(j.title, 140), summary: str(j.summary, 1500), budget: str(j.budget, 600),
+      goals: (Array.isArray(j.goals) ? j.goals : []).slice(0, 6).map(g => ({ when: str(g.when, 40), goal: str(g.goal, 300) })).filter(g => g.goal),
+      measure: (Array.isArray(j.measure) ? j.measure : []).slice(0, 10).map(m => str(m, 300)).filter(Boolean), stages };
+  } catch { return null; }
+}
+const planAsText = (d) => [d.summary, '', ...d.goals.map(g => `- ${g.when}: ${g.goal}`), '',
+  ...d.stages.flatMap(st => ['## ' + st.title, ...st.tasks.map(k => `- ${k.t}`), '']), d.measure.length ? '## מה מודדים' : '', ...d.measure.map(m => '- ' + m)].join('\n').trim();
 
 /* One call to the model. */
 export async function askClaude({ key, system, messages, maxTokens = 1500, fetchImpl = fetch }) {
@@ -88,10 +113,11 @@ export async function coachRun(body, email, deps) {
     if (!key) throw Object.assign(new Error('no-key'), { code: 'no-key' });
     const sum = summaryText(body.summary);
     if (body.kind === 'plan') {
-      const area = String(body.area || ''), label = PLAN_AREAS[area] || String(body.label || area).slice(0, 80);
-      const text = await deps.ask({ key, system: SYSTEM + '\n\n' + sum, messages: [{ role: 'user', content: planPrompt(area, label) + (body.note ? '\nהערה ממני: ' + String(body.note).slice(0, 600) : '') }], maxTokens: 3000 });
+      const area = String(body.area || '').slice(0, 60), label = PLAN_AREAS[area] || String(body.label || area).slice(0, 120);
+      const raw = await deps.ask({ key, system: SYSTEM + '\n\n' + sum, messages: [{ role: 'user', content: planPrompt(area, label) + (body.note ? '\nהערה ממני: ' + String(body.note).slice(0, 4000) : '') }], maxTokens: 5000 });
+      const data = parsePlan(raw);
       const plans = (await st.get(planKey(email), { type: 'json' }).catch(() => null)) || {};
-      plans[area || label] = { label, text, at: new Date().toISOString() };
+      plans[area || label] = { label: data?.title || label, text: data ? planAsText(data) : raw, data: data || undefined, at: new Date().toISOString() };
       await st.setJSON(planKey(email), plans);
       await st.setJSON(jobKey(id), { state: 'done', kind: 'plan', area: area || label, plan: plans[area || label] });
       return;

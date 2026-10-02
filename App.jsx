@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.41.0';
+const VERSION = '1.42.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -49,7 +49,7 @@ const lsSet = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED
    send them twice). They are also kept in this browser, so everything keeps
    working offline. The device lock (PIN) follows too, so every device asks
    for the same code. The store is linked for every device on the server. */
-const SYNCED = ['tzbooks_coach', 'tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin', 'tzbooks_taxprofile', 'tzbooks_launch'];
+const SYNCED = ['tzbooks_coach', 'tzbooks_software', 'tzbooks_archive', 'tzbooks_autobk', 'tzbooks_lastbackup', 'tzbooks_tours', 'tzbooks_seen_version', 'tzbooks_pin', 'tzbooks_taxprofile', 'tzbooks_launch', 'tzbooks_plandone'];
 /* Removed on one device, removed on all: kept in the cloud as false. */
 const lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } if (SYNCED.includes(k)) prefPush(k, false); };
 let prefUid = null, prefQueue = {}, prefTimer = null, prefErr = '';
@@ -817,6 +817,10 @@ li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
 .cm.thinking{color:var(--muted)}.cm .dots{display:inline-block;animation:cdots 1.2s infinite}@keyframes cdots{50%{opacity:.2}}
 .coach-sugg{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}@media (max-width:640px){.coach-sugg.ask{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}.coach-sugg.ask .mg-chipbtn{flex:0 0 auto;white-space:nowrap}}.coach-sugg .mg-chipbtn{font-size:13.5px;padding:6px 12px}
 .coach-in{display:flex;gap:8px;align-items:flex-end}.coach-in textarea{flex:1;min-width:0;resize:vertical}
+.mic{flex:0 0 auto;min-width:44px;font-size:18px;padding:6px 10px}.mic.rec{background:#b3412f;color:#fff;border-color:#b3412f;animation:micp 1.2s infinite}@keyframes micp{50%{box-shadow:0 0 0 6px rgba(179,65,47,.18)}}
+.cm-plan{display:block;margin-top:8px;font-size:13px}.cp-n{font-size:13px;color:var(--muted);margin-bottom:8px}
+.cp-goals{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:8px 0}.cp-goals div{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px}.cp-goals b{display:block;color:#2f5d46;font-size:12.5px}
+.cp-st{margin-top:10px}.coach-plan .ln-list li{padding:8px 2px}
 .coach-plan{margin-top:10px;background:#fffdf8;border:1px solid var(--line);border-radius:12px;padding:10px 12px}.coach-plan summary{cursor:pointer}
 .ct{font-size:14.5px;line-height:1.65}.ct-h{font-weight:800;margin:8px 0 2px;color:#2f5d46}.ct-li{padding-inline-start:14px;text-indent:-12px}.ct-gap{height:6px}.coach-tbl td{white-space:nowrap}
 @media (max-width:640px){.coach-goal .cg-top{flex-direction:column;align-items:stretch}.cg-big{font-size:34px}
@@ -1274,6 +1278,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.42.0', date: '02.10.26', items: ['מיקרופון במאמן החכם (🎤): מדברים בעברית והטקסט נכנס לתיבה. גם בהערה לתוכנית ובנושא תוכנית.', 'תוכניות עם צ׳קליסט: כל תוכנית נבנית בשלבים, עם משימות, תאריך יעד לכל משימה, יעדים ל-30/60/90 יום ומה מודדים. מסמנים מה בוצע (מסונכרן לכל המכשירים) ורואים התקדמות ואיחורים.', 'תוכנית לכל נושא שתכתוב, וכפתור "📋 הפוך לתוכנית עם צ׳קליסט" מתחת לתשובה ארוכה בשיחה.', 'הורדת תוכנית כקובץ HTML מעוצב עם צ׳קליסט שעובד גם מחוץ לאפליקציה, והדפסה.'] },
   { v: '1.41.0', date: '02.10.26', items: ['מסלול השקה (בתפריט הצד, 🚀): צ׳קליסט עם תאריכים מהפיילוט ועד שהקליניקה עובדת על Tizon Finance — הכנה, תיק הרישום ברשות המסים, עבודה במקביל ל-iCount, והמעבר. הערות, שינוי תאריכים ומשימות משלך, מסונכרן לכל המכשירים, ואפשר להדפיס.'] },
   { v: '1.40.0', date: '02.10.26', items: ['מסמכים חדשים ("＋ מסמכים נוספים" בלשונית מסמכים): הצעת מחיר, הזמנה, תעודת משלוח והזמנת רכש. לא מסמכי מס ולא הכנסה; מהם מפיקים חשבונית בלחיצה "→ חשבונית".', 'קבלה על פיקדון (לא נספרת כהכנסה), הפקדת בנק של מזומן וצ׳קים שעוד לא הופקדו, החזרת שיק (פותחת שוב את החוב) וביטול יתרה, מהשורה של המסמך.', 'ריטיינרים: חיוב חודשי קבוע ללקוח. כל חודש הם ממתינים להפקה, ולחיצה אחת מפיקה את כולם.', 'במבנה האחיד נכנסים הזמנה (100), תעודת משלוח (200), הזמנת רכש (500) והפקדת בנק (420) לפי הקודים הרשמיים.'] },
   { v: '1.39.2', date: '02.10.26', items: ['מסמך שנחתם דיגיטלית נושא חותמת נראית: "🔏 חתום דיגיטלית" עם שם בעל התעודה, במקום שורת החתימה. החתימה עצמה בתוך הקובץ, ורואים אותה ב-Adobe Reader.'] },
@@ -2684,6 +2689,116 @@ function CoachText({ text }) {
 const COACH_AREAS = [['clinic', '🩺 הקליניקה'], ['store', '🛒 החנות'], ['courses', '🎓 קורסים'], ['tizon', '🌿 Tizon Health'], ['marketing', '📣 שיווק'], ['debt', '🏦 אוברדרפט ותזרים'], ['costs', '✂ קיצוץ הוצאות']];
 const COACH_ASK = ['איך מגיעים ל-50 אלף כבר החודש?', 'מה לחתוך קודם?', 'מה לשלוח ללקוחות שלא חזרו?', 'איך יוצאים מהאוברדרפט הכי מהר?', 'מה 3 הפעולות החשובות לשבוע הזה?'];
 
+/* The microphone: speech to text in the browser (Hebrew), into whatever box
+   it sits next to. Nothing is recorded or sent anywhere but the text. */
+const SpeechRec = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+function MicButton({ value, onChange, flash, disabled }) {
+  const [on, setOn] = useState(false);
+  const rec = useRef(null);
+  useEffect(() => () => { try { rec.current?.abort(); } catch { /* ignore */ } }, []);
+  const start = () => {
+    if (!SpeechRec) { flash?.('הדפדפן הזה לא תומך בהכתבה. אפשר ללחוץ על המיקרופון במקלדת של הטלפון, או לפתוח ב-Chrome.'); return; }
+    if (on) { try { rec.current?.stop(); } catch { /* ignore */ } return; }
+    const r = new SpeechRec(); rec.current = r;
+    r.lang = 'he-IL'; r.interimResults = true; r.continuous = true;
+    const base = String(value || '').trim(); let fin = '';
+    r.onresult = (e) => { let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t; else interim += t; }
+      onChange([base, (fin + interim).trim()].filter(Boolean).join(' ')); };
+    r.onerror = (e) => { setOn(false);
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') flash?.('אין הרשאה למיקרופון. מאשרים בסמל המנעול שליד הכתובת, ומנסים שוב.');
+      else if (e.error === 'no-speech') flash?.('לא נשמע דיבור. נסה שוב, קרוב יותר למיקרופון.');
+      else if (e.error !== 'aborted') flash?.('ההכתבה נעצרה (' + e.error + ')'); };
+    r.onend = () => setOn(false);
+    try { r.start(); setOn(true); } catch { setOn(false); }
+  };
+  return <button type="button" className={'mg-btn ghost mic' + (on ? ' rec' : '')} disabled={disabled} onClick={start}
+    title={on ? 'עצור הכתבה' : 'הכתבה בקול'} aria-label={on ? 'עצור הכתבה' : 'הכתבה בקול'}>{on ? '⏹' : '🎤'}</button>;
+}
+
+/* A plan from the coach, as a checklist: stages, tasks with a date counted
+   from the day the plan was written, goals and what to measure. What is
+   done follows the owner to every device; the plan can leave as an HTML
+   file that keeps its own checklist. */
+const PLAN_DONE_KEY = 'tzbooks_plandone';
+const planId = (area, p) => area + '@' + String(p.at || '').slice(0, 19);
+const planTasks = (p) => (p.data?.stages || []).flatMap((st, i) => st.tasks.map((k, j) => ({ ...k, id: `s${i}t${j}`, due: addDaysIso(String(p.at || todayIso()).slice(0, 10), k.day || 0) })));
+const escH = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function planHTML(area, p, done) {
+  const d = p.data, id = planId(area, p), start = String(p.at || '').slice(0, 10), tasks = planTasks(p);
+  const stages = d.stages.map((st, i) => `<section class="st"><h2>${escH(st.title)}</h2><ul>${st.tasks.map((k, j) => { const t = tasks.find(x => x.id === `s${i}t${j}`);
+    return `<li data-id="${t.id}"><label><input type="checkbox"${done[t.id] ? ' checked' : ''}><span class="t">${escH(k.t)}</span><span class="due">${heDate(t.due)}</span></label>${k.detail ? `<div class="dt">${escH(k.detail)}</div>` : ''}</li>`; }).join('')}</ul></section>`).join('');
+  return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escH(p.label)}</title>
+<style>:root{--ink:#22301f;--mut:#667066;--acc:#2f5d46;--bg:#f7f3ea;--card:#fff;--line:#e8e0cf}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Assistant,Heebo,Arial,sans-serif;line-height:1.6}
+.w{max-width:860px;margin:0 auto;padding:24px 16px 60px}header{background:linear-gradient(120deg,#2f5d46,#7aa37f);color:#fff;border-radius:18px;padding:22px 24px}
+header h1{margin:0 0 6px;font-size:26px}header .m{opacity:.9;font-size:14px}.bar{height:10px;background:rgba(255,255,255,.3);border-radius:99px;margin-top:14px;overflow:hidden}.bar i{display:block;height:100%;background:#fff;border-radius:99px;transition:width .3s}
+.pct{margin-top:6px;font-size:14px;font-weight:700}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-top:14px}
+.sum{font-size:15.5px}.goals{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:14px}.goals div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.goals b{display:block;color:var(--acc);font-size:13px}h2{font-size:18px;color:var(--acc);margin:0 0 8px}ul{list-style:none;margin:0;padding:0}
+li{padding:10px 0;border-top:1px solid #f0eadc}li:first-child{border-top:0}label{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+input{width:19px;height:19px;margin-top:3px;flex:0 0 19px;accent-color:var(--acc)}.t{flex:1;font-weight:600}.due{font-size:12.5px;background:#f1ebde;border-radius:99px;padding:2px 10px;white-space:nowrap;font-weight:700;color:#6b5a35}
+li.done .t{text-decoration:line-through;color:#98a098;font-weight:500}li.late .due{background:#f8dcd6;color:#9b2f1f}.dt{font-size:13.5px;color:var(--mut);margin:3px 29px 0 0}
+.ms li{padding:6px 0}.foot{margin-top:18px;font-size:12.5px;color:var(--mut);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+button{font:inherit;border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 14px;cursor:pointer}
+@media print{body{background:#fff}.np{display:none}.card,.st{break-inside:avoid}header{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+@media (max-width:560px){label{flex-wrap:wrap}.t{flex:1 1 calc(100% - 30px)}.due{margin-right:29px}.dt{margin-right:0}}</style></head><body><div class="w">
+<header><h1>${escH(p.label)}</h1><div class="m">תוכנית 90 יום · נכתבה ${heDate(start)} · Tizon Finance</div><div class="bar"><i id="bar"></i></div><div class="pct" id="pct"></div></header>
+${d.summary ? `<div class="card sum">${escH(d.summary)}</div>` : ''}
+${d.goals.length ? `<div class="goals">${d.goals.map(g => `<div><b>${escH(g.when)}</b>${escH(g.goal)}</div>`).join('')}</div>` : ''}
+${stages.replace(/<section class="st">/g, '<section class="st card">')}
+${d.measure.length ? `<div class="card"><h2>📏 מה מודדים כל שבוע</h2><ul class="ms">${d.measure.map(m => `<li>• ${escH(m)}</li>`).join('')}</ul></div>` : ''}
+${d.budget ? `<div class="card"><h2>💰 תקציב</h2>${escH(d.budget)}</div>` : ''}
+<div class="foot"><span>הסימונים נשמרים בדפדפן הזה. הצ׳קליסט המסונכרן נמצא באפליקציה, אצל המאמן.</span><button class="np" onclick="print()">🖨 הדפס</button></div></div>
+<script>(function(){var K='tzplan:${escH(id)}',s={};try{s=JSON.parse(localStorage.getItem(K)||'{}')}catch(e){}
+var today=new Date().toISOString().slice(0,10),items=[].slice.call(document.querySelectorAll('li[data-id]'));
+var due={${tasks.map(t => `"${t.id}":"${t.due}"`).join(',')}};
+function draw(){var n=0;items.forEach(function(li){var id=li.getAttribute('data-id'),c=li.querySelector('input');if(id in s)c.checked=!!s[id];li.classList.toggle('done',c.checked);li.classList.toggle('late',!c.checked&&due[id]<today);if(c.checked)n++});
+var p=items.length?Math.round(n/items.length*100):0;document.getElementById('bar').style.width=p+'%';document.getElementById('pct').textContent=p+'% · '+n+' מתוך '+items.length+' משימות'}
+items.forEach(function(li){li.querySelector('input').addEventListener('change',function(e){s[li.getAttribute('data-id')]=e.target.checked;try{localStorage.setItem(K,JSON.stringify(s))}catch(x){}draw()})});draw()})();</script></body></html>`;
+}
+function downloadText(name, text, type) {
+  const blob = new Blob([text], { type }); const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function CoachPlan({ area, p, onDel, onRedo, wait }) {
+  const id = planId(area, p);
+  const [all, setAll] = useState(() => lsGet(PLAN_DONE_KEY, {}) || {});
+  const done = all[id] || {};
+  const toggle = (k) => setAll(x => { const cur = { ...(x[id] || {}) }; if (cur[k]) delete cur[k]; else cur[k] = todayIso();
+    const n = { ...x, [id]: cur }; try { lsSet(PLAN_DONE_KEY, n); } catch { /* ignore */ } return n; });
+  const today = todayIso(), tasks = planTasks(p), n = tasks.filter(t => done[t.id]).length;
+  const pct = tasks.length ? Math.round(n / tasks.length * 100) : 0;
+  const late = tasks.filter(t => !done[t.id] && t.due < today).length;
+  const fname = `Tizon-plan-${area.replace(/[^\w-]/g, '')}-${String(p.at || '').slice(0, 10)}.html`;
+  const html = () => planHTML(area, p, done);
+  return (<details className="coach-plan">
+    <summary><b>{p.label}</b> <small>· {new Date(p.at).toLocaleDateString('he-IL')}</small>
+      {p.data && <span className={'mg-chip ' + (pct === 100 ? 'ok' : late ? 'bad' : '')} style={{ marginInlineStart: 8 }}>{pct}%{late ? ` · ${late} באיחור` : ''}</span>}</summary>
+    {!p.data && <CoachText text={p.text} />}
+    {p.data && <div className="cp">
+      <div className="ln-bar" style={{ margin: '8px 0 4px' }}><i style={{ width: pct + '%', background: 'linear-gradient(90deg,#2f5d46,#7aa37f)' }} /></div>
+      <div className="cp-n">{n} מתוך {tasks.length} משימות</div>
+      {p.data.summary && <p className="coach-p">{p.data.summary}</p>}
+      {p.data.goals.length > 0 && <div className="cp-goals">{p.data.goals.map((g, i) => <div key={i}><b>{g.when}</b>{g.goal}</div>)}</div>}
+      {p.data.stages.map((st, i) => <div key={i} className="cp-st"><div className="ct-h">{st.title}</div>
+        <ul className="ln-list">{st.tasks.map((k, j) => { const t = tasks.find(x => x.id === `s${i}t${j}`), ok = !!done[t.id];
+          const c = ok ? 'ok' : t.due < today ? 'bad' : t.due <= addDaysIso(today, 7) ? 'warn' : '';
+          return <li key={j} className={ok ? 'done' : ''}><label className="ln-row"><input type="checkbox" checked={ok} onChange={() => toggle(t.id)} />
+            <span className="ln-t">{k.t}</span><span className={'mg-chip ln-due ' + c}>{ok ? '✓ ' + heDate(done[t.id]) : heDate(t.due)}</span></label>
+            {k.detail && <div className="ln-w">{k.detail}</div>}</li>; })}</ul></div>)}
+      {p.data.measure.length > 0 && <><div className="ct-h">📏 מה מודדים כל שבוע</div>{p.data.measure.map((m, i) => <div key={i} className="ct-li">• {m}</div>)}</>}
+      {p.data.budget && <><div className="ct-h">💰 תקציב</div><div className="ct">{p.data.budget}</div></>}
+    </div>}
+    <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+      {p.data && <button className="mg-btn sm" onClick={() => downloadText(fname, html(), 'text/html;charset=utf-8')}>⬇ קובץ HTML</button>}
+      <button className="mg-btn ghost sm" onClick={() => printHTML(p.data ? html() : `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${escH(p.label)}</title><style>body{font-family:Arial;margin:28px;line-height:1.7;font-size:14px;white-space:pre-wrap}</style></head><body><h2>${escH(p.label)}</h2>${escH(p.text)}</body></html>`)}>🖨 הדפס</button>
+      {onRedo && <button className="mg-btn ghost sm" disabled={!!wait} onClick={onRedo}>↻ בנה מחדש</button>}
+      <button className="mg-btn ghost sm" onClick={onDel}>מחק</button></div>
+  </details>);
+}
+
 function SmartCoach({ summary, flash, partial }) {
   const [st, setSt] = useState(null);
   const [err, setErr] = useState('');
@@ -2721,13 +2836,14 @@ function SmartCoach({ summary, flash, partial }) {
     } catch (e) { setErr(coachErr(e.message)); setChat(c => c.slice(0, -1)); setQ(t); }
     setWait('');
   };
-  const plan = async (area) => {
+  const [topic, setTopic] = useState('');
+  const plan = async (area, label, extra) => {
     if (wait) return; setWait(area); setErr('');
     const id = uid('job');
     try {
-      await coachCall({ id, kind: 'plan', area, summary, note }, true);
+      await coachCall({ id, kind: 'plan', area, label, summary, note: [note, extra].filter(Boolean).join('\n') }, true);
       const j = await poll(id);
-      if (j.state === 'done') { setPlans(p => ({ ...p, [j.area]: j.plan })); flash('התוכנית מוכנה'); }
+      if (j.state === 'done') { setPlans(p => ({ ...p, [j.area]: j.plan })); setTopic(''); flash('התוכנית מוכנה · עם צ׳קליסט'); }
       else setErr(coachErr(j.error, j.detail));
     } catch (e) { setErr(coachErr(e.message)); }
     setWait('');
@@ -2753,7 +2869,9 @@ function SmartCoach({ summary, flash, partial }) {
     {st?.keyed && !st.failed && <>
       <div className="coach-chat" aria-live="polite">
         {!chat.length && <div className="coach-p">שאל אותי כל דבר על העסק. אני רואה את המספרים שלמעלה: היעד, הקצב, ההוצאות, ההפרשות והאוברדרפט.</div>}
-        {chat.map((m, i) => <div key={i} className={'cm ' + m.role}>{m.role === 'assistant' ? <CoachText text={m.text} /> : m.text}</div>)}
+        {chat.map((m, i) => <div key={i} className={'cm ' + m.role}>{m.role === 'assistant' ? <><CoachText text={m.text} />
+          {m.text.length > 200 && <button className="mg-linkish cm-plan" disabled={!!wait} onClick={() => plan('chat_' + Date.now().toString(36), (chat[i - 1]?.text || 'תוכנית מהשיחה').slice(0, 70), 'בנה את התוכנית על בסיס התשובה הזו שלך מהשיחה:\n' + m.text.slice(0, 3500))}>📋 הפוך לתוכנית עם צ׳קליסט</button>}</> : m.text}</div>)}
+        {wait && wait !== 'chat' && <div className="cm assistant thinking">בונה תוכנית עם צ׳קליסט<span className="dots">…</span></div>}
         {wait === 'chat' && <div className="cm assistant thinking">המאמן חושב<span className="dots">…</span></div>}
         <div ref={endRef} />
       </div>
@@ -2761,19 +2879,24 @@ function SmartCoach({ summary, flash, partial }) {
       <div className="coach-in">
         <textarea rows={2} value={q} placeholder="מה תרצה לשאול את המאמן?" onChange={e => setQ(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+        <MicButton value={q} onChange={setQ} flash={flash} disabled={!!wait} />
         <button className="mg-btn" disabled={!q.trim() || !!wait} onClick={() => send()}>{wait === 'chat' ? '…' : 'שלח'}</button>
       </div>
 
-      <h4 style={{ margin: '18px 0 6px' }}>📋 תוכניות לפי תחום (90 יום)</h4>
+      <h4 style={{ margin: '18px 0 6px' }}>📋 תוכניות עבודה (90 יום, עם צ׳קליסט ותאריכים)</h4>
       <div className="coach-sugg">{COACH_AREAS.map(([a, l]) => <button key={a} className={'mg-chipbtn' + (plans[a] ? ' on' : '')} disabled={!!wait} onClick={() => plan(a)}>
         {wait === a ? 'בונה…' : (plans[a] ? '↻ ' : '＋ ') + l}</button>)}</div>
-      <input value={note} onChange={e => setNote(e.target.value)} placeholder="הערה לתוכנית הבאה (לא חובה): למשל 'יש לי 10 שעות פנויות בשבוע'" style={{ width: '100%', marginTop: 6 }} />
-      {Object.entries(plans).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).map(([a, p]) => <details key={a} className="coach-plan">
-        <summary><b>{p.label}</b> <small>· {new Date(p.at).toLocaleDateString('he-IL')}</small></summary>
-        <CoachText text={p.text} />
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-          <button className="mg-btn ghost sm" onClick={() => printHTML(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${p.label}</title><style>body{font-family:Arial;margin:28px;line-height:1.7;font-size:14px;white-space:pre-wrap}</style></head><body><h2>${p.label}</h2>${String(p.text).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</body></html>`)}>🖨 הדפס</button>
-          <button className="mg-btn ghost sm" onClick={() => delPlan(a)}>מחק</button></div></details>)}
+      <div className="coach-in" style={{ marginTop: 6 }}>
+        <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="או תוכנית לכל נושא: למשל 'השקת קורס דיקור בינואר'"
+          onKeyDown={e => { if (e.key === 'Enter' && topic.trim()) plan('t_' + Date.now().toString(36), topic.trim()); }} style={{ flex: 1, minWidth: 0 }} />
+        <MicButton value={topic} onChange={setTopic} flash={flash} disabled={!!wait} />
+        <button className="mg-btn" disabled={!topic.trim() || !!wait} onClick={() => plan('t_' + Date.now().toString(36), topic.trim())}>{wait && wait.startsWith('t_') ? 'בונה…' : 'בנה'}</button></div>
+      <div className="coach-in" style={{ marginTop: 6 }}>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="הערה לתוכנית הבאה (לא חובה): למשל 'יש לי 10 שעות פנויות בשבוע'" style={{ flex: 1, minWidth: 0 }} />
+        <MicButton value={note} onChange={setNote} flash={flash} disabled={!!wait} /></div>
+      {Object.entries(plans).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).map(([a, p]) =>
+        <CoachPlan key={a + p.at} area={a} p={p} wait={wait} onDel={() => { if (window.confirm('למחוק את התוכנית?')) delPlan(a); }}
+          onRedo={() => plan(a, COACH_AREAS.some(x => x[0] === a) ? undefined : p.label)} />)}
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', fontSize: 13 }}>
         {chat.length > 0 && <button className="mg-linkish" onClick={clear}>מחק את השיחה</button>}
         <button className="mg-linkish" onClick={() => { if (window.confirm('להסיר את מפתח ה-API מהשרת?')) saveKey(true); }}>הסר מפתח API</button>
