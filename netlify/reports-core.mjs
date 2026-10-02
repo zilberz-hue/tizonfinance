@@ -150,7 +150,7 @@ ${sections.map(s => bookSection(s, p.kind)).join('<hr style="border:0;border-top
    wasSent(key) / markSent(key); send({ to, subject, html }); appUrl.
    only: { email, kind } sends one report now to one person (a test), sent or not. */
 export async function runReports(now, deps, only = null) {
-  const books = (await deps.books()).filter(b => !b.deleted);
+  const books = (await deps.books()).filter(b => !b.deleted && !b.mergedInto);
   const people = {};
   for (const b of books) {
     const cfg = reportCfg(b);

@@ -33,7 +33,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.44.1';
+const VERSION = '1.45.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -541,6 +541,224 @@ function parseBankCSV(text) {
   return out;
 }
 
+/* ------------------------------------------------------- business lines
+   One business (one tax id, one numbering, one VAT file) with several lines
+   of activity: the clinic, herbs, the online store, courses. Every income
+   and expense belongs to a line, so each line has its own income, costs and
+   profit, without splitting the business for tax. A document's line comes
+   from what it says (its own line), else from its items or words in its
+   lines, else the main line; store orders go to the store's line; an expense
+   to its own line, its supplier's, or the shared costs. */
+const SegCtx = React.createContext({ segs: [], main: '' });
+const SEG_DEF = ['קליניקה', 'צמחים', 'חנות מקוונת', 'קורסים'];
+const SEG_SHARED = 'משותף';
+const SEG_WORDS_DEF = { 'צמחים': 'צמח פורמול תמצית טינקטור קפסול אבקת שמן' , 'קורסים': 'קורס סדנ הרצא השתלמות' };
+const segsOf = (book) => (Array.isArray(book?.segs) ? book.segs : []).map(s => String(s || '').trim()).filter(Boolean);
+const segOn = (book) => segsOf(book).length > 1;
+const segMain = (book) => segsOf(book).includes(book?.segDefault) ? book.segDefault : segsOf(book)[0] || '';
+const segStore = (book) => segsOf(book).includes(book?.storeSeg) ? book.storeSeg : (segsOf(book).find(s => /חנות|אתר|אונליין|מקוונ/.test(s)) || segMain(book));
+const segWords = (book) => segsOf(book).map(s => [s, String((book?.segWords || {})[s] ?? SEG_WORDS_DEF[s] ?? '').split(/[\s,]+/).map(w => w.trim()).filter(w => w.length > 1)]).filter(([, w]) => w.length);
+function segIndex(book, data) {
+  const byId = {}, byName = {}, sup = {};
+  (data?.items || []).forEach(it => { if (it.seg) { byId[it.id] = it.seg; byName[normName(it.name)] = it.seg; } });
+  (data?.suppliers || []).forEach(s => { if (s.seg) sup[s.id] = s.seg; });
+  return { byId, byName, sup, words: segWords(book) };
+}
+const lineSeg = (book, idx, l) => {
+  if (l.itemId && idx.byId[l.itemId]) return idx.byId[l.itemId];
+  const n = normName(l.desc); if (idx.byName[n]) return idx.byName[n];
+  const hit = idx.words.find(([, ws]) => ws.some(w => n.includes(w)));
+  return hit ? hit[0] : '';
+};
+/* A document's share per line of activity, by its lines' amounts. */
+function docSegs(d, book, idx) {
+  const segs = segsOf(book), main = segMain(book);
+  if (d.seg && segs.includes(d.seg)) return { [d.seg]: 1 };
+  const w = {}; let tot = 0;
+  (d.lines || []).forEach(l => { const amt = Math.abs((Number(l.qty) || 0) * (Number(l.price) || 0)); if (!amt) return;
+    const s = lineSeg(book, idx, l) || main; w[s] = (w[s] || 0) + amt; tot += amt; });
+  if (!tot) { const hit = idx.words.find(([, ws]) => ws.some(x => normName(d.desc || '').includes(x))); return { [hit ? hit[0] : main]: 1 }; }
+  Object.keys(w).forEach(k => { w[k] = w[k] / tot; });
+  return w;
+}
+const segsLabel = (split) => Object.entries(split || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => v < 0.999 ? `${k} ${Math.round(v * 100)}%` : k).join(' · ');
+
+/* The line picker in the forms; nothing when the business has one line. */
+function SegField({ value, onChange, shared, auto, label = 'תחום פעילות' }) {
+  const { segs, main } = React.useContext(SegCtx);
+  if (segs.length < 2) return null;
+  return <Field label={label}><select value={value || ''} onChange={e => onChange(e.target.value)}>
+    {auto && <option value="">{auto === true ? 'אוטומטי (לפי הפריטים)' : auto}</option>}
+    {shared && <option value="">{SEG_SHARED} (לכל התחומים)</option>}
+    {!auto && !shared && <option value="">{main} (ברירת מחדל)</option>}
+    {segs.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>;
+}
+
+/* Income, costs and profit per line of activity. Shared costs are shown on
+   their own and, if asked, spread by each line's share of the income. */
+function SegmentsTab({ book, data, ledger, onSettings }) {
+  const segs = segsOf(book);
+  const ym = thisMonth(), y = ym.slice(0, 4);
+  const [range, setRange] = useState('ytd');
+  const [spread, setSpread] = useState(false);
+  const [from, to] = range === 'month' ? [ym, ym] : range === 'last' ? [addMonths(ym, -1), addMonths(ym, -1)] : range === '12' ? [addMonths(ym, -11), ym] : [y + '-01', ym];
+  const net = (r) => (r.gross || 0) - (r.vat || 0);
+  const add = (o, k, v) => { o[k] = (o[k] || 0) + v; };
+  const res = useMemo(() => {
+    const inc = {}, exp = {}, cnt = {}, monthly = {};
+    ledger.income.filter(r => inMonths(r.date, from, to)).forEach(r => Object.entries(r.segSplit || { [segMain(book)]: 1 }).forEach(([s, w]) => { add(inc, s, net(r) * w); add(cnt, s, w); }));
+    ledger.outgo.filter(e => inMonths(e.date, from, to)).forEach(e => Object.entries(e.segSplit || { [SEG_SHARED]: 1 }).forEach(([s, w]) => add(exp, s, net(e) * w)));
+    const m12 = Array.from({ length: 12 }, (_, i) => addMonths(ym, i - 11));
+    ledger.income.filter(r => inMonths(r.date, m12[0], ym)).forEach(r => { const m = String(r.date).slice(0, 7);
+      Object.entries(r.segSplit || { [segMain(book)]: 1 }).forEach(([s, w]) => { monthly[s] = monthly[s] || {}; add(monthly[s], m, net(r) * w); }); });
+    const incTot = Object.values(inc).reduce((a, v) => a + v, 0), shared = exp[SEG_SHARED] || 0;
+    const rows = [...segs, ...Object.keys(inc).filter(s => !segs.includes(s))].map(s => {
+      const i = inc[s] || 0, e = exp[s] || 0, part = spread && incTot ? shared * i / incTot : 0;
+      return { s, inc: r2(i), exp: r2(e + part), share: incTot ? i / incTot : 0, profit: r2(i - e - part), n: Math.round(cnt[s] || 0), months: m12.map(m => r2(monthly[s]?.[m] || 0)) };
+    });
+    return { rows, shared: r2(shared), incTot: r2(incTot), expTot: r2(Object.values(exp).reduce((a, v) => a + v, 0)), m12 };
+  }, [ledger, from, to, spread, book]);
+  /* What the clinic sold by item: the store's stock is not touched from here, so this is the list to update it by hand. */
+  const sold = useMemo(() => {
+    const idx = segIndex(book, data), out = {};
+    (data.documents || []).filter(d => (d.series === 'live' || d.series === 'import') && !d.cancelled && ['305', '320', '400'].includes(d.type) && inMonths(d.date, from, to))
+      .forEach(d => (d.lines || []).forEach(l => { const s = (segsOf(book).includes(d.seg) ? d.seg : '') || lineSeg(book, idx, l); if (!s || s === segStore(book) || s === segMain(book)) return;
+        const k = normName(l.desc); out[k] = out[k] || { name: l.desc, seg: s, qty: 0, sum: 0 }; out[k].qty += Number(l.qty) || 0; out[k].sum += (Number(l.qty) || 0) * (Number(l.price) || 0); }));
+    return Object.values(out).sort((a, b) => b.qty - a.qty).slice(0, 40);
+  }, [data.documents, from, to, book, data.items]);
+  if (segs.length < 2) return <div className="mg-card"><h3 style={{ marginTop: 0 }}>🧩 תחומי פעילות</h3>
+    <p className="coach-p">העסק עוד לא מחולק לתחומים. מגדירים אותם פעם אחת (למשל קליניקה, צמחים, חנות מקוונת, קורסים), וכל הכנסה והוצאה משויכת לתחום.</p>
+    {onSettings && <button className="mg-btn" onClick={onSettings}>הגדרת תחומים</button>}</div>;
+  const max = Math.max(1, ...res.rows.flatMap(r => r.months));
+  const COL = ['#2f7d5b', '#c08a3e', '#3b6ea8', '#8a5aa6', '#b3412f', '#5d8f8a', '#7a7a3a'];
+  return (<div className="segs">
+    <div className="mg-card">
+      <div className="col-head"><h3 style={{ margin: 0 }}>🧩 תחומי פעילות</h3>
+        <div className="col-filters" style={{ margin: 0 }}>{[['month', 'החודש'], ['last', 'חודש שעבר'], ['ytd', `מתחילת ${y}`], ['12', '12 חודשים']].map(([k, l]) =>
+          <button key={k} className={'mg-chipbtn' + (range === k ? ' on' : '')} onClick={() => setRange(k)}>{l}</button>)}</div></div>
+      <div data-tour="segs-cards" className="seg-cards">{res.rows.map((r, i) => <div key={r.s} className="seg-card" style={{ '--c': COL[i % COL.length] }}>
+        <div className="sc-h"><i />{r.s}<small>{Math.round(r.share * 100)}%</small></div>
+        <div className="sc-n"><span>הכנסות</span><b>{fmtRound(r.inc)}</b></div>
+        <div className="sc-n"><span>הוצאות{spread ? ' (כולל חלק מהמשותף)' : ''}</span><b>{fmtRound(r.exp)}</b></div>
+        <div className="sc-n sc-p"><span>רווח</span><b className={r.profit < 0 ? 'neg' : ''}>{fmtRound(r.profit)}</b></div>
+        <div className="sc-bar"><i style={{ width: Math.round(r.share * 100) + '%' }} /></div></div>)}</div>
+      <div className="seg-foot">
+        <span>הוצאות משותפות (שכירות, טלפון וכד׳): <b>{fmtRound(res.shared)}</b></span>
+        <label className="col-test" style={{ margin: 0 }}><input type="checkbox" checked={spread} onChange={e => setSpread(e.target.checked)} /> לחלק את המשותף לפי חלק בהכנסות</label>
+        <span>סה״כ: הכנסות <b>{fmtRound(res.incTot)}</b> · הוצאות <b>{fmtRound(res.expTot)}</b> · רווח <b>{fmtRound(res.incTot - res.expTot)}</b></span></div>
+      <div className="mg-hint">לפני מע״מ. הכנסה בלי תחום הולכת ל"{segMain(book)}"; הזמנות מהאתר ל"{segStore(book)}"; הוצאה בלי תחום ל"{SEG_SHARED}". {onSettings && <button className="mg-linkish" onClick={onSettings}>הגדרות התחומים</button>}</div>
+    </div>
+    <div className="mg-card"><h3 style={{ marginTop: 0 }}>📈 הכנסות לפי תחום · 12 חודשים</h3>
+      <div className="seg-chart">{res.m12.map((m, mi) => <div key={m} className="sg-col" title={m}>
+        <div className="sg-stack">{res.rows.map((r, i) => r.months[mi] > 0 && <i key={r.s} style={{ height: (r.months[mi] / max * 100) + '%', background: COL[i % COL.length] }} title={`${r.s}: ${fmtRound(r.months[mi])}`} />)}</div>
+        <small>{m.slice(5)}</small></div>)}</div>
+      <div className="seg-legend">{res.rows.map((r, i) => <span key={r.s}><i style={{ background: COL[i % COL.length] }} />{r.s}</span>)}</div>
+    </div>
+    {sold.length > 0 && <div className="mg-card"><h3 style={{ marginTop: 0 }}>🌿 נמכר בקליניקה לפי פריט</h3>
+      <p className="mg-hint" style={{ marginTop: 0 }}>מה יצא מהמלאי בלי לעבור באתר. המלאי של החנות לא מתעדכן מכאן; זו הרשימה לעדכון ידני.</p>
+      <div className="sold-list">{sold.map(x => <div key={x.name} className="sr-row"><div><b>{x.name}</b><small>{x.seg}</small></div><span>{x.qty} יח׳ · {fmtRound(x.sum)}</span></div>)}</div></div>}
+  </div>);
+}
+
+/* The settings: the lines, the main one, the store's, and words that put a document line in a line of activity. */
+function SegSettings({ book, flash, data, siblings = [], onMerge }) {
+  const [segs, setSegs] = useState(() => segsOf(book).length ? segsOf(book) : []);
+  const [nw, setNw] = useState('');
+  const savePatch = async (p) => { try { await DB.patch('books', book.id, clean(p)); Object.assign(book, p); flash('נשמר'); } catch (e) { flash('השמירה נכשלה · ' + dbErr(e)); } };
+  const saveSegs = (list) => { setSegs(list); savePatch({ segs: list }); };
+  const on = segs.length > 1;
+  return (<div>
+    {!on && <><p className="coach-p" style={{ marginTop: 0 }}>מחלקים את העסק לתחומים כדי לראות הכנסות, הוצאות ורווח לכל תחום, בלי לפצל את העסק מול רשות המסים (מספור אחד, מע״מ אחד).</p>
+      <button className="mg-btn sm" onClick={() => { saveSegs(SEG_DEF); savePatch({ segs: SEG_DEF, segDefault: SEG_DEF[0], storeSeg: 'חנות מקוונת' }); }}>הפעל עם: {SEG_DEF.join(', ')}</button></>}
+    {on && <>
+      <div className="seg-edit">{segs.map((s, i) => <span key={s + i} className="seg-pill">
+        <input value={s} onChange={e => { const n = [...segs]; n[i] = e.target.value; setSegs(n); }} onBlur={() => saveSegs(segs.map(x => x.trim()).filter(Boolean))} />
+        <button aria-label="הסר" onClick={() => { if (window.confirm(`להסיר את "${s}"? רשומות שסומנו בו יעברו לברירת המחדל.`)) saveSegs(segs.filter((_, j) => j !== i)); }}>✕</button></span>)}
+        <span className="seg-pill add"><input value={nw} placeholder="תחום חדש" onChange={e => setNw(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && nw.trim()) { saveSegs([...segs, nw.trim()]); setNw(''); } }} />
+          <button disabled={!nw.trim()} onClick={() => { saveSegs([...segs, nw.trim()]); setNw(''); }}>＋</button></span></div>
+      <div className="col-grid">
+        <Field label="הכנסה בלי תחום הולכת ל"><select value={segMain(book)} onChange={e => savePatch({ segDefault: e.target.value })}>{segs.map(s => <option key={s}>{s}</option>)}</select></Field>
+        <Field label="הזמנות מהאתר הולכות ל"><select value={segStore(book)} onChange={e => savePatch({ storeSeg: e.target.value })}>{segs.map(s => <option key={s}>{s}</option>)}</select></Field>
+      </div>
+      <div className="mg-hint">מילים שמשייכות שורה במסמך לתחום (גם במסמכים שנמשכו מ-iCount): אם תיאור השורה מכיל אחת מהן.</div>
+      <div className="col-grid">{segs.map(s => <Field key={s} label={`מילים ל"${s}"`}><input defaultValue={(book.segWords || {})[s] ?? SEG_WORDS_DEF[s] ?? ''} placeholder="מילה, מילה"
+        onBlur={e => savePatch({ segWords: { ...(book.segWords || {}), [s]: e.target.value } })} /></Field>)}</div>
+      <div className="mg-hint">אפשר גם לשייך פריט לתחום (בעריכת פריט), ספק (בעריכת ספק), וכל מסמך או הוצאה בטופס שלהם.</div>
+    </>}
+    {siblings.length > 0 && onMerge && <div className="mg-note" style={{ marginTop: 12 }}>
+      <b>עוד עסק עם אותו מספר עוסק:</b> {siblings.map(x => x.book.name).join(', ')}. מבחינת רשות המסים זה עסק אחד.{' '}
+      {siblings.map(x => <button key={x.book.id} className="mg-btn sm" style={{ marginInlineStart: 6 }} onClick={() => onMerge(x)}>אחד את "{x.book.name}" לכאן</button>)}</div>}
+  </div>);
+}
+
+/* Merging a business with the same tax id into this one: its records are
+   copied here with its line of activity, the store link moves here, and the
+   old business is kept (hidden) as it was. Nothing is deleted. A business
+   that issued real documents of its own is not merged: two numberings under
+   one tax id are a question for the accountant first. */
+async function mergeLineInto({ main, mainData, sib, sibData, seg, cols, onStep }) {
+  const live = (sibData.documents || []).filter(d => d.series === 'live');
+  if (live.length) throw new Error(`ב"${sib.name}" יש ${live.length} מסמכים אמיתיים במספור משלו. לפני איחוד צריך לברר עם רואה החשבון איך לטפל בשני המספורים.`);
+  const tag = (r, k) => (k === 'expenses' || k === 'incomes' || k === 'items' || k === 'suppliers' || k === 'recurring') && !r.seg ? { ...r, seg } : r;
+  const out = {};
+  for (const k of ['suppliers', 'items', 'incomes', 'expenses', 'banktx', 'recurring', 'retainers', 'standing']) {
+    const have = new Map((mainData[k] || []).map(r => [r.id, r]));
+    const list = (sibData[k] || []).map(r => { const { _arch, ...x } = r; const id = have.has(x.id) && JSON.stringify(have.get(x.id)) !== JSON.stringify(x) ? 'm_' + x.id : x.id; return tag({ ...x, id, mergedFrom: sib.id }, k); });
+    let n = 0;
+    for (const r of list) { onStep?.(`${k}: ${++n}/${list.length}`); await withTimeout(cols[k].put(r.id, clean(r)), 15000); }
+    out[k] = list.length;
+  }
+  onStep?.('לקוחות…');
+  const cp = planCustomers(mainData.customers || [], sibData.customers || [], 'merge');
+  if (cp.add.length + cp.upd.length) await saveCustomers(cols.customers, [...cp.add, ...cp.upd]);
+  out.customers = cp.add.length;
+  /* Imported history (from iCount): into this business's pack, without what it already has. */
+  onStep?.('היסטוריית מסמכים…');
+  const key = (d) => `${d.type}:${d.number}`;
+  const mine = new Set((mainData.documents || []).filter(d => d.series === 'import').map(key));
+  const docs = (sibData.documents || []).filter(d => d.series === 'import' && !mine.has(key(d))).map(({ _arch, ...d }) => ({ ...d, seg: d.seg || seg, mergedFrom: sib.id }));
+  out.documents = docs.length ? await archiveAdd(main.id, {}, docs) : 0;
+  onStep?.('חיבור לחנות…');
+  const patchMain = { segs: [...new Set([...(segsOf(main).length ? segsOf(main) : SEG_DEF), seg])] };
+  if (!segsOf(main).includes(main.segDefault)) patchMain.segDefault = patchMain.segs[0];
+  if (sib.tenant && !main.tenant) { patchMain.tenant = sib.tenant; patchMain.storeSeg = seg; }
+  else if (sib.tenant) patchMain.storeSeg = seg;
+  await DB.patch('books', main.id, clean(patchMain)); Object.assign(main, patchMain);
+  await DB.patch('books', sib.id, { mergedInto: main.id, mergedAt: new Date().toISOString(), mergedSeg: seg }); sib.mergedInto = main.id;
+  return out;
+}
+function MergeBox({ main, mainData, sib, sibData, cols, flash, onClose, onDone }) {
+  const segs = segsOf(main).length ? segsOf(main) : SEG_DEF;
+  const [seg, setSeg] = useState(() => sib.tenant ? (segs.find(s => /חנות|אתר|מקוונ/.test(s)) || segs[0]) : segs[0]);
+  const [busy, setBusy] = useState(''), [err, setErr] = useState(''), [done, setDone] = useState(null);
+  const live = (sibData?.documents || []).filter(d => d.series === 'live').length;
+  const count = (k) => (sibData?.[k] || []).length;
+  const run = async () => { setBusy('מתחיל…'); setErr('');
+    try { const r = await mergeLineInto({ main, mainData, sib, sibData, seg, cols, onStep: setBusy }); setDone(r); flash('האיחוד הסתיים'); }
+    catch (e) { setErr(e.message); } setBusy(''); };
+  return (<div className="mg-mod" onClick={busy ? undefined : onClose}><div className="mg-mod-in" onClick={e => e.stopPropagation()}>
+    <div className="mg-mod-h"><h3>איחוד "{sib.name}" לתוך "{main.name}"</h3>{!busy && <button className="sf-x" onClick={onClose}>✕</button>}</div>
+    <div className="mg-mod-b">
+      {!sibData && <div className="mg-empty">טוען את "{sib.name}"…</div>}
+      {sibData && !done && <>
+        <p className="coach-p" style={{ marginTop: 0 }}>הרשומות של "{sib.name}" יועתקו לכאן ויסומנו בתחום שתבחר. {sib.tenant ? 'החיבור לחנות יעבור לכאן, וההזמנות מהאתר ייכנסו לתחום הזה. ' : ''}"{sib.name}" עצמו לא נמחק: הוא נשאר כמו שהוא, מוסתר מהתפריט.</p>
+        <ul className="merge-list">
+          <li>הכנסות ידניות: {count('incomes')} · הוצאות: {count('expenses')} · ספקים: {count('suppliers')} · פריטים: {count('items')}</li>
+          <li>לקוחות: {count('customers')} (כפולים מתאחדים) · שורות בנק: {count('banktx')} · הוצאות קבועות: {count('recurring')}</li>
+          <li>מסמכים מ-iCount: {(sibData.documents || []).filter(d => d.series === 'import').length} (מה שכבר קיים כאן לא יוכפל) · מסמכי ניסיון לא מועברים</li>
+        </ul>
+        <Field label="לאיזה תחום לשייך את מה שמגיע מ״{sib.name}״"><select value={seg} onChange={e => setSeg(e.target.value)}>{[...new Set([...segs, 'חנות מקוונת'])].map(s => <option key={s}>{s}</option>)}</select></Field>
+        {live > 0 && <div className="mg-note bad" style={{ marginTop: 10 }}>ב"{sib.name}" יש {live} מסמכים אמיתיים במספור משלו. איחוד ייצור שני מספורים לאותו עוסק, ולכן הוא חסום. כדאי לברר עם ששון.</div>}
+        {err && <div className="mg-note bad" style={{ marginTop: 10 }}>{err}</div>}
+        {busy && <div className="mg-note" style={{ marginTop: 10 }}>⏳ {busy}</div>}
+      </>}
+      {done && <div className="mg-note">✅ האיחוד הסתיים: {done.incomes} הכנסות, {done.expenses} הוצאות, {done.suppliers} ספקים, {done.items} פריטים, {done.customers} לקוחות חדשים, {done.documents} מסמכים מ-iCount.</div>}
+    </div>
+    <div className="mg-mod-f">{!done ? <><button className="mg-btn" disabled={!sibData || !!busy || live > 0} onClick={run}>אחד עכשיו</button><button className="mg-btn ghost" disabled={!!busy} onClick={onClose}>ביטול</button></>
+      : <button className="mg-btn" onClick={onDone}>סגור וטען מחדש</button>}</div>
+  </div></div>);
+}
+
 /* ------------------------------------------------------------ the ledger */
 /* One list of income and one of expenses for a book, whatever their source. */
 function buildLedger(book, data) {
@@ -589,8 +807,16 @@ function buildLedger(book, data) {
               cat: 'מסמכים שהופקו', pay: (d.payments || []).map(p => p.kind).join(', '),
               gross: sign * r2(d.total), vat: rate === 0 ? 0 : sign * r2(d.vat), docNo: docNum(d) }];
   });
+  /* Lines of activity: each row's share per line (see segIndex). */
+  const segs = segOn(book), sx = segs ? segIndex(book, data) : null, docById = segs ? new Map((data?.documents || []).map(d => [d.id, d])) : null;
+  if (segs) {
+    fromShop.forEach(r => { r.segSplit = { [segStore(book)]: 1 }; });
+    fromDocs.forEach(r => { r.segSplit = docSegs(docById.get(r.id.slice(2)) || {}, book, sx); });
+    manual.forEach(r => { r.segSplit = { [segsOf(book).includes(r.seg) ? r.seg : segMain(book)]: 1 }; });
+  }
   const income = [...fromShop, ...fromDocs, ...manual].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const outgo = (data?.expenses || []).map(e => ({ ...e, gross: r2(e.gross), vat: rate === 0 ? 0 : r2(e.vat) }))
+  const outgo = (data?.expenses || []).map(e => ({ ...e, gross: r2(e.gross), vat: rate === 0 ? 0 : r2(e.vat),
+      ...(segs ? { segSplit: { [segsOf(book).includes(e.seg) ? e.seg : sx.sup[e.supplierId] && segsOf(book).includes(sx.sup[e.supplierId]) ? sx.sup[e.supplierId] : SEG_SHARED]: 1 } } : {}) }))
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return { income, outgo, rate };
 }
@@ -796,6 +1022,19 @@ li.done .ln-t{text-decoration:line-through;color:#8a94a0;font-weight:500}
 .ln-add{display:flex;flex-wrap:wrap;gap:6px}.ln-add input:first-child{flex:1 1 200px;min-width:0;padding:7px 9px;border:1px solid #d5dbe2;border-radius:8px;font:inherit}
 @media (max-width:640px){.ln-row{flex-wrap:wrap}.ln-t{flex:1 1 calc(100% - 40px)}.ln-due{margin-inline-start:28px}.ln-nx{flex-wrap:wrap}.ln-nx span:nth-child(2){flex:1 1 calc(100% - 40px)}.ln-nx .mg-chip{margin-inline-start:26px}.ln-w,.ln-note,.ln-act,.ln-edit{margin-inline-start:0}}
 @media print{.no-print,.side,.ln-act{display:none!important}.launch .mg-card{break-inside:avoid;box-shadow:none}}
+.segs{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.segs > *{min-width:0}
+.seg-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(155px,100%),1fr));gap:10px;margin:8px 0}
+.seg-card{border:1px solid var(--line);border-top:4px solid var(--c);border-radius:14px;padding:10px 12px;background:#fffdf8;display:flex;flex-direction:column;gap:4px}
+.sc-h{display:flex;align-items:center;gap:6px;font-weight:800;font-size:16px}.sc-h i{width:10px;height:10px;border-radius:50%;background:var(--c)}.sc-h small{margin-inline-start:auto;color:var(--muted);font-weight:700}
+.sc-n{display:flex;justify-content:space-between;font-size:14px}.sc-n span{color:var(--muted)}.sc-p b{font-size:17px}.sc-p b.neg{color:#b3412f}
+.sc-bar{height:6px;background:#efe7d6;border-radius:99px;overflow:hidden;margin-top:4px}.sc-bar i{display:block;height:100%;background:var(--c)}
+.seg-foot{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:14px;margin:6px 0}
+.seg-chart{display:flex;gap:6px;align-items:flex-end;height:180px;padding-top:8px}.sg-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;min-width:0}
+.sg-stack{flex:1;width:100%;display:flex;flex-direction:column-reverse;justify-content:flex-start;border-radius:6px 6px 0 0;overflow:hidden;background:#f6f1e6}.sg-stack i{display:block;width:100%}
+.sg-col small{font-size:11px;color:var(--muted)}.seg-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:13px}.seg-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-inline-end:4px}
+.seg-edit{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.seg-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:99px;background:#fff;padding:2px 4px 2px 10px}
+.seg-pill input{border:0;background:transparent;width:110px;padding:4px 2px;font:inherit;min-width:0}.seg-pill button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:14px}.seg-pill.add{border-style:dashed}
+.merge-list{margin:6px 0 12px;padding-inline-start:18px;font-size:14px;line-height:1.8}
 .collect{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}.collect > *{min-width:0}
 .col-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}.col-acts{display:flex;gap:6px}
 .aging-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:6px 0 10px}
@@ -1314,6 +1553,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.45.0', date: '02.10.26', items: ['🧩 תחומי פעילות: עסק אחד (מספור אחד, מע״מ אחד, קובץ מבנה אחיד אחד) עם תחומים: קליניקה, צמחים, חנות מקוונת, קורסים. לכל תחום הכנסות, הוצאות ורווח, וגרף של 12 חודשים (לשונית תחומים).', 'שיוך אוטומטי: הזמנות מהאתר לחנות המקוונת; מסמך לפי הפריטים או מילים בשורות (למשל צמח, פורמולה, תמצית לצמחים), גם במסמכים מ-iCount; הוצאה לפי הספק, או למשותף. אפשר לבחור תחום בכל מסמך, הוצאה, הכנסה, פריט וספק.', '"נמכר בקליניקה לפי פריט": מה יצא מהמלאי בלי לעבור באתר, לעדכון ידני של המלאי בחנות.', 'איחוד עסקים עם אותו מספר עוסק (הגדרות העסק ← תחומי פעילות): הרשומות מועתקות עם התחום שלהן, החיבור לחנות עובר, והעסק הישן נשאר מוסתר כמו שהיה. נחסם אם בעסק השני יש מסמכים אמיתיים במספור משלו.'] },
   { v: '1.44.1', date: '02.10.26', items: ['נקודות זיכוי: אפשר להקליד מספר עם נקודה עשרונית (2.75) או פסיק (2,5), ולמחוק ולהקליד מחדש. שדה ריק כבר לא מאפס את הזיכוי בחישוב, אלא נחשב 2.25.'] },
   { v: '1.44.0', date: '02.10.26', items: ['🔎 חיפוש ושאלות (בתפריט הצד, או Ctrl+K מכל מקום): מחפשים מסמך, לקוח, סכום, הוצאה, ספק או פריט בכל העסקים; מונחים (נקודות זיכוי, מקדמות, ניכוי במקור…) עם הסבר וקישור למקום במערכת; ואיפה נמצא כל דבר.', 'כל שאלה אחרת נשלחת למאמן (🤖 שאל, או במיקרופון), והוא עונה לפי המספרים וההגדרות שלך ומפנה למסך המתאים.'] },
   { v: '1.43.0', date: '02.10.26', items: ['לשונית חדשה 📬 גבייה: דוח גיול חובות (מי חייב, כמה ומאיזה זמן: עד 30, 31–60, 61–90, מעל 90 יום), עם הדפסה וייצוא.', 'תזכורות אוטומטיות: כל יום א׳–ה׳ בשעה שבוחרים השרת שולח ללקוחות החייבים תזכורת במייל, עם קישור לתשלום בכרטיס. תשלום בקישור מפיק קבלה על החשבוניות. ללקוח בלי מייל ההודעה מוכנה לשליחה בוואטסאפ בלחיצה. מספר תזכורות, מרווח, סכום מינימלי, ו"בלי תזכורות" ללקוח מסוים.', 'הוראות קבע: חיוב חודשי קבוע. ביום שנקבע השרת יוצר קישור לתשלום ושולח ללקוח; כשמשלם, הקבלה מופקת לבד. רואים מי שילם החודש.', 'התאמת סליקת אשראי (בלשונית בנק): מעלים דוח עסקאות או זיכויים מחברת האשראי, והמערכת מראה מה שולם ואין עליו קבלה, איזו קבלה לא הופיעה בדוח, ועמלות.'] },
@@ -1475,7 +1715,7 @@ const TOUR_CTX = {
   expenses: 'הוצאות', suppliers: 'ספקים', bank: 'בנק', vat: 'מע״מ', pay: 'לתשלום', bset: 'הגדרות העסק', paypages: 'דפי סליקה', pnl: 'רווח והפסד', tax: 'רשות המסים',
   items: 'פריטים', ledger: 'כרטסת', export: 'ייצוא', import: 'ייבוא', settings: 'גיבוי וענן', users: 'משתמשים והרשאות', help: 'מדריך',
 };
-const BOOK_CTX = ['dash', 'docs', 'collect', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'export', 'import'];
+const BOOK_CTX = ['dash', 'docs', 'collect', 'segs', 'customers', 'items', 'ledger', 'income', 'expenses', 'suppliers', 'bank', 'vat', 'pnl', 'tax', 'export', 'import'];
 const WRITERS = ['owner', 'clerk'];
 
 const TOURS = {
@@ -1571,6 +1811,9 @@ const TOURS = {
     { t: 'bank-stats', title: 'המצב', text: 'כמה שורות מותאמות וכמה עוד פתוחות.', since: '1.0.0' },
     { t: 'bank-table', title: 'השורות', text: 'שורה שלא הותאמה לבד מתאימים ידנית.', since: '1.0.0' },
     { t: 'cc-recon', title: 'התאמת סליקת אשראי', text: 'מעלים דוח עסקאות או זיכויים מחברת האשראי, ורואים מה שולם ואין עליו קבלה, איזו קבלה לא הגיעה, ועמלות.', since: '1.43.0' },
+  ],
+  segs: [
+    { t: 'segs-cards', title: 'תחומי פעילות', text: 'הכנסות, הוצאות ורווח לכל תחום (קליניקה, צמחים, חנות מקוונת…), בלי לפצל את העסק מול רשות המסים. הוצאות משותפות מוצגות לבד, ואפשר לחלק אותן לפי ההכנסות.', since: '1.45.0' },
   ],
   collect: [
     { t: 'aging', title: 'גיול חובות', text: 'מי חייב, כמה ומאיזה זמן. לחיצה על לקוח פותחת את החשבוניות הפתוחות ושליחת תזכורת בוואטסאפ או במייל.', since: '1.43.0' },
@@ -2089,7 +2332,7 @@ function App() {
         {(books || []).some(b => roleOf(b, user.email) === 'owner') && <button className={'bk' + (cur === 'launch' ? ' on' : '')} onClick={() => setCur('launch')} title="מסלול השקה">
           <span className="ic">🚀</span><span className="lbl">מסלול השקה</span></button>}
         <div data-tour="side-books" className="sec">העסקים</div>
-        {(books || []).map(b => (
+        {(books || []).filter(b => !b.mergedInto || cur === b.id).map(b => (
           <button key={b.id} className={'bk' + (cur === b.id ? ' on' : '')} onClick={() => setCur(b.id)} title={b.name}>
             <span className="ic bk-ini" style={{ background: b.color || '#2f7d5b' }}>{ini(b.name)}</span><span className="lbl">{b.name}</span>
           </button>
@@ -2135,12 +2378,12 @@ function App() {
         {cur !== 'settings' && cur !== 'users' && cur !== 'help' && cur !== 'coach' && cur !== 'launch' && cur !== 'search' && books && !books.length && !booksErr && <Welcome onNew={(preset) => setBookForm(preset)} />}
 
         {cur === 'launch' && <LaunchView flash={flash} />}
-        {cur === 'search' && books && <SearchView books={books} datas={datas} user={user} flash={flash} onGo={goTo} />}
-        {cur === 'coach' && books && books.length > 0 && <CoachView books={books} datas={datas} loading={loading} user={user} flash={flash} />}
+        {cur === 'search' && books && <SearchView books={books.filter(b => !b.mergedInto)} datas={datas} user={user} flash={flash} onGo={goTo} />}
+        {cur === 'coach' && books && books.length > 0 && <CoachView books={books.filter(b => !b.mergedInto)} datas={datas} loading={loading} user={user} flash={flash} />}
         {cur === 'all' && books && books.length > 0 && (() => {
           /* The financial overview is for owners and viewers; someone who only
              issues documents sees their businesses, not the totals. */
-          const seen = books.filter(b => roleOf(b, user.email) !== 'clerk');
+          const seen = books.filter(b => roleOf(b, user.email) !== 'clerk' && !b.mergedInto);
           return seen.length
             ? <><DupCard books={books} user={user} flash={flash} onDone={() => { setDatas({}); refreshBooks(); }} />
                 <AllView books={seen} datas={datas} loading={loading} onOpen={setCur} onStoreLogin={() => setStoreLogin(true)} /></>
@@ -2149,15 +2392,16 @@ function App() {
         })()}
 
         {book && (datas[book.id]
-          ? <BookView key={book.id} book={book} data={datas[book.id]} patch={patch(book.id)} flash={flash} server={server}
+          ? <SegCtx.Provider value={{ segs: segsOf(book), main: segMain(book) }}><BookView key={book.id} book={book} data={datas[book.id]} patch={patch(book.id)} flash={flash} server={server}
                       role={roleOf(book, user.email)} ro={roleOf(book, user.email) === 'viewer'}
                       onReload={() => ensure(book, true)} onEditBook={() => setBookForm(book)}
                       onStoreLogin={() => setStoreLogin(true)}
                       onDeleteBook={() => deleteBook(book)}
                       onTab={setBookTab} tabReq={tabReq?.book === book.id ? tabReq.k : null} onTabDone={() => setTabReq(null)}
-                      siblings={(books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId) && roleOf(b, user.email) === 'owner').map(b => ({ book: b, data: datas[b.id] }))}
+                      siblings={(books || []).filter(b => b.id !== book.id && !b.mergedInto && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId) && roleOf(b, user.email) === 'owner').map(b => ({ book: b, data: datas[b.id] }))}
                       onLoadSiblings={() => (books || []).filter(b => b.id !== book.id && digitsOf(b.taxId) && digitsOf(b.taxId) === digitsOf(book.taxId)).forEach(b => ensure(b))}
-                      user={user} onGlobal={(v) => setCur(v)} onServer={() => serverStatus(true).then(setServer)} />
+                      user={user} onGlobal={(v) => setCur(v)} onServer={() => serverStatus(true).then(setServer)}
+                      onOpenBook={(id) => setCur(id)} /></SegCtx.Provider>
           : <div className="mg-empty">טוען את {book.name}…</div>)}
       </main>
 
@@ -3421,6 +3665,10 @@ function CoachView({ books, datas, loading, user, flash }) {
     `להפריש החודש: ${fmtRound(reserveNeed)} (מס+ב״ל ${fmtRound(taxMonthly)}, מע״מ ${fmtRound(vatMonth)}); הופרש ${fmtRound(reserved)}.`,
     `לקוחות קבועים שלא חזרו מעל חודשיים: ${lapsed.length}${lapsed.length ? ' (' + lapsed.slice(0, 12).join(', ') + ')' : ''}.`,
     `הערות המאמן: ${notes.map(n => n.t).join(' | ') || 'אין'}.`,
+    ...L.filter(x => segOn(x.b)).map(x => { const by = {}, ytdBy = {};
+      x.L.income.forEach(r => { const m = String(r.date || '').slice(0, 7), n = (r.gross || 0) - (r.vat || 0);
+        Object.entries(r.segSplit || {}).forEach(([k, w]) => { if (m === ym) by[k] = (by[k] || 0) + n * w; if (m.slice(0, 4) === ym.slice(0, 4)) ytdBy[k] = (ytdBy[k] || 0) + n * w; }); });
+      return `תחומי פעילות ב${x.b.name} (הכנסה לפני מע״מ, החודש / מתחילת השנה): ${segsOf(x.b).map(k => `${k} ${Math.round(by[k] || 0)} / ${Math.round(ytdBy[k] || 0)}`).join('; ')}.`; }),
     c.checkins?.[ym] ? `סיכום החודש שכתבתי: ${c.checkins[ym]}` : '',
   ].filter(Boolean).join('\n');
   const num = (v) => v === '' || v == null ? '' : v;
@@ -3875,7 +4123,7 @@ function ReportSettings({ book, owner, flash, server }) {
   </div>);
 }
 
-function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEditBook, onStoreLogin, onGo, onGlobal, onServer, onReload, onLog }) {
+function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEditBook, onStoreLogin, onGo, onGlobal, onServer, onReload, onLog, siblings = [], onMerge }) {
   const [open, setOpen] = useState(() => { try { return sessionStorage.getItem('tzbooks_bset') || ''; } catch { return ''; } });
   const tog = (k) => { const n = open === k ? '' : k; setOpen(n); try { sessionStorage.setItem('tzbooks_bset', n); } catch {} };
   const [inbox, setInbox] = useState(null);
@@ -3903,6 +4151,10 @@ function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEd
         </div>
         {owner && <button className="mg-btn sm" style={{ marginTop: 8 }} onClick={onEditBook}>✎ עריכת פרטי העסק, מצב המסמכים והמספור</button>}
       </SetRow>
+
+      {owner && <SetRow icon="🧩" title="תחומי פעילות" ok={segOn(book) ? true : siblings.length ? false : null} open={open === 'segs'} onOpen={() => tog('segs')}
+              status={segOn(book) ? segsOf(book).join(' · ') : siblings.length ? `יש עוד עסק עם אותו מספר עוסק (${siblings.map(x => x.book.name).join(', ')}): כדאי לאחד ולחלק לתחומים` : 'עסק אחד, בלי חלוקה לתחומים'}>
+        <SegSettings book={book} flash={flash} data={data} siblings={siblings} onMerge={onMerge} /></SetRow>}
 
       <SetRow icon="💳" title="דפי סליקה · זד קרדיט ויופיי" ok={!!(payOk?.zcredit || payOk?.upay)} open={open === 'pay'} onOpen={() => tog('pay')}
               status={(payOk?.zcredit || payOk?.upay) ? `מחובר דרך ${[payOk.zcredit && 'זד קרדיט', payOk.upay && 'יופיי'].filter(Boolean).join(' ו')} · ${pays.length} דפי סליקה${openPays ? `, ${openPays} ממתינים לתשלום` : ''}` : !server ? 'דורש את השרת (ההתקנה מ-GitHub)' : !server?.pay?.admin ? 'חסר מפתח שירות של Firebase בשרת' : 'חסר מפתח זד קרדיט או אימייל יופיי לעסק הזה'}>
@@ -4018,7 +4270,8 @@ function PayPagesTab({ book, data, payOk, server, role, ro, flash, onCreated, on
   );
 }
 
-function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings, user, onGlobal, onServer }) {
+function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook, onStoreLogin, server, ro, role = 'owner', onTab, tabReq, onTabDone, siblings = [], onLoadSiblings, user, onGlobal, onServer, onOpenBook }) {
+  const [merge, setMerge] = useState(null);
   const clerk = role === 'clerk';
   const [sub, setSub] = useState(clerk ? 'docs' : 'dash');
   const [ledgerPick, setLedgerPick] = useState(null);
@@ -4231,13 +4484,15 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
 
   const TAB_GROUP = { docs: 'עבודה יומית', paypages: 'עבודה יומית', collect: 'עבודה יומית', customers: 'עבודה יומית', items: 'עבודה יומית',
     income: 'כספים', expenses: 'כספים', suppliers: 'כספים', bank: 'כספים', ledger: 'כספים',
-    vat: 'דוחות ומיסים', pay: 'דוחות ומיסים', pnl: 'דוחות ומיסים', tax: 'דוחות ומיסים', export: 'כלים', import: 'כלים' };
+    vat: 'דוחות ומיסים', pay: 'דוחות ומיסים', pnl: 'דוחות ומיסים', segs: 'דוחות ומיסים', tax: 'דוחות ומיסים', export: 'כלים', import: 'כלים' };
   const SUBS = [['dash', 'סקירה'], ['docs', 'מסמכים'], ...(ro ? [] : [['paypages', '💳 סליקה' + ((data.payreqs || []).filter(p => p.status === 'open').length ? ` (${(data.payreqs || []).filter(p => p.status === 'open').length})` : '')]]), ...(clerk ? [] : [['collect', '📬 גבייה']]), ['customers', 'לקוחות'], ['items', 'פריטים'], ['income', 'הכנסות'], ['expenses', 'הוצאות'], ['suppliers', 'ספקים'], ['ledger', 'כרטסת'],
-    ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['tax', 'רשות המסים'], ['export', 'ייצוא'], ...(ro ? [] : [['import', 'ייבוא']])]
+    ['bank', 'בנק' + (alerts.unmatched ? ` (${alerts.unmatched})` : '')], ['vat', 'מע״מ'], ...(role === 'owner' ? [['pay', 'לתשלום']] : []), ['pnl', 'רווח והפסד'], ['segs', '🧩 תחומים'], ['tax', 'רשות המסים'], ['export', 'ייצוא'], ...(ro ? [] : [['import', 'ייבוא']])]
     .filter(([k]) => !clerk || ['docs', 'paypages', 'customers', 'items'].includes(k));
 
   return (
     <div className={ro ? 'ro' : ''}>
+      {book.mergedInto && <div className="mg-note warn" style={{ marginBottom: 12 }}>העסק הזה אוחד לתוך עסק אחר ומוצג כאן כמו שהיה, לעיון.{' '}
+        {onOpenBook && <button className="mg-btn sm" onClick={() => onOpenBook(book.mergedInto)}>לעסק המאוחד</button>}</div>}
       {ro && <div className="mg-note" style={{ marginBottom: 12 }}><b>צפייה בלבד.</b> אפשר לראות, להדפיס ולייצא. הפקה ושינויים שמורים לבעלי העסק.</div>}
       <div data-tour="book-head" className="mg-h" style={{ '--h1': book.color || '#8a6331', '--h2': '#c4a36e' }}>
         <div><h2>{book.name}</h2>
@@ -4320,10 +4575,14 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       {sub === 'bank' && <CardReconCard book={book} data={data} save={save} remove={remove} flash={flash} ro={ro} />}
       {sub === 'collect' && <CollectTab book={book} data={data} save={save} remove={remove} patch={patch} flash={flash} payOk={payOk} ro={ro}
         onPayCreated={payCreated} onLedger={(r) => { const c = (data.customers || []).find(x => normName(x.name) === normName(r.customer.name)); setLedgerPick({ kind: 'cust', id: c ? c.id : 'doc:' + normName(r.customer.name), n: Date.now() }); setSub('ledger'); }} />}
+      {sub === 'segs' && <SegmentsTab book={book} data={data} ledger={ledger} onSettings={role === 'owner' ? () => { try { sessionStorage.setItem('tzbooks_bset', 'segs'); } catch {} setSub('bset'); } : null} />}
+      {merge && <MergeBox main={book} mainData={data} sib={merge.book} sibData={siblings.find(x => x.book.id === merge.book.id)?.data} cols={cols} flash={flash}
+        onClose={() => setMerge(null)} onDone={() => { setMerge(null); onReload(); }} />}
       {sub === 'vat' && <VatTab totals={tot} rate={rate} book={book} />}
       {sub === 'bset' && <><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}><h3 style={{ margin: 0, flex: 1 }}>⚙ הגדרות · {book.name}</h3>
         <button className="mg-btn ghost sm" onClick={() => setSub('dash')}>סגור</button></div>
         <BookSettings book={book} data={data} cols={cols} flash={flash} server={server} user={user} payOk={payOk} role={role}
+          siblings={siblings} onMerge={role === 'owner' && !book.mergedInto ? (x) => { onLoadSiblings?.(); setMerge(x); } : null}
           onEditBook={onEditBook} onStoreLogin={onStoreLogin} onReload={onReload} onLog={log} onServer={onServer}
           onGo={(k, o) => { if (o?.pay) openDoc(null, true); else setSub(k); }} onGlobal={onGlobal} /></>}
       {sub === 'paypages' && <PayPagesTab book={book} data={data} payOk={payOk} server={server} role={role} ro={ro} flash={flash}
@@ -4536,6 +4795,7 @@ function IncomeForm({ rec, rate, onSave, onClose, docLabel = '', onDoc }) {
         <Field label="תיאור"><input value={f.desc} onChange={e => set('desc', e.target.value)} placeholder="טיפול דיקור" /></Field>
         <Field label="לקוח"><input value={f.customer} onChange={e => set('customer', e.target.value)} /></Field>
         <Field label="קטגוריה"><select value={f.cat} onChange={e => set('cat', e.target.value)}>{INC_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <SegField value={f.seg} onChange={v => set('seg', v)} />
         <Field label="אמצעי תשלום"><select value={f.pay} onChange={e => set('pay', e.target.value)}>{PAY_METHODS.map(c => <option key={c}>{c}</option>)}</select></Field>
         <Field label="מספר מסמך (חשבונית / קבלה)"><input value={f.docNo} onChange={e => set('docNo', e.target.value)} /></Field>
         <Field label="סכום כולל מע״מ (₪)"><input inputMode="decimal" value={f.gross} onChange={e => set('gross', e.target.value)} /></Field>
@@ -5007,6 +5267,7 @@ function ExpenseForm({ rec, init, rate, suppliers, onSave, onClose, onNewSupplie
             }}>＋</button></div></Field>
         <Field label="תיאור"><input value={f.desc} onChange={e => set('desc', e.target.value)} /></Field>
         <Field label="קטגוריה"><select value={f.cat} onChange={e => set('cat', e.target.value)}>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <SegField value={f.seg} onChange={v => set('seg', v)} shared />
         <Field label="אמצעי תשלום"><select value={f.pay} onChange={e => set('pay', e.target.value)}>{PAY_METHODS.map(c => <option key={c}>{c}</option>)}</select></Field>
         <Field label="מספר חשבונית של הספק"><input value={f.docNo} onChange={e => set('docNo', e.target.value)} /></Field>
         <Field label="סכום כולל מע״מ (₪)"><input inputMode="decimal" value={f.gross} onChange={e => set('gross', e.target.value)} /></Field>
@@ -5068,6 +5329,7 @@ function SupplierForm({ rec, onSave, onClose }) {
         <Field label="טלפון"><input dir="ltr" value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
         <Field label="אימייל"><input dir="ltr" value={f.email} onChange={e => set('email', e.target.value)} /></Field>
         <Field label="קטגוריה קבועה"><select value={f.cat} onChange={e => set('cat', e.target.value)}>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</select></Field>
+        <SegField value={f.seg} onChange={v => set('seg', v)} shared label="תחום קבוע להוצאות שלו" />
         <Field label="הערות"><input value={f.notes || ''} onChange={e => set('notes', e.target.value)} /></Field>
       </div>
     </Box>
@@ -6698,6 +6960,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
   const [incl, setIncl] = useState(ref ? !!ref.incl : from ? !!from.incl : true);
   const [lines, setLines] = useState(() => ref && type === '330' ? ref.lines.map(l => ({ ...l })) : from ? (from.lines || []).map(l => ({ ...l })) : [{ desc: '', qty: 1, price: '' }]);
   const [validDays, setValidDays] = useState(30);
+  const [seg, setSeg] = useState(() => preset?.from?.seg || preset?.seg || '');
   const tot = T.lines ? docTotals(lines, incl, vatRate) : null;
   const refOpen = ref && type === '400' ? openOf(ref, docs) : 0;
   const [pays, setPays] = useState(() => [{ kind: 'העברה בנקאית', amount: ref && type === '400' ? refOpen : '', date: todayIso(), details: '' }]);
@@ -6776,7 +7039,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
       allocationNo: alloc.trim(), notes: notes.trim(), withholding: T.pay ? whAmt : 0,
       createdBy: cloud?.auth?.currentUser?.email || '',
       refId: ref?.id || '', refTitle: ref ? docTitle(ref) : '',
-      ...(from ? { fromId: from.id, fromTitle: docTitle(from) } : {}), ...(deposit ? { deposit: true } : {}), ...(type === 'Q' ? { validDays: Number(validDays) || 30 } : {}),
+      ...(from ? { fromId: from.id, fromTitle: docTitle(from) } : {}), ...(deposit ? { deposit: true } : {}), ...(type === 'Q' ? { validDays: Number(validDays) || 30 } : {}), ...(seg ? { seg } : {}),
       printCount: 0, createdAt: new Date().toISOString(),
     };
     try { await onIssue(rec); } catch (e) { setErr('ההפקה נכשלה · ' + dbErr(e)); }
@@ -6824,6 +7087,7 @@ function DocForm({ book, docs, customers = [], items = [], preset, series, onIss
           {[...allowedTypes(book).filter(t => t !== '330'), ...PRE_TYPES].map(t => <option key={t} value={t}>{DOC_TYPES[t].label}</option>)}</select></Field>}
         {type === 'Q' && <Field label="תוקף ההצעה (ימים)"><input inputMode="numeric" value={validDays} onChange={e => setValidDays(e.target.value)} /></Field>}
         <Field label="תאריך"><input type="date" value={date} min={lastDate || undefined} onChange={e => setDate(e.target.value)} /></Field>
+        {!T.supplier && <SegField value={seg} onChange={setSeg} auto />}
         <div data-tour="doc-cust" style={{ gridColumn: '1 / -1' }}><Field label={`${T.supplier ? 'ספק' : 'לקוח'} · חיפוש לפי שם, טלפון, אימייל או ח.פ.`}>
           <SearchPick value={cust.name} onType={typeName} onPick={pickCust} options={custOpts} disabled={!!ref} autoFocus={!ref}
                       placeholder="הקלד שם או טלפון…" emptyHint="לקוח חדש: המשך להקליד את השם ומלא את הפרטים למטה"
@@ -9234,6 +9498,7 @@ function ItemForm({ rec, rate, onSave, onClose }) {
         <Field label="מק״ט"><input dir="ltr" value={f.sku} onChange={e => set('sku', e.target.value)} /></Field>
         <Field label="יחידה"><input value={f.unit} onChange={e => set('unit', e.target.value)} placeholder="טיפול / יח׳ / שעה" /></Field>
         <Field label="קטגוריה"><input value={f.category} onChange={e => set('category', e.target.value)} /></Field>
+        <SegField value={f.seg} onChange={v => set('seg', v)} auto="לפי ברירת המחדל של העסק" />
       </div>
       <div style={{ marginTop: 12 }}><Field label="תיאור נוסף"><input value={f.desc} onChange={e => set('desc', e.target.value)} /></Field></div>
       <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14, marginTop: 12 }}>

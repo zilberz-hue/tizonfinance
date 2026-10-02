@@ -152,7 +152,7 @@ export const monthHe = (ym) => { const [y, m] = String(ym).split('-').map(Number
    to Thursday; standing orders go out on their day, from 8 in the morning. */
 export async function runCollect(now, deps) {
   const t = ilNow(now), sent = [];
-  const books = await deps.books();
+  const books = (await deps.books()).filter(b => !b.deleted && !b.mergedInto);
   for (const book of books) {
     const cfg = remindCfg(book), standing = book.standingOn ? await deps.standing(book).catch(() => []) : [];
     const doRemind = cfg.on && t.hour === (Number(cfg.hour) || 10) && !['Fri', 'Sat'].includes(t.weekday) && !(await deps.wasDone(`remind-day:${book.id}:${t.date}`));
