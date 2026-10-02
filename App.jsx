@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.35.3';
+const VERSION = '1.36.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -236,7 +236,7 @@ async function storeRead(tenant, name) {
   return s.docs.map(d => ({ ...d.data(), id: d.id }));
 }
 
-const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive', 'recurring'];
+const COLS = ['incomes', 'expenses', 'suppliers', 'banktx', 'documents', 'counters', 'log', 'customers', 'items', 'payreqs', 'archive', 'recurring', 'custpack'];
 
 /* History imported from iCount is kept packed: a few hundred documents to a
    record in books/{book}/archive, instead of one record each. Thousands of
@@ -301,6 +301,49 @@ async function archiveMigrate(book, data, onStep) {
     onStep?.(Math.min(i + 25, loose.length), loose.length);
   }
   return n;
+}
+/* ---------------------------------------------------- packed customers
+   Customers are kept the way the history is: in a few large records
+   (custpack), so opening a business reads a handful of records instead of
+   one per customer (thousands, from the store). What changes after the pack
+   is written stays one record per customer, as before; a customer removed
+   from the pack is marked { _del: true } there. Reading is the pack, then
+   those records on top. When enough of them gather, the owner's next visit
+   packs everything again. */
+const CUST_REPACK_AT = 150;
+function custMerge(pack, loose) {
+  const by = new Map();
+  (pack || []).filter(c => c.kind === 'customers').sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')) || String(a.id).localeCompare(String(b.id)))
+    .forEach(c => { try { JSON.parse(c.data || '[]').forEach(x => by.set(x.id, x)); } catch { /* a damaged chunk is skipped */ } });
+  for (const r of loose || []) { if (r._del) by.delete(r.id); else by.set(r.id, r); }
+  return [...by.values()];
+}
+/* The customers as the screens use them: put adds or changes one record, del marks it removed. */
+const custCol = (bookId) => ({
+  list: async () => { const [p, l] = await Promise.all([DB.list(`books/${bookId}/custpack`), DB.list(`books/${bookId}/customers`)]); return custMerge(p, l); },
+  get: (id) => DB.get(`books/${bookId}/customers`, id),
+  put: (id, data) => DB.put(`books/${bookId}/customers`, id, data),
+  del: (id) => DB.put(`books/${bookId}/customers`, id, { _del: true, updatedAt: new Date().toISOString() }),
+});
+/* Everything into a new pack, then the old pack and the single records go. */
+async function custRepack(bookId, onStep) {
+  const pc = bookCol(bookId, 'custpack'), lc = bookCol(bookId, 'customers');
+  const [old, loose] = await Promise.all([withTimeout(pc.list(), 30000), withTimeout(lc.list(), 60000)]);
+  const all = custMerge(old, loose).map(({ _arch, ...c }) => c).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const chunks = []; let cur = [], size = 2;
+  for (const c of all) { const j = JSON.stringify(c), n = utf8Len(j) + 1; if (cur.length && size + n > ARCH_BYTES) { chunks.push(cur); cur = []; size = 2; } cur.push(j); size += n; }
+  if (cur.length) chunks.push(cur);
+  const gen = Date.now().toString(36), at = new Date().toISOString();
+  for (let i = 0; i < chunks.length; i++)
+    await withTimeout(pc.put(`cust_${gen}_${String(i).padStart(3, '0')}`, { kind: 'customers', n: chunks[i].length, data: '[' + chunks[i].join(',') + ']', gen, updatedAt: at }), 30000);
+  /* The new pack is whole: now the old one and the single records can go. */
+  for (const c of old) await pc.del(c.id).catch(() => {});
+  let n = 0;
+  for (let i = 0; i < loose.length; i += 25) {
+    await Promise.all(loose.slice(i, i + 25).map(r => lc.del(r.id).then(() => n++).catch(() => {})));
+    onStep?.(Math.min(i + 25, loose.length), loose.length);
+  }
+  return { packed: all.length, chunks: chunks.length, removed: n };
 }
 const bookCol = (bookId, name) => ({
   list: () => DB.list(`books/${bookId}/${name}`),
@@ -578,6 +621,8 @@ async function loadCore(book) {
   const res = await Promise.all(CORE.map(c => withTimeout(bookCol(book.id, c).list()).catch(() => null)));
   const out = { errors: [], orders: [], docs: [], storeErr: '', storeLogin: false, archive: [], histPending: true, storePending: !!tenantId(book.tenant) };
   CORE.forEach((c, i) => { out[c] = res[i] || []; if (!res[i]) out.errors.push(c); });
+  out.custLoose = out.customers.length;
+  out.customers = custMerge(out.custpack, out.customers);
   return out;
 }
 async function loadHistory(book) {
@@ -1202,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.36.0', date: '02.10.26', items: ['הלקוחות נשמרים בחבילות, כמו היסטוריית המסמכים: פתיחת עסק קוראת כמה רשומות במקום רשומה לכל לקוח (אלפים בחנות). הטעינה מהירה יותר, והמכסה היומית של Firebase מספיקה להרבה יותר כניסות.', 'בפעם הראשונה שבעל העסק נכנס, הלקוחות מתארגנים בחבילות לבד. שום דבר לא משתנה בעבודה: חיפוש, עריכה, מיזוג ומחיקה כרגיל.'] },
   { v: '1.35.3', date: '02.10.26', items: ['iCount: כשהמכסה היומית של Firebase נגמרת, ההודעה אומרת את זה במקום "עומס ב-Google".'] },
   { v: '1.35.2', date: '02.10.26', items: ['המאמן החכם: הודעת שגיאה ברורה כשאין יתרה בחשבון Anthropic, כשהשרתים עמוסים או כששם המודל לא מוכר, עם ההודעה המקורית מ-Anthropic.'] },
   { v: '1.35.1', date: '02.10.26', items: ['המאמן החכם: שדה מפתח ה-API מופיע תמיד, גם לפני שכל הנתונים נטענו ואם השרת לא ענה; כפתור 🤖 בראש מסך המאמן קופץ אליו.'] },
@@ -1714,6 +1760,7 @@ function App() {
   const closeNews = () => { try { lsSet(SEEN_KEY, VERSION); } catch { /* ignore */ } setNews(null); };
   const flashT = useRef(null);
   const migrating = useRef(new Set());
+  const custPacking = useRef(new Set());
   const flash = (m) => { setMsg(m); clearTimeout(flashT.current); flashT.current = setTimeout(() => setMsg(''), 4200); };
 
   useEffect(() => {
@@ -1811,6 +1858,14 @@ function App() {
     setLoading(l => ({ ...l, [book.id]: false }));
     histP.then(h => setDatas(x => x[book.id] ? { ...x, [book.id]: withHistory(x[book.id], h) } : x));
     storeP.then(st => setDatas(x => x[book.id] ? { ...x, [book.id]: { ...x[book.id], ...st } } : x));
+    /* Customers kept one per record gather into the pack (the first time: all of them). */
+    if (cloud && (d.custLoose || 0) >= CUST_REPACK_AT && roleOf(book, user?.email || '') === 'owner' && !custPacking.current.has(book.id)) {
+      custPacking.current.add(book.id);
+      const first = !(d.custpack || []).length;
+      if (first) flash(`מארגן ${d.custLoose} לקוחות של "${book.name}" בחבילות, כדי שהעסק ייטען מהר ובזול…`);
+      custRepack(book.id).then(r => { if (first) flash(`הסתיים: ${r.packed} לקוחות ב-${r.chunks} חבילות. מעכשיו פתיחת העסק קוראת חבילות ולא לקוח-לקוח.`); custPacking.current.delete(book.id); })
+        .catch(e => { console.warn('customers pack', e); });
+    }
     /* Once: imported history kept one record per document moves into the pack. */
     const loose = (d.documents || []).filter(z => z.series === 'import' && !z._arch).length;
     if (loose >= 20 && !migrating.current.has(book.id) && (!cloud || roleOf(book, user?.email || '') === 'owner')) {
@@ -3380,7 +3435,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
   useEffect(() => { if (window.innerWidth < 1100) document.querySelector('.book-tabs .mg-tab.on')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }, [sub]);
   useEffect(() => { if (tabReq) { if (SUBS.some(([k]) => k === tabReq)) setSub(tabReq); onTabDone?.(); } }, [tabReq]);
   const [edit, setEdit] = useState(null);
-  const cols = useMemo(() => Object.fromEntries(COLS.map(c => [c, bookCol(book.id, c)])), [book.id]);
+  const cols = useMemo(() => Object.fromEntries(COLS.map(c => [c, c === 'customers' ? custCol(book.id) : bookCol(book.id, c)])), [book.id]);
   const ledger = useMemo(() => buildLedger(book, data), [book, data]);
   /* A report that is due (and not seen on this device) opens by itself, once the history is in. */
   const repChecked = useRef('');
