@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.36.2';
+const VERSION = '1.37.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1247,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.37.0', date: '02.10.26', items: ['רישום התוכנה ברשות המסים: כפתור "🧪 הפק קובץ דוגמה לרישום" בלשונית רשות המסים. כל סוגי הרשומות, 10 מסמכים מכל סוג, מלקוחות לדוגמה, בלי לגעת בספרים.', 'רשומות M100 (פריטים) לפי המפרט, אפשרות לכלול אותן בייצוא.', 'פלט הסיכום כולל הודעת סיום ומאזן בוחן תנועות, כנדרש בסעיפים 2.6 ו-5.4.'] },
   { v: '1.36.2', date: '02.10.26', items: ['מבנה אחיד: "מספר מקשר" ברשומת הכותרת של כל מסמך (C100) נכתב כמו בשורות הפירוט (D110/D120). זה מה שהסימולטור סימן כשגיאה.'] },
   { v: '1.36.1', date: '02.10.26', items: ['מבנה אחיד, לפי דוח הסימולטור: מספר עוסק של יצרן התוכנה (ברירת מחדל: מספר העוסק של העסק) ושם תוכנת הכיווץ נכתבים ב-INI.TXT.', 'מסמך שמופיע פעמיים נכנס פעם אחת, ומסמכים שונים עם אותו סוג ומספר מוצגים לבדיקה במקום להיכנס לקובץ.'] },
   { v: '1.36.0', date: '02.10.26', items: ['הלקוחות נשמרים בחבילות, כמו היסטוריית המסמכים: פתיחת עסק קוראת כמה רשומות במקום רשומה לכל לקוח (אלפים בחנות). הטעינה מהירה יותר, והמכסה היומית של Firebase מספיקה להרבה יותר כניסות.', 'בפעם הראשונה שבעל העסק נכנס, הלקוחות מתארגנים בחבילות לבד. שום דבר לא משתנה בעבודה: חיפוש, עריכה, מיזוג ומחיקה כרגיל.'] },
@@ -1508,6 +1509,7 @@ const TOURS = {
   ],
   tax: [
     { t: 'tax-export', title: 'מבנה אחיד', text: 'INI.TXT ו-BKMVDATA.TXT לפי הוראה 1.31: הקובץ שמבקר מס מבקש, וגם מה שמעבירים לרואה החשבון.', since: '1.3.0' },
+    { t: 'tax-sample', title: 'קובץ דוגמה לרישום', text: 'כל סוגי הרשומות ו-10 מסמכים מכל סוג, מלקוחות לדוגמה, לבקשת רישום התוכנה. לא נשמר בספרים.', since: '1.37.0' },
     { t: 'tax-register', title: 'רישום התוכנה', text: 'חמשת השלבים לרישום התוכנה ברשות המסים, והמקום לרשום את מספר הרישום שמתקבל.', since: '1.3.0' },
     { t: 'tax-log', title: 'יומן פעולות', text: 'כל הפקה, הדפסה, שליחה וייצוא נרשמים כאן, ואי אפשר למחוק.', since: '1.3.0' },
   ],
@@ -3715,7 +3717,7 @@ function BookView({ book, data, patch, flash, onReload, onEditBook, onDeleteBook
       {sub === 'customers' && <CustomersTab book={book} data={data} cols={cols} patch={patch} flash={flash} ro={ro} role={role}
                                             onLedger={clerk ? null : (c) => { setLedgerPick({ kind: 'cust', id: c.id, n: Date.now() }); setSub('ledger'); }}
                                             onReload={onReload} onStoreLogin={onStoreLogin} />}
-      {sub === 'tax' && <TaxTab book={book} docs={data.documents || []} log={data.log || []} ro={ro} onLog={log} flash={flash} ledger={ledger} />}
+      {sub === 'tax' && <TaxTab book={book} docs={data.documents || []} log={data.log || []} ro={ro} onLog={log} flash={flash} ledger={ledger} items={data.items || []} />}
       {sub === 'export' && <ExportTab book={book} data={data} ledger={ledger} flash={flash} onLog={ro ? null : log} onSub={setSub} user={user} />}
       {sub === 'import' && <ImportTab book={book} data={data} cols={cols} flash={flash} onDone={onReload} onDeleteBook={onDeleteBook} onLog={log} server={server} />}
 
@@ -5801,7 +5803,7 @@ function buildJournal(book, ownDocs, ledger, from, to) {
     });
   };
   const ownIds = new Set();
-  ownDocs.filter(d => d.series === 'live' && !d.cancelled && inRange(d.date)).forEach(d => {
+  ownDocs.filter(d => (d.series === 'live' || d.series === 'sample') && !d.cancelled && inRange(d.date)).forEach(d => {
     ownIds.add(d.id);
     const sign = d.type === '330' ? -1 : 1, num = docNum(d);
     if (['305', '320', '330'].includes(d.type) || (d.type === '400' && book.dealerType === 'exempt' && !d.refId)) {
@@ -5893,6 +5895,17 @@ function buildUnified(book, docs, soft, from, to, opts = {}) {
     const t = byType[d.type] = byType[d.type] || { count: 0, total: 0 };
     t.count++; t.total += sign * d.total;
   });
+  /* M100: the items, when asked for (the software keeps no stock, so balances
+     are zero and what went out is the quantity on the documents in the file). */
+  if (opts.items?.length) {
+    const sold = {}; sorted.forEach(d => (d.lines || []).forEach(l => { const k = normName(l.desc); sold[k] = (sold[k] || 0) + (d.type === '330' ? -1 : 1) * (Number(l.qty) || 0); }));
+    const seenSku = new Set();
+    opts.items.forEach(it => {
+      let sku = String(it.sku || it.id || it.name || '').slice(0, 20); while (seenSku.has(sku)) sku = sku.slice(0, 17) + '-' + seenSku.size; seenSku.add(sku);
+      push('M100', osek + fX('', 20) + fX('', 20) + fX(sku, 20) + fX(it.name, 50) + fX(String(it.category || '').slice(0, 10), 10) + fX(it.category || '', 30)
+        + fX(it.unit || 'יחידה', 20) + fS(0, 9, 2) + fS(0, 9, 2) + fS(Math.max(0, sold[normName(it.name)] || 0), 9, 2) + fN(0, 10) + fN(0, 10) + fX('', 50));
+    });
+  }
   const total = recs.length + 1;
   push('Z900', osek + mainId + OF_CONST + fN(total, 15) + fX('', 50));
 
@@ -5906,7 +5919,7 @@ function buildUnified(book, docs, soft, from, to, opts = {}) {
     + fN(0, 9) + fN(0, 9) + fX('', 10) + fX(book.legalName || book.name, 50) + fX(street, 50) + fX('', 10) + fX(city, 30) + fX('', 8)
     + fN(0, 4) + fN(ymd(from), 8) + fN(ymd(to), 8) + fN(ymd(now.toISOString()), 8) + stamp.slice(4) + '0' + '1' + fX('fflate ZIP', 20)
     + fX('ILS', 3) + '0' + fX('', 46)];
-  ['B100', 'B110', 'C100', 'D110', 'D120'].forEach(code => { if (counts[code]) ini.push(code + fN(counts[code], 15)); });
+  ['B100', 'B110', 'C100', 'D110', 'D120', 'M100'].forEach(code => { if (counts[code]) ini.push(code + fN(counts[code], 15)); });
   const bytes = (lines) => new Uint8Array(enc8859(lines.join('\r\n') + '\r\n'));
   return { dir, ini: bytes(ini), data: bytes(recs), counts: { ...counts, total }, byType, journal, lengths: { A000: ini[0].length } , recs, iniLines: ini, dups };
 }
@@ -6146,12 +6159,52 @@ function ExportTab({ book, data, ledger, flash, onLog, onSub, user }) {
 }
 
 /* ------------------------------------------------------ the tax tab */
-function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
+/* ------------------------------------------- sample file for registration
+   The request to register the software asks for a sample file with every
+   kind of record and at least ten documents of each type. It is made here,
+   in memory, from made-up customers: nothing is written to the books, and
+   the real documents are never touched. Numbers start at 1 for each type. */
+function registrationSample(book, from, to, items) {
+  const rate = rateOf(book) || 0;
+  const names = ['דנה כהן', 'יוסי לוי', 'מיכל אברהם', 'רון שפירא', 'נועה ברק', 'אבי מזרחי', 'שירה פרץ', 'עומר דהן', 'תמר גולן', 'איתי רוזן'];
+  const ids = ['514789632', '', '038745126', '', '515236985', '', '027415896', '', '516932147', ''];
+  const cust = (i) => ({ name: names[i % 10], taxId: ids[i % 10], address: `רחוב הדקל ${i + 3}, תל אביב`, phone: '050-55512' + String(10 + i).slice(-2) });
+  const prods = items?.length ? items.slice(0, 6).map(x => ({ desc: x.name, price: Number(x.price) || 100 })) : [{ desc: 'טיפול דיקור', price: 300 }, { desc: 'ייעוץ תזונתי', price: 250 }, { desc: 'פורמולת צמחים', price: 180 }, { desc: 'טיפול שיאצו', price: 280 }];
+  const start = Date.parse(from > '2000-01-01' ? from : todayIso().slice(0, 4) + '-01-01'), end = Math.min(Date.parse(to), Date.now());
+  const dayOf = (k, n) => new Date(start + (end - start) * ((k + 0.5) / n)).toISOString().slice(0, 10);
+  const kinds = ['מזומן', 'כרטיס אשראי', 'העברה בנקאית', 'צ׳ק', 'ביט'];
+  const pay = (amt, i, date) => { const k = kinds[i % kinds.length];
+    return { kind: k, amount: r2(amt), date: k === 'צ׳ק' ? addDaysIso(date, 30) : date, details: k === 'צ׳ק' ? `${100230 + i} 12 ${640 + i} ${3001234 + i}` : k === 'כרטיס אשראי' ? `**** ${4000 + i}` : '' }; };
+  const docs = []; let seq = 0;
+  const mk = (type, i, extra = {}) => {
+    const lines = extra.lines || [prods[i % prods.length], ...(i % 3 === 0 ? [prods[(i + 1) % prods.length]] : [])].map((p, j) => ({ desc: p.desc, qty: 1 + ((i + j) % 2), price: p.price }));
+    const t = type === '400' ? { net: extra.total, vat: 0, total: extra.total } : docTotals(lines, false, rate);
+    const date = extra.date || dayOf(seq++ % 50, 50);
+    const d = { id: `sample_${type}_${i}`, type, series: 'sample', number: i + 1, date, createdAt: date + 'T09:' + String(10 + i).slice(-2) + ':00', createdBy: 'sample',
+                customer: extra.customer || cust(i), lines: type === '400' ? [] : lines, incl: false, vatRate: rate, ...t, payments: [], ...(extra.ref ? { refId: extra.ref.id, refTitle: `${DOC_TYPES[extra.ref.type].label} ${extra.ref.number}` } : {}) };
+    if (type === '320') d.payments = [pay(d.total, i, date)];
+    if (type === '400') d.payments = i % 4 === 3 ? [pay(d.total / 2, i, date), pay(d.total - r2(d.total / 2), i + 1, date)] : [pay(d.total, i, date)];
+    docs.push(d); return d;
+  };
+  const inv = Array.from({ length: 10 }, (_, i) => mk('305', i));
+  const ir = Array.from({ length: 10 }, (_, i) => mk('320', i));
+  inv.forEach((v, i) => mk('400', i, { total: v.total, customer: v.customer, ref: v, date: addDaysIso(v.date, 3) > todayIso() ? v.date : addDaysIso(v.date, 3) }));
+  ir.forEach((v, i) => mk('330', i, { customer: v.customer, ref: v, lines: [{ desc: 'זיכוי · ' + v.lines[0].desc, qty: 1, price: r2(v.lines[0].price / 2) }], date: addDaysIso(v.date, 2) > todayIso() ? v.date : addDaysIso(v.date, 2) }));
+  Array.from({ length: 10 }, (_, i) => mk('300', i));
+  if (rate === 0) docs.forEach(d => { if (d.type !== '400') { d.vat = 0; d.total = d.net; } });
+  const cats = ['שכירות', 'ציוד', 'שיווק', 'תקשורת', 'רכב ונסיעות'];
+  const outgo = Array.from({ length: 10 }, (_, i) => { const g = [1180, 590, 354, 236, 472][i % 5] * (1 + (i % 3)); return { date: dayOf(i, 10), desc: cats[i % 5], cat: cats[i % 5], gross: g, vat: rate ? r2(g * rate / (100 + rate)) : 0, pay: ['העברה בנקאית', 'כרטיס אשראי', 'מזומן'][i % 3], docNo: String(7000 + i), supplierName: 'ספק ' + (i + 1) }; });
+  const its = items?.length ? items : prods.map((p, i) => ({ id: 'item' + i, sku: 'SKU-' + (i + 1), name: p.desc, price: p.price, unit: 'יחידה', category: 'טיפולים' }));
+  return { docs, ledger: { income: [], outgo, rate }, items: its };
+}
+
+function TaxTab({ book, docs, log, ro, onLog, flash, ledger, items = [] }) {
   const [withJournal, setWithJournal] = useState(false);
   const y = new Date().getFullYear();
   const [from, setFrom] = useState(`${y}-01-01`);
   const [to, setTo] = useState(todayIso());
   const [withTest, setWithTest] = useState(false);
+  const [withItems, setWithItems] = useState(false);
   const [soft, setSoft] = useState(() => {
     const mine = Object.fromEntries(Object.entries(lsGet(SOFT_KEY, {})).filter(([, v]) => v));
     return { regNo: '', makerId: '', makerName: 'Tizon Health', ...(book.software || {}), ...mine };
@@ -6163,25 +6216,40 @@ function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
 
   const run = async () => {
     const { zipSync } = await import('fflate');
-    const u = buildUnified(book, pick, soft, from, to, withJournal && ledger ? { ledger } : {});
+    const u = buildUnified(book, pick, soft, from, to, { ...(withJournal && ledger ? { ledger } : {}), ...(withItems ? { items } : {}) });
     const zip = zipSync({ [`${u.dir}/INI.TXT`]: u.ini, [`${u.dir}/BKMVDATA.TXT`]: u.data });
     saveBytes(`OPENFRMT-${String(book.taxId).replace(/\D/g, '')}-${from}_${to}.zip`, zip, 'application/zip');
-    setLast(u);
+    setLast({ ...u, from, to, sample: false });
     await onLog({ action: 'export-unified', title: `${from} עד ${to} · ${pick.length} מסמכים${withTest ? ' (כולל ניסיון)' : ''}`, series: withTest ? 'test' : 'live' });
     flash(`הקבצים ירדו · ${u.counts.total} רשומות`);
   };
+  /* The sample for the registration request: every record type, ten of each document. */
+  const sample = async () => {
+    const { zipSync } = await import('fflate');
+    const smp = registrationSample(book, from, to, items);
+    const u = buildUnified(book, smp.docs, soft, from, to, { ledger: smp.ledger, items: smp.items });
+    saveBytes(`OPENFRMT-SAMPLE-${String(book.taxId).replace(/\D/g, '')}-${from}_${to}.zip`, zipSync({ [`${u.dir}/INI.TXT`]: u.ini, [`${u.dir}/BKMVDATA.TXT`]: u.data }), 'application/zip');
+    setLast({ ...u, from, to, sample: true });
+    await onLog({ action: 'export-unified', title: `קובץ דוגמה לרישום · ${smp.docs.length} מסמכים`, series: 'test' });
+    flash(`קובץ הדוגמה ירד · ${smp.docs.length} מסמכים · ${u.counts.total} רשומות. עכשיו: סימולטור, ואחר כך "פלט סיכום".`);
+  };
   const printSummary = () => {
     if (!last) return;
+    const lf = last.from || from, lt = last.to || to;
     const rows = Object.entries(last.byType).map(([t, v]) => `<tr><td>${t}</td><td>${DOC_TYPES[t]?.label || ''}</td><td>${v.count}</td><td>${v.total.toFixed(2)}</td></tr>`).join('');
-    const recRows = ['A100', 'B100', 'B110', 'C100', 'D110', 'D120', 'Z900'].filter(k => last.counts[k]).map(k => `<tr><td>${k}</td><td>${last.counts[k]}</td></tr>`).join('');
+    const recRows = ['A100', 'B100', 'B110', 'C100', 'D110', 'D120', 'M100', 'Z900'].filter(k => last.counts[k]).map(k => `<tr><td>${k}</td><td>${last.counts[k]}</td></tr>`).join('');
     printHTML(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>הפקת קבצים במבנה אחיד</title>
 <style>body{font-family:Arial;margin:30px;font-size:13px}table{border-collapse:collapse;margin:10px 0 20px}td,th{border:1px solid #999;padding:6px 10px;text-align:right}h2{margin:0 0 6px}</style></head><body>
 <h2>הפקת קבצים במבנה אחיד</h2>
+<div style="border:2px solid #2f7d5b;color:#2f7d5b;padding:8px 12px;display:inline-block;margin:6px 0 10px;font-weight:bold">✓ הפקת הקבצים במבנה אחיד הסתיימה בהצלחה${last.sample ? ' (קובץ דוגמה לבקשת רישום התוכנה)' : ''}</div>
 <div>מספר עוסק: <b>${esc(book.taxId)}</b> · שם העסק: <b>${esc(book.legalName || book.name)}</b></div>
-<div>טווח: ${heDate(from)} עד ${heDate(to)} · תאריך ושעת הפקה: ${new Date().toLocaleString('he-IL')}</div>
+<div>טווח: ${heDate(lf)} עד ${heDate(lt)} · תאריך ושעת הפקה: ${new Date().toLocaleString('he-IL')}</div>
 <div>נתיב: ${esc(last.dir.replace(/\//g, '\\'))} · תוכנה: Tizon Books ${VERSION} · מספר רישום: ${esc(soft.regNo || 'טרם נרשמה')}</div>
 <h3>סיכום רשומות בקובץ BKMVDATA</h3><table><tr><th>סוג רשומה</th><th>כמות</th></tr>${recRows}<tr><td><b>סה״כ</b></td><td><b>${last.counts.total}</b></td></tr></table>
 <h3>סיכום מסמכים לפי סוג</h3><table><tr><th>קוד</th><th>סוג מסמך</th><th>כמות</th><th>סה״כ (ש״ח)</th></tr>${rows}</table>
+${last.journal ? (() => { const acc = [...last.journal.accounts].filter(a => a.dr || a.cr).sort((a, b) => String(a.key).localeCompare(String(b.key)));
+  const dr = acc.reduce((x, a) => x + a.dr, 0), cr = acc.reduce((x, a) => x + a.cr, 0);
+  return `<h3>מאזן בוחן תנועות</h3><table><tr><th>חשבון</th><th>שם</th><th>קבוצה</th><th>חובה</th><th>זכות</th><th>יתרה</th></tr>${acc.map(a => `<tr><td>${esc(a.key)}</td><td>${esc(a.name)}</td><td>${esc(a.tbName || '')}</td><td>${a.dr.toFixed(2)}</td><td>${a.cr.toFixed(2)}</td><td>${(Math.abs(a.dr - a.cr) < 0.005 ? 0 : a.dr - a.cr).toFixed(2)}</td></tr>`).join('')}<tr><td colspan="3"><b>סה״כ</b></td><td><b>${dr.toFixed(2)}</b></td><td><b>${cr.toFixed(2)}</b></td><td><b>${(Math.abs(dr - cr) < 0.005 ? 0 : dr - cr).toFixed(2)}</b></td></tr></table>`; })() : ''}
 </body></html>`);
   };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -6208,11 +6276,17 @@ function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '0 0 10px', fontSize: 14 }}>
           <input type="checkbox" style={{ width: 'auto' }} checked={withJournal} onChange={e => setWithJournal(e.target.checked)} />
           לכלול רשומות הנהלת חשבונות (B100 / B110): פקודות יומן כפולות וכרטסת חשבונות</label>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '0 0 10px', fontSize: 14 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={withItems} onChange={e => setWithItems(e.target.checked)} />
+          לכלול את רשימת הפריטים (M100, {items.length} פריטים)</label>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>{pick.length} מסמכים בטווח</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="mg-btn keep" disabled={!osekOk || !pick.length} onClick={run}>⬇ הפק קבצים</button>
           <button className="mg-btn ghost keep" disabled={!last} onClick={printSummary}>🖨 פלט סיכום</button>
         </div>
+        <div data-tour="tax-sample" className="mg-note" style={{ marginTop: 12 }}>
+          <b>לבקשת רישום התוכנה:</b> קובץ דוגמה עם כל סוגי הרשומות (B100, B110, C100, D110, D120, M100) ו-10 מסמכים מכל סוג, מלקוחות לדוגמה. נבנה רק לקובץ ולא נשמר בספרים.
+          <div style={{ marginTop: 8 }}><button className="mg-btn sm keep" disabled={!osekOk} onClick={sample}>🧪 הפק קובץ דוגמה לרישום</button></div></div>
         {last?.dups?.length > 0 && <div className="mg-note bad" style={{ marginTop: 10 }}>
           <b>{last.dups.length} מסמכים עם אותו סוג ומספר כמו מסמך אחר</b>, ולכן לא נכנסו לקובץ (הסימולטור היה מסמן אותם כשגיאה):
           <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>{last.dups.map((x, i) => <li key={i}>{DOC_TYPES[x.type]?.label} {x.num} · {heDate(x.date)}{x.name ? ' · ' + x.name : ''} (כבר קיים מ-{heDate(x.first)})</li>)}</ul>
@@ -6226,7 +6300,7 @@ function TaxTab({ book, docs, log, ro, onLog, flash, ledger }) {
       <div data-tour="tax-register" className="mg-card">
         <h3 style={{ marginTop: 0 }}>רישום התוכנה ברשות המסים</h3>
         <ol style={{ paddingInlineStart: 18, lineHeight: 1.9, marginTop: 0, fontSize: 14 }}>
-          <li>מפיקים כאן קבצים (אפשר עם מסמכי ניסיון).</li>
+          <li>מפיקים כאן <b>קובץ דוגמה לרישום</b> (🧪 למטה משמאל).</li>
           <li>מריצים אותם ב<b>סימולטור</b> של רשות המסים ושומרים את דוח התקינות.</li>
           <li>מדפיסים את <b>פלט הסיכום</b>.</li>
           <li>מגישים באזור האישי: "בקשה לרישום תוכנה המיועדת לניהול מערכת חשבונות ממוחשבת", עם שלושת הפלטים.</li>
