@@ -32,7 +32,7 @@ import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
 } from 'firebase/auth';
 
-const VERSION = '1.37.0';
+const VERSION = '1.38.0';
 const BUILD_DATE = '30.09.26';
 const OLD_ERP_URL = 'https://tizon-event-default-rtdb.firebaseio.com/tizon_live_data.json';
 const CLOUD_KEY = 'tzbooks_cloud';
@@ -1247,6 +1247,7 @@ const verCmp = (a, b) => {
 };
 
 const CHANGES = [
+  { v: '1.38.0', date: '02.10.26', items: ['חתימה דיגיטלית: מעלים את קובץ התעודה (‎.pfx/.p12) ומקלידים את הסיסמה שלה ישירות באפליקציה (גיבוי וענן ← חתימה דיגיטלית). שניהם נשמרים רק בשרת. בלי הגדרות ב-Netlify.', 'הסבר מאיפה מזמינים תעודה, והודעה ברורה כשהסיסמה שגויה.'] },
   { v: '1.37.0', date: '02.10.26', items: ['רישום התוכנה ברשות המסים: כפתור "🧪 הפק קובץ דוגמה לרישום" בלשונית רשות המסים. כל סוגי הרשומות, 10 מסמכים מכל סוג, מלקוחות לדוגמה, בלי לגעת בספרים.', 'רשומות M100 (פריטים) לפי המפרט, אפשרות לכלול אותן בייצוא.', 'פלט הסיכום כולל הודעת סיום ומאזן בוחן תנועות, כנדרש בסעיפים 2.6 ו-5.4.'] },
   { v: '1.36.2', date: '02.10.26', items: ['מבנה אחיד: "מספר מקשר" ברשומת הכותרת של כל מסמך (C100) נכתב כמו בשורות הפירוט (D110/D120). זה מה שהסימולטור סימן כשגיאה.'] },
   { v: '1.36.1', date: '02.10.26', items: ['מבנה אחיד, לפי דוח הסימולטור: מספר עוסק של יצרן התוכנה (ברירת מחדל: מספר העוסק של העסק) ושם תוכנת הכיווץ נכתבים ב-INI.TXT.', 'מסמך שמופיע פעמיים נכנס פעם אחת, ומסמכים שונים עם אותו סוג ומספר מוצגים לבדיקה במקום להיכנס לקובץ.'] },
@@ -1531,6 +1532,7 @@ const TOURS = {
     { t: 'set-backup', title: 'גיבוי', text: 'קובץ אחד עם כל העסקים. משחזרים ממנו בכל מחשב.', since: '1.0.0' },
     { t: 'set-cloud', title: 'ענן', text: 'עם הענן הנתונים מאחורי כניסה, בכל מכשיר, ומסמכים אמיתיים אפשריים.', since: '1.0.0' },
     { t: 'set-sign', title: 'חתימה דיגיטלית', text: 'מעלים את תעודת החתימה פעם אחת. מאז כל PDF נחתם, ואפשר לשלוח אותו במייל ישירות.', since: '1.3.0' },
+    { t: 'cert-upload', title: 'העלאת תעודה', text: 'בוחרים את קובץ התעודה, מקלידים את הסיסמה שלו ושומרים. הכול נשמר בשרת בלבד.', since: '1.38.0' },
     { t: 'set-store', title: 'החנות', text: 'חיבור לקריאה בלבד: הזמנות ששולמו ומספרי חשבוניות.', since: '1.1.0' },
     { t: 'set-store', title: 'חיבור קבוע', text: 'מתחברים לחנות פעם אחת, והחיבור עובד בכל המכשירים דרך השרת. הסיסמה לא נשמרת.', since: '1.11.0' },
     { t: 'set-ita', title: 'רשות המסים', text: 'מתחברים פעם בשלושה חודשים, ומספרי ההקצאה מתבקשים אוטומטית.', since: '1.7.0' },
@@ -2395,6 +2397,28 @@ function BookForm({ rec, me, count, hasLive, onSave, onClose }) {
 }
 
 /* ---------------------------------------------------------- backup & cloud */
+/* The signing certificate and its password, from the app: both are kept only on the server. */
+function CertUpload({ server, flash, onDone }) {
+  const [file, setFile] = useState(null);
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const needPass = !(server.password && !server.passFromApp);
+  const send = async () => {
+    setBusy(true);
+    try { const r = await fnCall({ action: 'cert', p12: b64(await file.arrayBuffer()), pass });
+          flash(`התעודה נשמרה · ${r.cert.name} · מעכשיו כל PDF נחתם`); setFile(null); setPass(''); onDone?.(); }
+    catch (x) { flash(x.message === 'wrong-password' ? 'הסיסמה לא פותחת את התעודה. בדוק אותה ונסה שוב.' : x.message === 'password' ? 'צריך את הסיסמה של קובץ התעודה.'
+                : x.message === 'owners only' ? 'רק בעל עסק יכול להעלות תעודה.' : 'העלאת התעודה נכשלה · ' + x.message); }
+    setBusy(false);
+  };
+  return <div data-tour="cert-upload" style={{ display: 'grid', gap: 8, marginTop: 10, maxWidth: 520 }}>
+    <label className="mg-btn ghost" style={{ cursor: 'pointer', justifySelf: 'start' }}>📄 {file ? file.name : (server.sign ? 'בחר תעודה חדשה' : 'בחר קובץ תעודה')} (.pfx / .p12)
+      <input type="file" accept=".p12,.pfx,application/x-pkcs12" hidden onChange={e => { setFile(e.target.files?.[0] || null); e.target.value = ''; }} /></label>
+    {file && <>{needPass && <Field label="הסיסמה של קובץ התעודה"><input type="password" dir="ltr" autoComplete="off" value={pass} onChange={e => setPass(e.target.value)} /></Field>}
+      <button className="mg-btn" style={{ justifySelf: 'start' }} disabled={busy || (needPass && !pass)} onClick={send}>{busy ? 'בודק…' : '🔐 שמור תעודה בשרת'}</button></>}
+  </div>;
+}
+
 function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreChanged, server, onServer }) {
   const [busy, setBusy] = useState(false);
   const [cfgText, setCfgText] = useState('');
@@ -2471,21 +2495,12 @@ function SettingsView({ user, flash, onRestored, books, onStoreLogin, onStoreCha
           ) : (
             <>
               <div style={{ lineHeight: 1.9, fontSize: 14 }}>
-                <div>{server.project ? '✓' : '✗'} מזהה הפרויקט (BOOKS_PROJECT_ID)</div>
-                <div>{server.guarded ? '✓' : '✗'} רשימת מורשים (ALLOWED_EMAILS)</div>
-                <div>{server.password ? '✓' : '✗'} סיסמת התעודה (SIGN_P12_PASSWORD)</div>
-                <div>{server.sign ? '✓' : '✗'} תעודה {server.cert ? <>· <b>{server.cert.name}</b> · {server.cert.issuer} · בתוקף עד {heDate(server.cert.expires.slice(0, 10))}</> : server.certError ? `· שגיאה: ${server.certError}` : '· לא הועלתה'}</div>
-                <div>{server.mail ? '✓' : '✗'} שליחת מייל (SMTP)</div>
+                <div>{server.sign ? '✓' : '✗'} תעודת חתימה {server.cert ? <>· <b>{server.cert.name}</b> · מנפיק: {server.cert.issuer} · בתוקף עד {heDate(server.cert.expires.slice(0, 10))}</> : server.certError ? `· שגיאה: ${server.certError}` : '· לא הועלתה'}</div>
+                <div>{server.mail ? '✓' : '✗'} שליחת מייל (SMTP){server.mail ? '' : ' · בלעדיה מורידים PDF חתום ושולחים בעצמכם'}</div>
               </div>
-              {cloud && server.password && server.guarded && (
-                <label className="mg-btn ghost" style={{ cursor: 'pointer', marginTop: 10 }}>⬆ {server.sign ? 'החלף תעודה' : 'העלה תעודה'} (.p12 / .pfx)
-                  <input type="file" accept=".p12,.pfx,application/x-pkcs12" hidden onChange={async e => {
-                    const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
-                    try { const r = await fnCall({ action: 'cert', p12: b64(await file.arrayBuffer()) });
-                          flash(`התעודה נשמרה · ${r.cert.name}`); onServer(); }
-                    catch (x) { flash('העלאת התעודה נכשלה · ' + x.message); }
-                  }} /></label>
-              )}
+              {cloud && <CertUpload server={server} flash={flash} onDone={onServer} />}
+              {!server.sign && <div className="mg-note" style={{ marginTop: 10, fontSize: 14, lineHeight: 1.7 }}>
+                <b>מאיפה מביאים תעודה:</b> חשבונית שנשלחת דיגיטלית צריכה חתימה אלקטרונית מאובטחת. מזמינים מגורם מאשר בישראל, <a href="https://www.comsign.co.il" target="_blank" rel="noreferrer">קומסיין</a> או <a href="https://www.personalid.co.il" target="_blank" rel="noreferrer">פרסונל איי.די</a>, תעודה <b>כקובץ</b> (‎.pfx / .p12, "תעודה רכה" לחתימה אוטומטית של מסמכים), לא כרטיס חכם. את הקובץ והסיסמה שלו מעלים כאן.</div>}
               {server.sign && server.cert && Date.parse(server.cert.expires) - Date.now() < 30 * 86400000 &&
                 <div className="mg-note warn" style={{ marginTop: 10 }}>התעודה פגה בקרוב. כדאי לחדש מול הגורם המאשר.</div>}
             </>
@@ -3310,6 +3325,13 @@ function BookSettings({ book, data, cols, flash, server, user, payOk, role, onEd
           <button className="mg-btn ghost sm" onClick={() => onGo('expenses')}>לחשבוניות שהגיעו</button>
         </div>
         {gmail && <GmailSetup book={book} flash={flash} onClose={() => { setGmail(false); inboxCall('inbox-list', book.id).then(setInbox).catch(() => {}); }} />}
+      </SetRow>
+
+      <SetRow icon="✍" title="חתימה דיגיטלית" ok={server ? !!server.sign : null} open={open === 'sign'} onOpen={() => tog('sign')}
+              status={server?.sign && server.cert ? `${server.cert.name} · בתוקף עד ${heDate(String(server.cert.expires).slice(0, 10))}` : 'בלעדיה אי אפשר לשלוח חשבונית במייל כמסמך מקור'}>
+        {owner && cloud && server ? <><CertUpload server={server} flash={flash} onDone={onServer} />
+          {!server.sign && <div className="mg-note" style={{ marginTop: 10, fontSize: 14, lineHeight: 1.7 }}>מזמינים תעודה <b>כקובץ</b> (‎.pfx / .p12) מגורם מאשר: <a href="https://www.comsign.co.il" target="_blank" rel="noreferrer">קומסיין</a> או <a href="https://www.personalid.co.il" target="_blank" rel="noreferrer">פרסונל איי.די</a>. אחר כך מעלים אותה כאן עם הסיסמה שלה.</div>}</>
+          : <div className="mg-note">{!cloud || !server ? 'דורש את השרת.' : 'רק בעל העסק מעלה תעודה.'}</div>}
       </SetRow>
 
       <SetRow icon="📊" title="דוחות יומי, שבועי וחודשי" ok={book.reports ? (book.reports.daily !== false || book.reports.weekly !== false || book.reports.monthly !== false) : true} open={open === 'reports'} onOpen={() => tog('reports')}

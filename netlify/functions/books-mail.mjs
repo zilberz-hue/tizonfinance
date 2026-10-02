@@ -1033,11 +1033,20 @@ function certInfo(b64, pass) {
   const issuer = c.issuer.getField("CN")?.value || c.issuer.getField("O")?.value || "";
   return { name: forge.util.decodeUtf8(cn), issuer: forge.util.decodeUtf8(issuer), expires: c.validity.notAfter.toISOString() };
 }
-async function signState() {
-  const b = await certB64();
-  if (!b || !env("SIGN_P12_PASSWORD")) return { sign: false };
+/* The certificate's password: from Netlify's settings, or as typed in the app (kept here, with the certificate). */
+async function certPass() {
+  if (env("SIGN_P12_PASSWORD")) return env("SIGN_P12_PASSWORD");
   try {
-    return { sign: true, cert: certInfo(b, env("SIGN_P12_PASSWORD")) };
+    return await secrets().get("cert.pass") || "";
+  } catch {
+    return "";
+  }
+}
+async function signState() {
+  const b = await certB64(), pass = await certPass();
+  if (!b || !pass) return { sign: false };
+  try {
+    return { sign: true, cert: certInfo(b, pass) };
   } catch (e) {
     return { sign: false, certError: String(e.message || e) };
   }
@@ -1206,7 +1215,7 @@ async function signPdf(pdf, info = {}) {
     signatureLength: 16384
   });
   const ready = Buffer.from(await doc.save({ useObjectStreams: false }));
-  const signer = new P12Signer(Buffer.from(await certB64(), "base64"), { passphrase: env("SIGN_P12_PASSWORD") });
+  const signer = new P12Signer(Buffer.from(await certB64(), "base64"), { passphrase: await certPass() });
   return Buffer.from(await new SignPdf().sign(ready, signer));
 }
 function mailer() {
@@ -1440,7 +1449,8 @@ var books_mail_default = async (req) => {
       pay: { admin: !!(dbOverride || await saJson()) },
       inbox: true,
       store: await storeLink().then((l) => l?.refreshToken ? { linked: true, email: l.email } : { linked: false }),
-      password: !!env("SIGN_P12_PASSWORD"),
+      password: !!await certPass(),
+      passFromApp: !env("SIGN_P12_PASSWORD"),
       guarded: !!env("ALLOWED_EMAILS"),
       ita: { configured: itaReady(), env: itaEnv() === "production" ? "production" : "sandbox" }
     });
@@ -1449,15 +1459,17 @@ var books_mail_default = async (req) => {
     const email = await who(String(body.idToken || ""));
     if (body.action === "cert") {
       if (!await ownsAny(email, String(body.idToken || ""))) return json(403, { error: "owners only" });
-      if (!env("SIGN_P12_PASSWORD")) return json(400, { error: "set SIGN_P12_PASSWORD first" });
+      const pass = env("SIGN_P12_PASSWORD") || String(body.pass || "");
+      if (!pass) return json(400, { error: "password" });
       const b = String(body.p12 || "");
       let info;
       try {
-        info = certInfo(b, env("SIGN_P12_PASSWORD"));
+        info = certInfo(b, pass);
       } catch (e) {
-        return json(400, { error: "cert: " + (e.message || e) });
+        return json(400, { error: /password|mac|decrypt/i.test(String(e.message || e)) ? "wrong-password" : "cert: " + (e.message || e) });
       }
       await secrets().set("cert.p12", b);
+      if (!env("SIGN_P12_PASSWORD")) await secrets().set("cert.pass", pass);
       return json(200, { ok: true, cert: info, by: email });
     }
     if (body.action === "doc") {
